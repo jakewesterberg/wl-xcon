@@ -32,6 +32,7 @@ from wl_xcon.geometry import stand_in_housings
 from wl_xcon.link import (
     CheckRun, Drawn, EndSession, Idle, OpenSession, ResumeSession, Simulated, StartRun, Telemetry,
 )
+from wl_xcon.record import welfare_note
 from wl_xcon.service import DEMO_UNRESUMED, Service, demo_folder
 from wl_xcon.welfare import Simulated as SimulatedPump
 
@@ -741,20 +742,46 @@ def test_a_stranded_demo_in_the_demo_root_never_holds_up_a_real_open(tmp_path):
     assert service.session.spec.session_id == "demo-2"
 
 
-def test_a_stranded_session_under_root_is_ended_first_when_both_folders_name_it(tmp_path):
-    """An End naming a stranded session goes to the real one under `--root` when the demo folder
-    holds one of the same name too (made by hand: the service gives none two folders), so a real
-    animal's return is never written into a demo's record."""
+@pytest.mark.parametrize("returned", [False, True], ids=["stranded", "returned"])
+def test_an_end_naming_a_stranded_demo_whose_id_a_real_session_has_is_refused_ending_nothing(
+    tmp_path, returned
+):
+    """A stranded demo's End is taken against the demo folder (`_in_demo_root`), so it is refused,
+    ending nothing, when a session under `--root` has the same id, stranded or not: the real
+    session's record is untouched byte for byte, and the demo stays stranded. The service never
+    gives two folders one id (`_session_for`), so this is planted by hand, as only a hand makes
+    it."""
     first = _rig_service(tmp_path)
-    _step(first, _open())
+    _step(first, _demo())
     first.shutdown()
-    shutil.copytree(first.root / SESSION, first.demo_root / SESSION)
+    real = _xcon(first.root, DEMO)
+    real.mkdir(parents=True)
+    left_at = WALL - 3600
+    for kind in ("departure", "returned") if returned else ("departure",):
+        welfare_note(real, kind=kind, subject="REFERENCE", was=left_at, now=left_at, reason="",
+                     by=BY, how="t", recorded_at=left_at)
+    (real / "config.json").write_text(json.dumps({"session_id": DEMO, "subject": "REFERENCE"}))
+
+    def files(root: Path) -> dict:
+        return {path: path.read_bytes() for path in sorted((root / DEMO).rglob("*"))
+                if path.is_file()}
+
+    real_before, demo_before = files(first.root), files(first.demo_root)
     service = _made((first.subjects, first.tasks, first.root), cls=_DemoPath,
                     demo_root=first.demo_root)
-    assert [s.session_id for s in service.stranded] == [SESSION]
-    assert [(s.session_id, s.resumable, s.why) for s in service.stranded_demos] == [
-        (SESSION, False, DEMO_UNRESUMED)], "nothing in a demo folder is resumed, demo or not"
-    _step(service, _end(session_id=SESSION))
-    assert _kinds(service.root, SESSION)[-1] == "returned"
-    assert _kinds(service.demo_root, SESSION)[-1] == "session ended"
-    assert service.stranded == [] and len(service.stranded_demos) == 1
+    assert [s.session_id for s in service.stranded] == ([] if returned else [DEMO])
+    assert [s.session_id for s in service.stranded_demos] == [DEMO]
+
+    frame = _step(service, _end(session_id=DEMO))
+
+    assert _refused(frame)[-1] == (
+        f"session {DEMO} is a stranded demo in the demo folder ({service.demo_root}), and a "
+        f"session under --root ({service.root}) has the same id, so an End naming it could be "
+        f"read as either; nothing was ended. Move the demo's folder out of {service.demo_root} "
+        f"by hand, then restart wlx taskd")
+    assert files(service.root) == real_before, "the real session's record is untouched"
+    assert files(service.demo_root) == demo_before and _kinds(service.demo_root, DEMO)[-1] == (
+        "session ended")
+    assert [s.session_id for s in service.stranded_demos] == [DEMO], "the demo is still stranded"
+    assert [s.session_id for s in service.stranded] == ([] if returned else [DEMO])
+    assert (service.root, service.question) == (first.root, None)

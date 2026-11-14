@@ -1091,7 +1091,7 @@ simulated card and pump (wl-xcon's `docs/superpowers/specs/2026-10-06-demo-mode-
 
 - `gaze`: what stood in for the eye, always `"mouse"` in this build.
 - `noise_deg`: the noise added to each pointer sample, in degrees (the simulated eye's own, `simeye.NOISE_DEG`).
-- `stand_in_housings`: whether the field's eye-tracker housings were stand-ins (a rig whose housings nobody has
+- `stand_in_housings`: whether the field's light sensors' housings were stand-ins (a rig whose housings nobody has
   measured) rather than measured ones.
 
 No trial line, run row or change-log row changes: a demo writes the record any session writes, for the test

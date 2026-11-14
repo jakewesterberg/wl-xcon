@@ -732,7 +732,7 @@ class Service:
                 self.closed = None
         elif isinstance(command, _link.EndSession):
             if self.session is None and self._demo_stranded(command.session_id) is not None:
-                self._in_demo_root(lambda: self._end(command))
+                self._end_stranded_demo(command)
             else:
                 self._end(command)
         elif isinstance(command, _link.CheckRun):
@@ -777,20 +777,42 @@ class Service:
             del self.refusals[: -_link.REFUSAL_HISTORY]
 
     def _demo_stranded(self, session_id: str | None):
-        """The stranded demo in this rig's demo folder that `session_id` names, or `None`: none
-        is, or a stranded session under `--root` has the name too, whose return comes first."""
-        if any(found.session_id == session_id for found in self.stranded):
-            return None
+        """The stranded demo in this rig's demo folder that `session_id` names, or `None`."""
         return next((found for found in self.stranded_demos if found.session_id == session_id),
                     None)
+
+    def _end_stranded_demo(self, command: _link.EndSession) -> None:
+        """**A stranded demo's End, in this rig's demo folder** (`_route`, with no session open):
+        **refused, ending nothing, when a session under `--root` has the same id**, stranded or
+        not, so an End can never reach a real animal's record through the demo folder's path,
+        nor be read as meaning the other; otherwise taken against the demo folder
+        (`_in_demo_root`). The service never gives two folders one id (`_session_for`), so only a
+        folder copied or renamed by hand meets the refusal, which says how to undo it."""
+        if (self.root / command.session_id).exists():
+            self._refuse(
+                "end", command.by,
+                f"session {command.session_id} is a stranded demo in the demo folder "
+                f"({self.demo_root}), and a session under --root ({self.root}) has the same id, so "
+                f"an End naming it could be read as either; nothing was ended. Move the demo's "
+                f"folder out of {self.demo_root} by hand, then restart wlx taskd",
+            )
+            return
+        self._in_demo_root(lambda: self._end(command))
 
     def _in_demo_root(self, act: Callable[[], None]) -> None:
         """**`act` taken against this rig's demo folder**: `root` and `stranded` are its
         (`demo_root`, `stranded_demos`) while it runs, then `--root`'s again. So a stranded demo's
         return is taken by `_end` and `_close_stranded`, welfare-critical and **unchanged**, by
         the rules and the rows of any stranded session's, written into its own record in the
-        demo folder; the question a far return poses stays the service's, for its session. One
-        thread takes every mark (the module docstring), so nothing else reads either meanwhile."""
+        demo folder; the question a far return poses stays the service's, for its session.
+        Asked only by `_end_stranded_demo`, once no session under `--root` has the id.
+
+        **Nothing else reads either meanwhile.** `wlx taskd` runs one Python thread, the one
+        running `serve`, which takes every command and every mark and publishes each frame, one
+        after another (`step`); the link is sockets read on that thread, with no thread of its
+        own; `wlx serve` and its threads are another process. A Ctrl-C between the two restores
+        can leave `stranded` the demo folder's, and its handler (`run`) reads neither before
+        `wlx taskd` exits: `shutdown` reads only the open session, and none is open here."""
         root, stranded = self.root, self.stranded
         self.root, self.stranded = self.demo_root, self.stranded_demos
         try:
