@@ -73,11 +73,14 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import fcntl
 import gc
+import os
 import re
 import secrets
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -141,6 +144,44 @@ REFERENCE = "REFERENCE"
 #: **Why a stranded demo is offered only *end*** (demo mode §8, Review Focus 7): what its banner
 #: and a resume's refusal say. A crashed demo never comes back as a live session.
 DEMO_UNRESUMED = "a demo is never resumed, only ended: record its return with End session"
+
+#: **Where a rig service says it runs on this computer** (demo mode §5 item 3; its plan's Task 10,
+#: the planner's call): every `wlx taskd` without `--demo` holds a shared `flock` on this file for its
+#: life (`run`), and `wlx demo` asks an exclusive one without waiting and is refused while it cannot
+#: have it (`demo.run`), since a demo's drawing would share the processor a live session's frames
+#: run on; a demo's children hold its exclusive one with it. In the temporary folder, so it is this
+#: computer's -- this user's, where the temporary folder is a user's own, as macOS gives one.
+#: `WLX_RIG_LOCK` names another file (`rig_lock`), for tests.
+RIG_LOCK = Path(tempfile.gettempdir()) / "wlx-taskd.lock"
+
+
+def rig_lock() -> Path:
+    """The rig lock's file: the one `WLX_RIG_LOCK` names, else `RIG_LOCK`."""
+    named = os.environ.get("WLX_RIG_LOCK")
+    return Path(named) if named else RIG_LOCK
+
+
+def lock_rig(*, exclusive: bool, wait: bool = False) -> "int | None":
+    """**The rig lock taken** (`RIG_LOCK`): shared, as a rig service holds it, or exclusive, as
+    `wlx demo` asks it; without waiting, `None` while another holds it the other way, or with
+    `wait`, once it can be had. Its open descriptor, which holds it until it is closed and is
+    passed to a child that is to hold it too. The file is made if absent, and opened to read
+    only, which is all a lock needs, so one user's file serves another's."""
+    path = rig_lock()
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
+        fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+                    | (0 if wait else fcntl.LOCK_NB))
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def demo_folder(path: Path) -> tuple[Path, Path]:
@@ -1835,7 +1876,9 @@ def run(args) -> int:
     `DIR` made (`demo_folder`) and the four bound endpoints printed on one line, `wlx taskd: --link
     PUB,REP,MARK,GAZE`, flushed, for the process that started it to read (`wlx demo`). Without it,
     `--subjects` and `--root` are required, and **`--demo-root DIR`** names where a demo opened
-    here goes, made if absent once the service has taken it."""
+    here goes, made if absent once the service has taken it. **A rig service holds the rig lock,
+    shared, for its life** (`RIG_LOCK`; demo mode's Task 10), taken once its refusals are past and
+    before its link binds; while `wlx demo` holds it, it says so and waits for the demo to end."""
     rig = _load_rig(args.rig)
     allocation = _load_allocation(args.allocation)
     demo = args.demo
@@ -1872,6 +1915,33 @@ def run(args) -> int:
             "where its page's pointer reports arrive, so with none no page could steer it. "
             "Nothing was made"
         )
+    if demo is not None:
+        return _serve(args, rig, allocation, parts)
+    # **A rig service holds the rig lock for its life** (`RIG_LOCK`; demo mode §5 item 3), shared,
+    # so `wlx demo` is refused beside it; while a demo holds it, this one says so and waits for the
+    # demo to end rather than serving beside it, since its frames would share the processor.
+    held = lock_rig(exclusive=False)
+    if held is None:
+        print(
+            f"wlx taskd: a demo runs on this computer (wlx demo holds {rig_lock()}); this rig "
+            f"service starts once it ends -- Ctrl-C at the demo's terminal ends it",
+            file=sys.stderr, flush=True,
+        )
+        try:
+            held = lock_rig(exclusive=False, wait=True)
+        except KeyboardInterrupt:
+            print("taskd: interrupted", file=sys.stderr)
+            return 130
+    try:
+        return _serve(args, rig, allocation, parts)
+    finally:
+        os.close(held)
+
+
+def _serve(args, rig: Rig, allocation: Allocation, parts: list) -> int:
+    """`run`'s own, once its refusals are past and, for a rig service, the rig lock is held: the
+    link bound, the service built, and served until interrupted."""
+    demo = args.demo
     pub, rep, *more = parts
     try:
         link = _link.ZmqLink(

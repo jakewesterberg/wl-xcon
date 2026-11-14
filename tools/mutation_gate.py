@@ -69,6 +69,7 @@ RETURNS: dict[str, str] = {
     "simeye": "None",
     "pointer": "None",
     "demoscreen": "None",
+    "demo": "None",
     "review": "None",
     "record": "None",
     "geometry": "None",

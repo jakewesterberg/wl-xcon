@@ -116,6 +116,10 @@ class Person:
 
     def seen(self, drawn: Drawn) -> None:
         self.drawn.append(drawn)
+        if drawn.frame == 0:
+            # The field before a run's first trial, drawn while that trial waits for the pointer
+            # (`pointer.Drawing.field`; demo mode's Task 10): no trial has begun, so none has ended.
+            return
         if drawn.trial != self.trial:
             self.trial = drawn.trial
             self.go_drawn, self.fixating, self.ended = None, False, False

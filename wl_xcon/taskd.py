@@ -119,6 +119,15 @@ from wl_xcon.welfare import (
 #: when nothing arrives. A responsiveness choice, not a measurement of this system.
 PAUSE_HOUSEKEEPING_S = 0.5
 
+#: **What the changes feed says while a demo run's first trial waits for its page's pointer**
+#: (`pointer.Worlds.waiting`; demo mode's Task 10), once a run: why nothing has begun, and what
+#: begins it.
+POINTER_AWAITED = (
+    "the run's first trial waits for the demo's pointer: point at the demo screen, and it begins "
+    "(before the first screen there is nothing to point at, and an eye nobody steers is tracker "
+    "loss)"
+)
+
 #: The bounded config's entry one manual reward delivers (PI, 2026-09-28): asked how
 #: much one press gives, he chose "Same as a correct trial" -- `reward_correct`, the
 #: entry the reference tasks pay a correct trial from, at the value it holds when the
@@ -1269,7 +1278,9 @@ class Session:
     #: drawn from the run's seed (demo mode §3.3, §14 item 16), since `world` is never told the
     #: run and a `wlx taskd` session's own seed is 0 in every session. `None`: the behaviour
     #: agent, as with neither given. A world that has `ended()` is told so at each trial's
-    #: boundary (`run`), where a demo's blanks the screen its page shows (§3.9).
+    #: boundary (`run`), where a demo's blanks the screen its page shows (§3.9). **Worlds that have
+    #: `waiting(index)`** (`pointer.Worlds`) are asked it before the run's first trial, which waits
+    #: at the boundary while it is true (`run`; demo mode's Task 10).
     run_world: object = None
     welfare: Welfare = field(init=False)
     rig: Rig = field(init=False)
@@ -5755,6 +5766,11 @@ class Session:
         make_world = (self.world if self.world is not None
                       else self.run_world(run) if self.run_world is not None
                       else self._agent(run))
+        # **Whether the run's first trial waits for a page's pointer** (`pointer.Worlds.waiting`;
+        # demo mode's Task 10): asked of a demo's worlds alone, at the boundary before that trial;
+        # and whether the feed has said so this run.
+        awaits = getattr(make_world, "waiting", None)
+        awaited = False
         tally = Tally()
         self.blocks_run = [scheduler.block.name]
         record = self._record
@@ -5947,6 +5963,26 @@ class Session:
                     self._hold(index, publish)
                     if self.stopped_because:
                         break
+                    continue
+                # **A demo run's first trial waits for its page's pointer** (`pointer.Worlds`;
+                # demo mode's Task 10): before the run's first screen a page has nothing to point
+                # at, and a trial whose eye nobody steers ends as tracker lost, so the first trial
+                # would be scored before anyone could play it. While no report has arrived the run
+                # waits here, the field published for a page to point at, every pass the boundary's
+                # own above -- staged changes applied, marks stamped, commands drained (a stop, an
+                # End, a pause among them), a frame published and `_ends` asked (the out-of-cage
+                # limit, a scheduled stop) -- and nothing drawn from the plan, no trial opened in
+                # the stream and no trial's time counted until it arrives. Each wait is a paused
+                # pass's (`PAUSE_HOUSEKEEPING_S`), ended early by a command or a mark, which is
+                # stamped here as the paused loop stamps one.
+                if awaits is not None and awaits(index):
+                    if not awaited:
+                        awaited = True
+                        self._feed("demo", None, self.wall_now(), POINTER_AWAITED)
+                    mark = self.link.idle(PAUSE_HOUSEKEEPING_S)
+                    if mark:
+                        self._stamp(mark, None)
+                        self._settle_stamps(index)
                     continue
                 # **A block's time limit** (the PI, 2026-10-19), read on the time trials ran, pauses
                 # not counting ("Pauses don't count"), and never in `_ends`, the welfare limits' (a

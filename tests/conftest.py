@@ -20,7 +20,9 @@ CI therefore checks out into `<repo>/wl-preproc`, and both locations are searche
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -94,3 +96,11 @@ def zmq_cleanup():
     yield _register
     for ctx in contexts:
         ctx.destroy(linger=0)
+
+
+#: **The rig lock this run's services take** (`service.rig_lock`; demo mode's Task 10): a file of
+#: this process's own, so a `wlx taskd` a test serves never waits on a `wlx demo` running on this
+#: computer, and a person's `wlx demo` is never refused for a test's. A test of the lock itself, and
+#: each process a test starts, names its own.
+os.environ.setdefault(
+    "WLX_RIG_LOCK", str(Path(tempfile.mkdtemp(prefix="wlx-suite-")) / "wlx-taskd.lock"))

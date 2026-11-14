@@ -3085,17 +3085,19 @@ class _LiveDemo:
         self.at = (x, y)
 
     def ready(self) -> None:
-        """The session open, and the page steering its eye at `REST`: first a run of one trial
-        nobody steers, which ends as tracker loss (§3.3: with no page steering, the eye is lost),
-        so the page holds a drawing of this session to put its pointer on; between runs the page
-        keeps the eye, so the next run's first frame finds it live (Task 8's carried (a))."""
+        """The session open, and the page steering its eye at `REST`: first a run of one trial,
+        which waits for the page's pointer with the field drawn (demo mode's Task 10: before the
+        first screen a page has nothing to point at), so the page puts its pointer on the field,
+        which begins the trial, played at `REST` to its no fixation at its shortest wait; between
+        runs the page keeps the eye, so the next run's first frame finds it live (Task 8's carried
+        (a))."""
         self.demo.open()
         self.page.wait_for_selector("#demo-pane.full", state="attached")
-        self.demo.start({}, trials=1)
-        self.demo.ended_run()
+        self.demo.start({**_QUICK, "fix_acquisition": 0.5}, trials=1)
         self.page.wait_for_selector(_DRAWN, state="attached")
         self.look(REST, seconds=0)
         self.page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+        self.demo.ended_run()
 
     def screen_with(self, wanted, what: str) -> Drawn:
         return self.demo.until(lambda f: isinstance(f, Drawn) and f.screen is not None

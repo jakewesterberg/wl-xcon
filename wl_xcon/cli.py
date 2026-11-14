@@ -1772,7 +1772,84 @@ def main(argv: list[str] | None = None) -> int:
         "--link-allow-remote` for the rest of what it exposes",
     )
 
+    demo_parser = sub.add_parser(
+        "demo",
+        help="play a task with the mouse as the eye: a private rig service and its page, a "
+        "session for the test monkey REFERENCE and a run, opened in the browser (demo mode §5)",
+    )
+    demo_parser.add_argument(
+        "task", metavar="TASK",
+        help="a task's name in --tasks (with or without .py), or a path to a task file, whose "
+        "folder is then the demo's --tasks: wl-xtasks/tasks/popout_search.py, its colors read "
+        "beside it",
+    )
+    demo_parser.add_argument(
+        "--tasks", type=Path, default=None, metavar="DIR",
+        help="the folder of task files the demo's rig service may use; omitted, this checkout's "
+        "tasks/",
+    )
+    demo_parser.add_argument(
+        "--rig", type=Path, default=None, metavar="PATH",
+        help="the rig's display settings, a Python file defining RIG; omitted, this checkout's "
+        "tasks/rig.py. Where its light sensors' housings are unmeasured, the demo's direct view "
+        "takes the stand-ins",
+    )
+    demo_parser.add_argument(
+        "--allocation", type=Path, default=None, metavar="PATH",
+        help="the event-code allocation; omitted, this checkout's tasks/allocation.py",
+    )
+    demo_parser.add_argument(
+        "--view", choices=VIEWS, default="direct",
+        help="the setup the session runs in; direct view by default",
+    )
+    demo_parser.add_argument(
+        "--chaired", action="store_true",
+        help="a chaired session, the head not fixed (rig_chaired), which a task that needs a fixed "
+        "head runs with the head-not-fixed warning; head-fixed by default",
+    )
+    demo_parser.add_argument(
+        "--kind", dest="session_kind", choices=SESSION_KINDS, default="training",
+        help="what the session is for, which decides the warnings it accepts; training by default",
+    )
+    demo_parser.add_argument(
+        "--plan", default=None, metavar="NAME",
+        help="run one of the task's plans by its name; without it the plain run of --trials trials",
+    )
+    demo_parser.add_argument(
+        "--start-block", default=None, metavar="NAME",
+        help="start the plan (--plan) at its block of this name; without it at its first",
+    )
+    demo_parser.add_argument(
+        "--set", action="append", default=[], metavar="NAME=VALUE",
+        help="a task setting's value for the run, over its own start, as `wlx run` takes it; may "
+        "be given more than once. Every setting stays changeable on the page as the run goes",
+    )
+    demo_parser.add_argument(
+        "--trials", type=int, default=1000,
+        help="the plain run's length, the page's own default; a run of a plan has its plan's",
+    )
+    demo_parser.add_argument(
+        "--as", dest="actor", default=None, metavar="WHO",
+        help="the person playing, recorded as a box actor on everything the demo sends; omitted, "
+        "this computer's login name",
+    )
+    demo_parser.add_argument(
+        "--keep", type=Path, default=None, metavar="DIR",
+        help="when the demo ends, first copy the session's folder to DIR, which must not exist "
+        "(refused at the start if it does); without it the demo leaves nothing behind",
+    )
+    demo_parser.add_argument(
+        "--no-browser", action="store_true",
+        help="print the demo screen's address rather than opening the default browser on it",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.command == "demo":
+        # Imported here, as `serve` and `taskd` are: no other subcommand starts children.
+        from wl_xcon import demo as _demo
+
+        return _demo.run(args)
 
     if args.command == "serve":
         # Imported here, the way `--link` builds its `ZmqLink` inside `run`: no other

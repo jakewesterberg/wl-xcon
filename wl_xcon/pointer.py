@@ -57,6 +57,10 @@ outlined saying why, the setup's viewports, housings and field edge, and the key
 publishes one on the trial's first frame, on the first frame after its screen changed, and at least
 every `REDRAWN_EVERY_S`; and a blank one when the trial has ended (`Pointing.ended`, which the
 session calls at the boundary). A drawing and its publisher are given together or not at all.
+**A run's first trial waits for its page's pointer** (`Worlds.waiting`; demo mode's Task 10): until
+a report arrives the trial loop holds at the boundary before it, the field published blank
+(`Drawing.field`), since before the first screen a page has nothing to point at and an eye nobody
+steers is tracker loss.
 
 **Numbers fixed here, each with its reason** (the demo plan's Global Constraints; the PI's
 "everything adjustable in the console", 2026-11-07, is about a task's numbers, which stay settings):
@@ -258,6 +262,16 @@ class Source:
         while self._drain(floor) == DRAIN:
             pass
         self._rebase = True
+
+    def heard(self) -> bool:
+        """**Whether a page has sent a report this source can take**: everything waiting read, as
+        between trials (`new_trial`), the newest kept for the next trial's first frame; true once
+        one is kept or in hand, a malformed one never. Between trials only, never in a frame: a
+        run's first trial waits on it (`Worlds.waiting`; demo mode's Task 10)."""
+        floor = self._seq if self._live(self._last) else -1
+        while self._drain(floor) == DRAIN:
+            pass
+        return self._pending or self._current
 
     # --- Each frame ---------------------------------------------------------------------------
 
@@ -587,21 +601,27 @@ class Drawing:
         saying why and the rest resolved; the windows `world`'s own as `gaze.Tracked` judges them
         on this frame (`drawn_windows`); and the setup and the keys."""
         resolved, outlines = self._resolved(world, visible, values, trial, frame)
-        return self._made(world, index, frame, resolved, drawn_windows(world), outlines)
+        return self._made(_labels(world), index, frame, resolved, drawn_windows(world), outlines)
 
     def blank(self, world, index: int, frame: int) -> Drawn:
         """**The screen after trial `index` has ended**: blank, as the animal's is until the next
         trial's first frame, with no windows; the setup and the keys as before."""
-        return self._made(world, index, frame, None, (), ())
+        return self._made(_labels(world), index, frame, None, (), ())
 
-    def _made(self, world, index, frame, resolved, windows, outlines) -> Drawn:
+    def field(self, index: int) -> Drawn:
+        """**The field before trial `index` has begun**, frame 0: blank, with no windows and no
+        keys, since no trial is drawn yet. What a page points at while a run's first trial waits
+        for its pointer (`Worlds.waiting`; demo mode's Task 10): before it nothing is drawn, and a
+        page with no drawing has nowhere to put the eye."""
+        return self._made((), index, 0, None, (), ())
+
+    def _made(self, keys, index, frame, resolved, windows, outlines) -> Drawn:
         geometry = self.geometry
         return Drawn(
             schema=SCHEMA, phase="drawn", session_id=self.session_id, trial=index, frame=frame,
             screen=resolved, windows=windows, outlines=outlines, viewports=self.viewports,
             housings=tuple(geometry.housings), stand_in=self.stand_in, mask_deg=geometry.mask_deg,
-            keys=tuple(item.label for item in sorted(world.keys, key=lambda item: item.key)),
-            vergence_half_deg=geometry.vergence_half_deg,
+            keys=keys, vergence_half_deg=geometry.vergence_half_deg,
         )
 
     def _resolved(self, world, visible, values, trial, frame):
@@ -629,6 +649,11 @@ class Drawing:
                 continue
             kept[name] = stimulus
         return resolve(kept), tuple(outlines)
+
+
+def _labels(world) -> tuple:
+    """A world's inputs' labels, in the order of their keys, as a `Drawn` lists them."""
+    return tuple(item.label for item in sorted(world.keys, key=lambda item: item.key))
 
 
 def _why(exc: Exception) -> str:
@@ -860,18 +885,54 @@ class Pointing(Tracked):
         self._stimuli = list(visible.values())
 
 
-def worlds(source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
-           publish=None) -> "Callable[[Trial, dict, int], Pointing]":
-    """**A demo session's worlds**, one a trial, as `taskd.Session.world` takes them, `(trial,
-    values, index) -> Pointing`: the source readied for the trial's first frame (`new_trial`) and
-    the trial's inputs numbered (`inputs`), at the pace's frame period, each publishing its screen
+class Worlds:
+    """**A demo run's worlds**, one a trial, as `taskd.Session.world` takes them, `(trial, values,
+    index) -> Pointing`: the source readied for the trial's first frame (`new_trial`) and the
+    trial's inputs numbered (`inputs`), at the pace's frame period, each publishing its screen
     through `publish` drawn by `drawing`, given both. One source, one pace and one drawing for the
-    session."""
-    _paired(drawing, publish)
+    run.
 
-    def make(trial: Trial, values: dict, index: int) -> Pointing:
-        source.new_trial()
-        return Pointing(source, trial, pace.frame_period, values, pace=pace, keys=inputs(trial),
-                        index=index, drawing=drawing, publish=publish)
+    **And whether the run's first trial waits for its page's pointer** (`waiting`; demo mode's Task
+    10). Before a run's first screen there is nothing drawn to point at, so no page can steer, and
+    a trial whose eye nobody steers ends as tracker lost: a run's first trial would be scored before
+    anyone could play it. So the trial loop asks `waiting` at the boundary before the first trial
+    (`taskd.Session.run`), and while no report has arrived holds there, as a pause does, the field
+    published for a page to point at."""
 
-    return make
+    def __init__(self, source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
+                 publish=None) -> None:
+        _paired(drawing, publish)
+        self.source = source
+        self.pace = pace
+        self.drawing = drawing
+        self.publish = publish
+        #: How many trials' worlds have been made: the run's first trial has begun once one has.
+        self.made = 0
+
+    def __call__(self, trial: Trial, values: dict, index: int) -> Pointing:
+        self.source.new_trial()
+        self.made += 1
+        return Pointing(self.source, trial, self.pace.frame_period, values, pace=self.pace,
+                        keys=inputs(trial), index=index, drawing=self.drawing,
+                        publish=self.publish)
+
+    def waiting(self, index: int) -> bool:
+        """**Whether trial `index`, the run's first, waits for a page's pointer**: true until a
+        report has arrived (`Source.heard`), and then never again this run; while it waits, the
+        field is published (`Drawing.field`), given a drawing, so a page has something to point at.
+        Asked between trials, once a housekeeping pass while it waits. **Only the run's first
+        trial waits**: a later one nobody steers ends as tracker lost under the task's
+        `tracker_lost`, as the rig's own eye rules end it (§3.3)."""
+        if self.made or self.source.heard():
+            return False
+        if self.publish is not None:
+            self.publish(self.drawing.field(index))
+        return True
+
+
+def worlds(source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
+           publish=None) -> Worlds:
+    """**A demo run's worlds** (`Worlds`): `(trial, values, index) -> Pointing`, as
+    `taskd.Session.world` takes them, and `waiting`, which the trial loop asks before the run's
+    first trial."""
+    return Worlds(source, pace=pace, drawing=drawing, publish=publish)

@@ -36,7 +36,7 @@ from wl_xcon import pointer, run, saccade, simeye, viewport
 from wl_xcon.bounds import Bounds, Ceiling, Floor
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.geometry import polar_of_deg
-from wl_xcon.link import Simulated, Stop, decode, encode
+from wl_xcon.link import Drawn, Simulated, Stop, decode, encode
 from wl_xcon.photometry import SRGB, Gray
 from wl_xcon.actor import Box
 from wl_xcon.run import Changed, Confirmed, Placed, Recorded, Shown, run_trial
@@ -707,6 +707,59 @@ def test_a_drawing_and_a_publisher_go_together():
     world = _world(FIX, source, pace)
     assert world.drawing is None and world.publish is None
     world.ended()
+
+
+def test_a_runs_first_trial_waits_for_a_report_showing_the_field_and_no_later_one_waits():
+    """Demo mode's Task 10: before a run's first screen a page has nothing to point at, so
+    `Worlds.waiting` says the first trial waits while no report has arrived -- a malformed one is
+    none -- publishing the field each time it is asked: blank, frame 0, the trial's index, no
+    windows and no keys, the setup's viewports and housings. Once a report is heard it waits no
+    longer, and the report is kept for the trial's first frame (`Source.heard`); once a trial's
+    world is made, no later trial waits, a report or none. Without a drawing nothing is
+    published."""
+    clock, page, source, pace = _rig()
+    link = Simulated()
+    drawing = _drawing(session_id="demo-2026-11-14_1012")
+    made = pointer.worlds(source, pace=pace, drawing=drawing, publish=link.publish)
+    assert made.waiting(0) is True and made.waiting(0) is True
+    page.send(clock.t, b"short")
+    assert made.waiting(0) is True and source.malformed == 1, "a malformed report is none"
+    fields = [d for d in link.published if isinstance(d, Drawn)]
+    assert len(fields) == 3, "the field, each time it is asked"
+    field = fields[0]
+    assert (field.session_id, field.trial, field.frame, field.screen) == (
+        "demo-2026-11-14_1012", 0, 0, None)
+    assert (field.windows, field.outlines, field.keys) == ((), (), ())
+    assert field.viewports == drawing.viewports and field.housings == tuple(DIRECT.housings)
+    assert field.stand_in is True and decode(encode(field)) == field
+    assert drawing.field(3).trial == 3
+
+    page.pointer(clock.t, 2.0, 1.0)
+    assert made.waiting(0) is False and made.waiting(0) is False
+    assert len([d for d in link.published if isinstance(d, Drawn)]) == 3, "nothing more drawn"
+    world = made(FIX, {}, 0)
+    world.display({}, 1)
+    assert world.gaze_cyclopean(1) == pytest.approx((2.0, 1.0), abs=0.2), "the report, kept"
+
+    _, _, again, paced = _rig()
+    later = pointer.worlds(again, pace=paced)
+    later(FIX, {}, 0)
+    assert later.waiting(1) is False, "only the run's first trial waits"
+    _, _, alone, paced = _rig()
+    assert pointer.worlds(alone, pace=paced).waiting(0) is True, "without a drawing too"
+
+
+def test_a_source_has_heard_a_report_kept_or_in_hand():
+    """`Source.heard`: false with nothing waiting, or only a malformed report; true once a report
+    is kept for the next trial's first frame, and while one is in hand."""
+    clock, page, source, pace = _rig()
+    assert source.heard() is False
+    page.send(clock.t, report(1, float("nan"), 0.0))
+    assert source.heard() is False and source.malformed == 1
+    page.pointer(clock.t, 0.0, 0.0)
+    assert source.heard() is True
+    _world(FIX, source, pace).display({}, 1)
+    assert source.heard() is True, "a report in hand"
 
 
 #: **A trial whose screen changes once**: the dot from its first frame; a transition that changes

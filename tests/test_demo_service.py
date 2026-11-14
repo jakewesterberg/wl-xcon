@@ -24,11 +24,13 @@ from _sessions import OPEN_ACCEPTED, WALL, typed
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import cli, dio, pointer, preflight, stranded
 from wl_xcon import service as service_module
+from wl_xcon import taskd as taskd_module
 from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, _load_rig, main
 from wl_xcon.geometry import stand_in_housings
 from wl_xcon.link import (
-    CheckRun, Drawn, EndSession, Idle, OpenSession, ResumeSession, Simulated, StartRun, Telemetry,
+    CheckRun, Drawn, EndSession, Idle, OpenSession, ResumeSession, Simulated, StartRun, Stop,
+    Telemetry,
 )
 from wl_xcon.record import welfare_note
 from wl_xcon.service import DEMO_UNRESUMED, Service, demo_folder
@@ -148,6 +150,14 @@ def _step(service, *commands):
         service.link.queue(command)
     service.step()
     return service.link.published[-1]
+
+
+def _steered(service) -> None:
+    """**A page's pointer report**, waiting on the service's link (`Simulated.gazes`), as a page
+    steering its demo sends one: a demo run's first trial waits for one (`pointer.Worlds.waiting`;
+    demo mode's Task 10), so a test that starts a demo run sends it first."""
+    service.link.gazes.append(pointer.pack(1, 0.0, -5.0, over=True, b=False, button=False,
+                                           held=0, presses=(0,) * pointer.KEYS))
 
 
 def _refused(frame) -> list[str]:
@@ -413,6 +423,7 @@ def test_build_with_demo_runs_on_the_factories_it_is_given(tmp_path):
     card, pump = service.session.card, service.session.pump
     assert (type(card), type(pump)) == (dio.Simulated, SimulatedPump), "the demo path's own"
     assert len(made) == 1
+    _steered(service)
     _step(service, _start(trials=1))
     run_start = next(code for code, name in service.allocation.task_events.items()
                      if name == "RUN_START")
@@ -461,6 +472,7 @@ def test_a_demo_field_takes_stand_ins_on_an_unmeasured_rig_and_a_live_open_never
     assert _config(service.demo_root, DEMO)["setup"]["housings"] == [
         {"left_cm": h.left_cm, "right_cm": h.right_cm, "bottom_cm": h.bottom_cm,
          "top_cm": h.top_cm, "margin_cm": h.margin_cm} for h in stand_in_housings(58.997)]
+    _steered(service)
     _step(service, _start(trials=1))
     drawn = [f for f in service.link.published if isinstance(f, Drawn)]
     assert drawn and {d.stand_in for d in drawn} == {True}, "the drawing labels them"
@@ -489,6 +501,7 @@ def test_a_demos_config_json_carries_demo_and_no_other_sessions_does(tmp_path):
     assert _config(service.demo_root, DEMO)["demo"] == {
         "gaze": "mouse", "noise_deg": 0.02, "stand_in_housings": False}
     assert isinstance(frame, Telemetry) and frame.demo is True
+    _steered(service)
     _step(service, _start(trials=1))
     frames = [f for f in service.link.published if isinstance(f, Telemetry)]
     assert {f.demo for f in frames if f.session_id == DEMO} == {True}
@@ -531,6 +544,7 @@ def test_a_demo_paces_to_the_wall_clock_and_a_live_session_runs_flat_out(tmp_pat
     assert drawn and {d.session_id for d in drawn} == {DEMO}
     assert [d.trial for d in drawn if d.screen is None] == [0, 1], "a blank at each trial's end"
     assert drawn[0].frame == 1 and drawn[0].stand_in is False
+    _steered(service)
     _step(service, _start(trials=1))
     assert seeds == [41, 42], "a source a run, from that run's seed"
 
@@ -596,6 +610,127 @@ def test_a_demo_task_naming_ten_inputs_fails_its_preflight_naming_them(tmp_path)
     assert "demo inputs" not in [item.name for item in live.items]
 
 
+# --- a run's first trial waits for its page's pointer (Task 10) ---------------------------------
+
+
+class _Unsteered(Simulated):
+    """**A page that steers late**: once `armed`, each wait asked of the link (`idle`, which a run
+    waiting for its pointer calls once a pass, as `Service.step` calls it once a housekeeping pass)
+    counted, and at the `at`-th, `then(self)` -- a report sent, a command queued, the wall moved on
+    -- with how much had been published by then kept in `before`. **Two backstops**: past
+    `BACKSTOP` passes (each a `drain`) a Stop is queued, so a run that never stopped waiting ends;
+    and past `BACKSTOP * 5` waits one raises, the run's fault, for a wait that never comes back to
+    the boundary: either way its test fails on what it finds rather than hanging. Never waits: a
+    simulated session's clocks are the test's."""
+
+    BACKSTOP = 40
+
+    def __init__(self, at: int) -> None:
+        super().__init__()
+        self.at, self.then = at, None
+        self.armed, self.waits, self.before, self.drains = False, 0, None, 0
+
+    def drain(self):
+        if self.armed:
+            self.drains += 1
+            if self.drains == self.BACKSTOP:
+                self.queue(Stop(by=Box("backstop")))
+        return super().drain()
+
+    def idle(self, timeout):
+        if self.armed:
+            self.waits += 1
+            if self.waits == self.at:
+                self.before = len(self.published)
+                self.then(self)
+            if self.waits > self.BACKSTOP * 5:
+                raise AssertionError("the run waited for its pointer apart from its boundary")
+        return super().idle(timeout)
+
+
+def _unsteered(tmp_path, then) -> tuple[Service, _Unsteered]:
+    """A demo open on a rig service whose page steers at the fourth wait: the step's own, then the
+    run's first three passes waiting for the pointer; armed, and a run of two trials started."""
+    link = _Unsteered(4)
+    service = _rig_service(tmp_path, link=link)
+    link.then = lambda link: then(service, link)
+    _step(service, _demo())
+    link.armed = True
+    _step(service, _start(trials=2))
+    return service, link
+
+
+def _trial_rows(service) -> list:
+    path = _xcon(service.demo_root, DEMO) / "trials.jsonl"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def _run_ends(service) -> list:
+    path = _xcon(service.demo_root, DEMO) / "runs.jsonl"
+    return [row for row in map(json.loads, path.read_text().splitlines())
+            if row.get("stop_kind") is not None]
+
+
+def test_a_demo_runs_first_trial_waits_for_its_pages_pointer_with_the_field_drawn(tmp_path):
+    """Demo mode's Task 10: before a run's first screen a page has nothing to point at, and an eye
+    nobody steers ends a trial as tracker lost, so **a demo run's first trial waits at the boundary
+    until a pointer report arrives**: the field published blank for the page to point at, once a
+    pass, the feed saying why once, and no trial drawn, opened or scored meanwhile. Then the run
+    plays, and its later trials never wait: the second, with no report since, runs at once."""
+    service, link = _unsteered(tmp_path, lambda service, link: _steered(service))
+    published = link.published
+    drawn = [(at, f) for at, f in enumerate(published) if isinstance(f, Drawn)]
+    fields = [(at, f) for at, f in drawn if f.frame == 0]
+    assert len(fields) == 3, "the field, once each of the three passes before the report"
+    assert {(f.trial, f.screen, f.windows, f.keys, f.session_id) for _, f in fields} == {
+        (0, None, (), (), DEMO)}
+    assert all(at < link.before for at, _ in fields)
+    assert all(at >= link.before for at, f in drawn if f.frame >= 1), "a trial drew before it"
+    assert drawn[:3] == fields, "the field only before the first trial"
+    assert len(_trial_rows(service)) == 2, "both trials played once it arrived"
+    assert link.drains < link.BACKSTOP
+    said = [c.said for c in published[-1].controls if c.kind == "demo"]
+    assert said == [taskd_module.POINTER_AWAITED]
+
+
+def test_a_mark_while_a_demo_run_waits_for_its_pointer_is_stamped_there(tmp_path):
+    """The wait is a paused pass's (`link.idle`), which returns early with a mark: the mark is
+    stamped there, between trials before the first, as the paused loop stamps one."""
+    def then(service, link):
+        link.marks.append(7)
+        _steered(service)
+
+    service, link = _unsteered(tmp_path, then)
+    stamped = [c.said for c in link.published[-1].controls if c.kind == "mark"]
+    assert stamped and stamped[0].startswith("mark 1 stamped between trials, before trial 0")
+    assert len(_trial_rows(service)) == 2
+
+
+@pytest.mark.parametrize("case", ["stop", "end", "out of cage"])
+def test_while_a_demo_run_waits_for_its_pointer_every_boundary_rule_holds(tmp_path, case):
+    """The wait is the boundary's own pass, repeated: a person's Stop ends the run, End ends it and
+    the session with its return, and the out-of-cage limit ends it as between any two trials
+    (`Session._ends`), each with no trial drawn or scored."""
+    def then(service, link):
+        if case == "stop":
+            link.queue(Stop(by=BY))
+        elif case == "end":
+            link.queue(_end())
+        else:
+            service.wall_clock.at += 9 * 3600.0
+
+    service, link = _unsteered(tmp_path, then)
+    assert link.waits == 4 and link.before is not None and link.drains < link.BACKSTOP
+    assert [f for f in link.published if isinstance(f, Drawn) and f.frame >= 1] == []
+    assert _trial_rows(service) == []
+    (ended,) = _run_ends(service)
+    assert ended["stop_kind"] == {"stop": "operator", "end": "operator",
+                                  "out of cage": "limit"}[case], ended
+    if case == "end":
+        assert service.session is None
+        assert _kinds(service.demo_root, DEMO)[-2:] == ["returned", "session ended"]
+
+
 # --- the idle frame ------------------------------------------------------------------------------
 
 
@@ -625,6 +760,7 @@ def test_a_live_rig_service_writes_a_demo_under_its_demo_root_never_its_root(tmp
     _step(service, _demo())
     assert sorted(p.name for p in service.demo_root.iterdir()) == [DEMO]
     assert list(service.root.iterdir()) == []
+    _steered(service)
     _step(service, _start(trials=1))
     _step(service, _end())
     assert _kinds(service.demo_root, DEMO)[-2:] == ["returned", "session ended"]
