@@ -205,6 +205,7 @@ animal is completing, which is the rule `welfare.Rig` already follows for pump f
 browser ──HTTP + SSE──►  console  ──ZMQ REQ/REP (commands)──►  taskd ──► world, devices
                       ├ OAuth client + local credential  ◄──ZMQ PUB (telemetry)──┘
                       │                 ──ZMQ PUSH/PULL (mark signal)──►
+                      │                 ──ZMQ PUSH/PULL (a demo's pointer)──►
                       ├ the page, SSE fan-out
                       └ /health  (the labhost surface)
 ```
@@ -225,6 +226,18 @@ only when its `Host` names this console. The console's telemetry thread reads, i
 thread alone owns the REQ socket and tells the page *sent* only when `taskd` has
 acknowledged, and its mark thread sends an operator's mark on a third socket, ahead of
 every command, for `taskd` to stamp in the frame it arrives.
+
+**A fourth endpoint, for a demo's pointer** (demo mode, built 2026-11-14;
+[its design §3.8-§3.9 and §4.5](2026-10-06-demo-mode-design.md#38-the-gaze-channel)).
+`--link PUB,REP,MARK,GAZE`: `taskd`'s PULL socket for a demo's pointer reports, bound
+loopback only whatever `--link-allow-remote` says, read without blocking, at most
+`pointer.DRAIN` messages a frame. The console's gaze thread pushes each `POST /gaze`
+report to it, never blocking, and `/gaze` is gated exactly as `/commands` is. A demo service
+(`wlx taskd --demo`) requires it; a rig service takes it optionally and opens a demo only
+with it and a demo folder of its own (`--demo-root`). On the PUB socket a demo's world also
+publishes a third message kind, `Drawn`, its screen whole when it changes and at least once a
+second, which the console draws with the exact drawer on a thread of its own and sends to each
+page as a `drawn` event; `wlx console` skips it. The telemetry schema is 21.
 
 **Queued commands reach the rig one trial boundary apart** (found by the b2a final
 review's probe, 2026-09-28). The command thread sends one command and waits for

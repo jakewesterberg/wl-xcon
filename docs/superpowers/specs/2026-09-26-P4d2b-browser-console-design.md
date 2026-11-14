@@ -34,6 +34,11 @@
   Since XC-043 (2026-11-07) `wlx serve` also holds at most `serve.MAX_EVENT_STREAMS` streams open
   across both listeners and answers one past it a JSON 503; the page shows its stream lost and
   asks again after three seconds.
+- *Amended 2026-11-14 (slice b4, demo mode; [its design](2026-10-06-demo-mode-design.md) §3.3, §4.4,
+  §4.5):* **a demo's pointer travels as `POST /gaze`s**, one in flight, at most once an animation frame
+  while it moves and every `web.GAZE_EVERY_MS` while it is still, gated exactly as `POST /commands` is;
+  its screen comes back as its own server-sent event, `drawn`, apart from the frames. WebSockets stay
+  deferred to the replica pane.
 
 ## 2. Process and security (decided; the write rules apply from slice b2)
 
@@ -199,7 +204,9 @@ builds its part; S9a is amended to match when that slice lands.
   - **b2 — writes from the box:** parameters, stop, pause, mark, scheduled stop.
   - **b3 — sessions from the page:** new / load / end session, the task-library pull and
     pre-flight. This needs a service on the box that holds a session across runs.
-  - **b4 — simulation** with mouse gaze.
+  - **b4 — simulation** with mouse gaze. *Built 2026-11-14* as demo mode
+    ([its design](2026-10-06-demo-mode-design.md), XC-013): `wlx demo TASK`, a private copy of the rig
+    service and its page, and a demo session for the test monkey, `REFERENCE`, from a live rig's own page.
   - **b5 — training tools and manual reward** (welfare-critical). *Amended 2026-09-28:*
     a manual reward **during a pause** moved to b2a, at the PI's request when he approved
     b2a's plan (§5.0, §5.1); a manual reward at any other time stays here. *Amended
@@ -852,7 +859,10 @@ And by the branch's final review, which drove the page in a browser (2026-09-30)
 
 - Plots (accuracy over time, RT distribution, accuracy by position) — their own slice, with
   the per-trial RT and bounded history they need (PI, 2026-09-26)
-- The replica pane — gated on V11
+- The replica pane — gated on V11. *Amended 2026-11-14:* still gated on V11. Demo mode's screen (slice
+  b4) takes the pane's place only while a frame says `demo`, and is not the replica: it shows the exact
+  drawer's frames of a demo's screen when it changes, labeled, never a live animal's screen at display
+  rate ([demo mode §4.3](2026-10-06-demo-mode-design.md#43-the-demo-screen))
 - **Cameras** — their own package, **P9**, designed 2026-09-27
   (`docs/superpowers/specs/2026-09-27-P9-camera-system-design.md`). It supersedes the single
   "animal camera" first sketched here the same day. P9 is one headless camera box per rig,

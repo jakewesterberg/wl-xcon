@@ -31,6 +31,12 @@ no reward, which is not "against simulators" but "against nothing"; that half is
 **Demo mode and the operator document do not exist**, and both are named here as M1
 deliverables. They are P4.
 
+*Amended 2026-11-14:* **demo mode exists** ([its design](superpowers/specs/2026-10-06-demo-mode-design.md)):
+`wlx demo TASK` plays a task with the mouse as the eye, scored by the rig's own eye rules, in a private copy of
+the rig service and its page, and a live rig's page opens one for the test monkey, `REFERENCE`. Its tests play
+the pop-out search by a scripted pointer and by a browser's mouse. **The operator document is still owed**
+(XC-014), so M1 is still not met.
+
 ## M2 — Display validated on rig hardware
 Protocol V1 on at least one rig: photodiode-measured onset lag and variability, dropped-frame rate
 over a 2 h stress run; protocol **V9** for split-panel per-half photometry and stereo viewport

@@ -1282,6 +1282,13 @@ summary before its build merges:
 Parked (XC-013). When it returns, its screen shows frames from the exact drawer, labeled, instead of a
 schematic. Its spec's §14 list still applies.
 
+*Amended 2026-11-14: built* ([its design](2026-10-06-demo-mode-design.md), XC-013 closed). A demo's world
+resolves its screen (`pointer.Drawing`) when what is visible changes, at a trial's start and at least once a
+second, and `wlx serve` draws each with the exact drawer (`demoscreen`, tested pixel for pixel against `exact.draw`)
+at a preview of the rig's panel through the sRGB standard, labeled as its §4.4 says, on a thread of its own and
+never in the rig service's process; a preview for a person, not timing-valid. Its §14 items are each marked
+there done, changed or open.
+
 ## 24. Builds, in order
 
 The PI's order: **definition first, display by January**.

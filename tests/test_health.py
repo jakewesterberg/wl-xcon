@@ -55,12 +55,19 @@ LIMIT = (
     "28800"
 )
 
+#: A demo left without its return in a rig's demo folder (`--demo-root`; demo mode's XC-504).
+DEMO = Stranded("demo-20261114-101010", "REFERENCE", 1_699_990_000.0, demo_folder=True)
+
 #: `(frame, seconds since it arrived)` for every row of spec §3's verdict table, and
 #: the absences and markup a reading must survive.
 CASES = {
     "no session": (None, None),
     "idle": (idle(), 1.0),
     "stranded": (idle(stranded=(Stranded("2027-01-13_01", "B", 1_699_990_000.0),)), 1.0),
+    # Demo mode (2026-11-14): a stranded demo in a rig's demo folder is the test monkey's.
+    "stranded demo": (idle(stranded=(DEMO,)), 1.0),
+    "stranded demo beside an animal": (
+        idle(stranded=(Stranded("2027-01-13_01", "B", 1_699_990_000.0), DEMO)), 1.0),
     # Schema 11 (the b3a-2 final review, I2): the page's End tab reads the closed
     # session's summary from the idle frame; `/health` reads the frame as it did.
     "idle after a session closed": (
@@ -141,6 +148,8 @@ EXPECTED = {
     "idle": "ok",
     "idle after a session closed": "ok",
     "stranded": "degraded",
+    "stranded demo": "ok",
+    "stranded demo beside an animal": "degraded",
     "between runs": "ok",
     "before the first run": "ok",
 }
@@ -237,6 +246,8 @@ def test_exactly_one_reading_is_featured(case):
         ("cage-side", "state"),
         ("idle", "state"),
         ("stranded", "stranded"),
+        ("stranded demo", "stranded"),
+        ("stranded demo beside an animal", "stranded"),
         ("between runs", "out_of_cage"),
     ],
 )
@@ -725,6 +736,40 @@ def test_the_readings_say_no_session_is_open_and_which_animal_is_stranded():
     assert rows["session"] == "none open · wlx taskd is idle"
     assert rows["state"] == "idle · no session open · an animal's return is not recorded"
     assert rows["stranded"] == "2027-01-13_01 · B(lt) · return not recorded"
+
+
+def test_a_rigs_stranded_demo_is_said_as_a_demos_and_degrades_nothing():
+    """A stranded demo in a rig's demo folder (`Stranded.demo_folder`) holds up only another
+    demo, never a real animal's open (demo mode §15, 2026-11-14), and no animal's return is
+    missing: `/health` names it a demo's and leaves the verdict `ok`, featuring it only when
+    nothing more urgent is. Beside an animal's stranded session the animal's words and
+    `degraded` stand."""
+    seen = {"frame_age_s": 1.0, "stale_after_s": 30.0, "endpoint": ENDPOINT}
+
+    def rows(found, rejected=None):
+        return {r["key"]: r for r in readings(found, rejected=rejected, **seen)}
+
+    alone, _ = CASES["stranded demo"]
+    assert rows(alone)["state"]["value"] == (
+        "idle · no session open · a demo's return is not recorded"
+    )
+    assert rows(alone)["stranded"]["value"] == (
+        "demo-20261114-101010 · REFERENCE · demo · return not recorded"
+    )
+    beside, _ = CASES["stranded demo beside an animal"]
+    assert rows(beside)["state"]["value"] == (
+        "idle · no session open · an animal's return is not recorded"
+    )
+    assert rows(beside)["stranded"]["value"] == (
+        "2027-01-13_01 · B · return not recorded · "
+        "demo-20261114-101010 · REFERENCE · demo · return not recorded"
+    )
+    refused = rows(alone, REFUSED)
+    assert verdict(alone, frame_age_s=1.0, stale_after_s=30.0, rejected=REFUSED) == "degraded"
+    assert [k for k, r in refused.items() if r["featured"]] == ["refused"]
+    quiet = {r["key"]: r for r in readings(alone, frame_age_s=45.0, stale_after_s=30.0,
+                                           rejected=None, endpoint=ENDPOINT)}
+    assert [k for k, r in quiet.items() if r["featured"]] == ["last_frame"]
 
 
 def test_between_runs_the_state_names_the_run_and_how_it_ended():

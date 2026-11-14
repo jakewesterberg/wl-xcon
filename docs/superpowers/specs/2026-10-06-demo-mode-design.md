@@ -7,7 +7,9 @@ and the PI chose to build other things first. It is part 3 of the pop-out search
 ([its design, §2](2026-11-07-popout-search-design.md)), built in a plan of its own after that build merges, this
 revision approved by the PI on 2026-11-07 (§15). It builds slice
 **b4** of [the P4d-2b console spec](2026-09-26-P4d2b-browser-console-design.md) ("b4 — simulation with mouse
-gaze") and closes backlog **XC-013**.
+gaze") and closes backlog **XC-013**. **Built 2026-11-14** by [its plan](../plans/2026-11-10-demo-mode.md), both doors
+(§15). **Where a sentence below was written before the PI kept the rig page's door** ("Also from a live rig's page",
+§15 item 1) or before he placed its demos (§15 item 2), a dated note beside it says what was built; §15 governs.
 
 **For the PI:** §8 (welfare: the two approved `Service._open` changes, §15, and the manifest update they need) and
 §15 (one question, answered).
@@ -87,6 +89,8 @@ animal's screen shown on the page.
 > welfare-listed change; the second, the rig page's, is offered with its cost (§8) and asked (§15). "Only the test
 > monkey" now holds by construction (§3.1). Call 1 takes `tasks/eight_hour_bounds.py` (the PI, 2026-10-07). Call
 > 2's tremor is the simulated eye's own noise, shared (§3.3). Call 3 left this build with §6.
+> *(2026-11-14: the PI kept the second door the day this was written, §15, and both were built, with §8's two
+> `Service._open` changes.)*
 
 ## 3. The demo service (the rig side)
 
@@ -108,6 +112,12 @@ Everything else is the rig's own path, unchanged: a session is opened, run and e
 `_start` and `_end`, as the page opens one. **A live rig service gains nothing**: no simulation choice, no rule, no
 gaze endpoint. (The builder's: whether `wlx taskd --demo` writes the subjects folder or `wlx demo` writes it and
 `--demo` refuses one holding anything but `REFERENCE`; either way a demo service holds no other animal.)
+
+> *2026-11-14, as built (§15): "a rig service without `--demo` refuses" the gaze endpoint and "a live rig service
+> gains nothing" give way to the PI's "Also from a live rig's page".* A rig service takes the fourth endpoint too
+> (`--link PUB,REP,MARK,GAZE`, loopback only), and opens a demo only with it and a demo folder of its own,
+> `wlx taskd --demo-root DIR` (§15 item 2), never under `--root`; its page gains a **demo** box in New session
+> (§4.1), and §8's two `Service._open` changes are its rule. `wlx taskd --demo` writes its own subjects folder.
 
 ### 3.2 Apparatus
 
@@ -236,10 +246,18 @@ takes stand-ins.**
    its event codes go to the simulated card, never to a sync box or a recording.
 5. **It says what it is**: the `demo` key in its record (in a kept copy too), and DEMO on every page (§4.2).
 
+*2026-11-14, as built (§15):* items 1 and 4 are `wlx demo`'s. A demo opened from a live rig's page is written
+under the rig's `--demo-root`, never its `--root`, so a stranded one holds up only another demo (§15 item 2); its
+page is the rig's own on the lab network, where only a writer steers it (§4.5), while its gaze endpoint is still
+loopback only and its event codes still go to the simulated card (§8); items 2, 3 and 5 hold for it, the page
+filling its id `demo-` and the date and time, editable.
+
 ### 3.8 The gaze channel
 
 **A fourth link endpoint, a PULL socket** (`--link PUB,REP,MARK,GAZE`), a demo service's alone (a rig service
 refuses four endpoints), built as the mark socket is: bound loopback-only and read without blocking.
+*(2026-11-14, as built (§15): not a demo service's alone. A rig service takes it too, and opens a demo only with
+it and a `--demo-root`; a demo service requires it. Loopback only whatever `--link-allow-remote` says.)*
 `pointer.Source.poll` drains what is waiting, **at most `pointer.DRAIN = 64` messages a frame, keeping the
 newest**: bounded work, whatever arrives. A message is fixed-size binary, read into a buffer allocated once: the
 page's sequence number, the pointer's x and y in degrees, whether it is over the drawing, B, the mouse button, the
@@ -271,6 +289,12 @@ A demo service's New session dialog offers `REFERENCE` alone, the one animal its
 *←cage at* with the clock time, still editable, parsed by `marks` as every departure is (a page convenience in
 `web.py`; `marks` unchanged). No rig's page gains a simulation choice (§15).
 
+*2026-11-14, as built (§15, "Also from a live rig's page"): a rig's page does.* Its New session dialog has a
+**demo** box, offered when the idle frame says `gaze` (a gaze endpoint and a `--demo-root`) and the rig's
+`--subjects` holds `REFERENCE`; ticked, it locks the subject to `REFERENCE` and fills *←cage at* and the id as
+above, and the open carries `demo`. Otherwise it is greyed, saying why; also while a demo in the demo folder is
+stranded. On a demo service the dialog offers `REFERENCE` alone, as above.
+
 ### 4.2 The tag
 
 Every page viewing a demo service shows **DEMO** in its header, from the frame's `demo` field.
@@ -278,8 +302,9 @@ Every page viewing a demo service shows **DEMO** in its header, from the frame's
 ### 4.3 The demo screen
 
 It sits in the right column, where *replica · V11* is now, **only on a demo service's page**, and opens full-window
-with a click or F (Escape closes it). **It is not the replica**, which redraws a live animal's screen at display rate
-and stays gated on V11 (console spec §7).
+with a click or F (Escape closes it). *(2026-11-14, as built (§15): on any page while its frame says `demo`, a
+rig's page during a demo session included; `#demo` in the address opens it full-window.)* **It is not the
+replica**, which redraws a live animal's screen at display rate and stays gated on V11 (console spec §7).
 
 ### 4.4 What it shows: frames from the exact drawer, labeled (engine spec §23)
 
@@ -356,6 +381,15 @@ wlx demo TASK [--tasks DIR] [--rig PATH] [--allocation PATH] [--view direct|ster
    takes them. It accepts the open's warnings and the pre-flight's unknowns, printing each, as a person would on the
    page; a pre-flight failure is printed and stops it. `--as` names the person (default: this computer's login
    name), recorded as a box actor.
+   *2026-11-14, as built (the plan's Task 10): a demo run's first trial waits for its first pointer report.*
+   Before the run's first screen a page has nothing to point at, and an eye nobody steers is tracker loss, so the
+   first trial would end before anyone could play it. While no report has arrived the run waits at the trial
+   boundary, the empty field published for a page to point at (`pointer.Worlds.waiting`), each pass the
+   boundary's own: staged changes applied, marks stamped, commands drained (a stop, an End, a pause), a frame
+   published, and the out-of-cage limit and a scheduled stop checked; nothing is drawn from the plan and no trial's
+   time counted until a report arrives. This holds for every demo run, from either door, and only for its first
+   trial: a later trial nobody steers ends as tracker lost (§7). `wlx demo` prints that the run begins when the
+   person points at the demo screen.
 5. **It opens the default browser** on the full-window demo screen (Safari on the PI's Mac). The person is at the
    computer, so every control works: pause, stop, reward, a change mid-run, the trainer's panel, another run.
    `--no-browser` prints the address instead.
@@ -414,9 +448,11 @@ it), so they draw as §4.4 says until a run sets them.
 | What | What happens |
 |---|---|
 | `wlx taskd --demo` with `--subjects` or `--root`, or `DIR` existing | refused at start, nothing made |
-| A fourth link endpoint on a rig service without `--demo` | refused at start |
+| A fourth link endpoint on a rig service without `--demo` | refused at start *(2026-11-14, as built (§15): taken; such a rig service opens a demo only with a `--demo-root` too)* |
 | `wlx demo` on a computer where a rig service runs | refused before anything starts |
+| A demo run's first trial, before any pointer report has arrived *(2026-11-14, the plan's Task 10)* | it waits at the boundary, the empty field published, commands drained, the out-of-cage limit and a scheduled stop checked (§5 item 4) |
 | The page closed, its network gone, or B held, mid-trial | tracker loss after `LIVE_S`, under the task's `tracker_lost` |
+| No page steering during a later trial (after Escape, or before the pointer reaches the drawing) *(2026-11-14)* | the same: tracker loss after `LIVE_S` |
 | The pointer off the drawing | gaze off the screen: no fixation, or a fixation break |
 | A report older than one already forwarded | dropped by `wlx serve` |
 | A malformed or non-finite gaze message | counted and dropped (§3.8); the frame goes on |
@@ -429,6 +465,7 @@ it), so they draw as §4.4 says until a run sets them.
 | `wlx demo`: a child process dies | the other stopped, the command ends, naming which and why |
 | `wlx demo --keep DIR` with `DIR` existing | refused before anything starts |
 | `wlx demo` killed outright, with no Ctrl-C | its folder stays in the temporary folder, outside any rig's data |
+| A demo stranded in a rig's `--demo-root` *(2026-11-14, as built)* | only *end* is offered, and only another demo's open waits on it; `/health` names it a demo's, featured when nothing more urgent is, and leaves the verdict `ok`, since no animal's return is missing (`health._animal_stranded`) |
 
 ## 8. Welfare
 
@@ -457,7 +494,10 @@ which stays unchanged, the PI's rule of 2026-09-30).
 
 With them, outside the list: a demo is never resumed, only ended (`_resume` refuses it, the flag read by
 `resume.read`; the PI kept both off the list on 2026-10-02), and until a crashed demo in the rig's folder is ended,
-`_open`'s existing stranded rule blocks every real animal's open.
+`_open`'s existing stranded rule blocks every real animal's open. *(2026-11-14, as built (§15 item 2): a rig's
+demos are written under its own `--demo-root`, never its `--root`, so a crashed demo blocks only another demo's
+open, never a real animal's; its return is recorded by the unchanged `_end` and `_close_stranded`, the service
+pointed at the demo folder for that one call. No welfare-listed code changed for it.)*
 
 ## 9. Testing (sim first)
 
@@ -475,6 +515,11 @@ With them, outside the list: a demo is never resumed, only ended (`_resume` refu
   endpoint; a demo service's sessions run on the simulated card and pump; a demo's `config.json` carries `demo` and
   no other session's does; a rig service started after a demo finds nothing of it, stranded or not.
 - **The welfare list**: `tools/welfare_diff.py` from the build's base shows every item `SAME`.
+- *2026-11-14, as built (§15): the two lines above give way to the rig page's door.* A rig service takes a fourth
+  endpoint and opens a demo only with a `--demo-root`, written there and never under `--root`; a demo for any animal
+  but `REFERENCE` is refused before anything is written; a demo gets the simulated card and pump whatever the
+  service was built with; a stranded demo in the demo folder never holds up a real open; and `welfare_diff` from
+  the build's base shows `service.Service._open` `DIFFERS`, naming the PI's approval, and every other item `SAME`.
 - **The drawing**: `wlx serve`'s image of a `Drawn` equals `exact.draw` at the preview through sRGB, pixel for
   pixel; each label of §4.4's table; a look with no value and a kind not yet drawable outlined with why; an array's
   target labeled at its placed window; the stand-ins; L and R; coordinates in degrees, +y up; a newer screen during a
@@ -493,7 +538,8 @@ With them, outside the list: a demo is never resumed, only ended (`_resume` refu
 
 - One review of the whole build, on the most capable model (the PI's process rule, 2026-11-07).
 - The welfare diff, every item `SAME` (§8); and the PI's welfare review of §8's two items only if he keeps the rig
-  page's door (§15).
+  page's door (§15). *(2026-11-14: he kept it, so the diff shows `service.Service._open` `DIFFERS` and every other
+  item `SAME`, and his welfare review of §8's two items, as built, is due before the merge.)*
 - **The PI tries it**: `wlx demo wl-xtasks/tasks/popout_search.py --set response_deadline=3.0` in Safari. The browser
   tests run WebKit; this is the look and feel no test can judge.
 
@@ -506,14 +552,16 @@ With them, outside the list: a demo is never resumed, only ended (`_resume` refu
 - **Engine spec §23**: demo mode built, its frames the exact drawer's.
 - **Roadmap M1**: demo mode exists; the operator document is still owed (XC-014).
 - **architecture.md**: the demo service in the `taskd` row; the gaze endpoint and the `Drawn` message in the
-  `console` row. Nothing in its welfare section (§8).
+  `console` row. Nothing in its welfare section (§8). *(2026-11-14, as built (§15): its welfare section gained a
+  dated paragraph on §8's two `Service._open` changes.)*
 - **`docs/pending-wl-preproc-amendments.md`**: the `demo` key, before it is written.
 - **Backlog**: XC-013 closed; XC-146's "demo mode's path" removed, both sources now playing through
   `gaze.Tracked`.
 
 ## 12. Out of scope
 
-- **A demo opened from a live rig's page**, unless the PI keeps it (§15).
+- **A demo opened from a live rig's page**, unless the PI keeps it (§15). *(2026-11-14: he kept it, and it is
+  built: in scope, not out.)*
 - **The live replica**: gated on V11, unchanged.
 - **Watching the simulated eye play on the demo screen, paced**: the same world seam; XC-146's.
 - **The display process** (engine build E): a demo never drives a display.
@@ -625,7 +673,8 @@ review, by number):
     `screen.Screen`, which it carries.
 12. **Schema 15 also carries `gaze`** (this rig service has a gaze endpoint), for §4.1's greying
     (F12). **Changed**: schema 21 carries `demo`, since a whole service is a demo's or not (§3.7), and no page
-    greys a choice (§4.1).
+    greys a choice (§4.1). *(2026-11-14, as built (§15): schema 21 carries `Idle.gaze` as well, a gaze endpoint and,
+    on a rig service, a `--demo-root`, and a rig's page greys its demo box on it, saying why.)*
 13. **`/gaze` is gated exactly as `/commands` is** (`_command`'s checks, factored out), never by
     `may_write`, which is false on the https page (F9). Each report on the https page costs a
     connection and a token check: stated, not measured. **Done**: §4.5.

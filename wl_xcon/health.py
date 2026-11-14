@@ -130,6 +130,13 @@ def _stale(frame: Telemetry | Idle | None, frame_age_s: float | None, stale_afte
     )
 
 
+def _animal_stranded(frame: Idle) -> bool:
+    """Whether a stranded session is an animal's: any but a demo found in a rig's demo folder
+    (`Stranded.demo_folder`; demo mode, 2026-11-14), which is the test monkey's, holds up only
+    another demo, and is said here as a demo's, never degrading the verdict."""
+    return any(not found.demo_folder for found in frame.stranded)
+
+
 def verdict(
     frame: Telemetry | Idle | None,
     *,
@@ -149,15 +156,16 @@ def verdict(
       due: `degraded`
     - ended by the out-of-cage limit and not yet back: `degraded`
     - otherwise -- running normally, or ended any other way: `ok`
-    - `wlx taskd` idle: `ok`; `degraded` while a stranded session exists, a frame was
-      refused, or the stream went quiet
+    - `wlx taskd` idle: `ok`; `degraded` while an animal's stranded session exists, a
+      frame was refused, or the stream went quiet. A stranded demo in a rig's demo folder
+      is no animal's, so it is said and degrades nothing (`_animal_stranded`)
     """
     if isinstance(frame, Idle):
         # No session: `ok`, unless a frame was refused, the stream went quiet, or an
         # animal's return is missing -- `degraded` until it is recorded, as a session
         # ended on its limit is (spec §3's table; the b3a-1 plan, decision 10).
         stale = _stale(frame, frame_age_s, stale_after_s)
-        return "degraded" if rejected or stale or frame.stranded else "ok"
+        return "degraded" if rejected or stale or _animal_stranded(frame) else "ok"
     if frame is not None and frame.stop_kind == "fault":
         return "down"
     if rejected:
@@ -176,7 +184,10 @@ def verdict(
 def _state_text(frame: Telemetry | Idle) -> str:
     if isinstance(frame, Idle):
         text = "idle · no session open"
-        return f"{text} · an animal's return is not recorded" if frame.stranded else text
+        if not frame.stranded:
+            return text
+        whose = "an animal's" if _animal_stranded(frame) else "a demo's"
+        return f"{text} · {whose} return is not recorded"
     if frame.phase == "between_runs":
         if frame.run_index is None:
             return "between runs · no run yet"
@@ -233,9 +244,11 @@ def _featured(
     if frame is None:
         return "refused" if rejected else "state"
     if isinstance(frame, Idle):
-        if frame.stranded:
+        if _animal_stranded(frame):
             return "stranded"
-        return "refused" if rejected else "last_frame" if stale else "state"
+        # A stranded demo is featured only when nothing more urgent is.
+        return ("refused" if rejected else "last_frame" if stale
+                else "stranded" if frame.stranded else "state")
     if frame.duration_warning:
         return "duration_warning"
     if verdict_ == "down" or (frame.stop_kind == "limit" and frame.phase != "closed"):
@@ -299,7 +312,8 @@ def readings(
                     "Stranded",
                     " · ".join(
                         f"{found.session_id} · {found.subject or 'record unreadable'} · "
-                        f"return not recorded"
+                        + ("demo · " if found.demo_folder else "")
+                        + "return not recorded"
                         for found in frame.stranded
                     ),
                 )
