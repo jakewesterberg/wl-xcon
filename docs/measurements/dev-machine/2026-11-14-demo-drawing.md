@@ -1,5 +1,10 @@
 # A demo's drawing -- how long the exact drawer takes at a preview's size, on a development machine
 
+> **Followed by `2026-11-14-demo-drawing-preview.md`** (same day): the preview's own drawing,
+> `demoscreen.draw`, is the exact drawer's image bit for bit and drew within the interval, and the
+> preview's size is now chosen from that record. This one stands as what the exact drawer alone
+> takes.
+
 > **This is not a rig measurement, and not a frame time.** It times the exact drawer drawing one
 > screen on a development machine, with whatever else ran on it. It is a display choice for a
 > demo's preview on this machine (demo mode §4.4). It says nothing about a rig, about the display

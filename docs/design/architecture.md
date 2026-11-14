@@ -834,7 +834,7 @@ them yet: the display process (engine build E) and the screen log (engine build 
 mode (2026-11-14) a demo's world resolves its screen for the page (`pointer.Drawing`), and
 `wl_xcon/demoscreen.py` draws it with the exact drawer for `wlx serve`, never in the rig service's
 process: at a preview of the panel (`viewport.preview`, its size chosen by
-`tools/measure_demo_drawing.py`'s measurement, `docs/measurements/dev-machine/2026-11-14-demo-drawing.md`),
+`tools/measure_demo_drawing.py`'s measurement, `docs/measurements/dev-machine/2026-11-14-demo-drawing-preview.md`),
 through the sRGB standard, as a PNG in an SVG labeled as demo mode §4.4's table says, on a thread of its
 own that draws the newest screen next. It draws the exact drawer's image bit for bit, faster
 (`demoscreen.draw`): the background once, then each group of stimuli by `exact.draw` over its own

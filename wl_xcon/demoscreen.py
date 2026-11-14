@@ -62,13 +62,14 @@ from wl_xcon.screen import Screen
 GAZE_EVERY_MS = 100
 
 #: **The preview's width in pixels, the whole panel's, and its supersample**: of the pairs
-#: `tools/measure_demo_drawing.py` drew (480, 640 and 960 px; 2 and 4), the largest whose median
-#: `exact.draw` time was at most `GAZE_EVERY_MS` -- and where none was, the fastest, which is what
-#: the development machine measured on 2026-11-14: a median of 495 ms at 480 px and 2
-#: (`docs/measurements/dev-machine/2026-11-14-demo-drawing.md`). A display choice for that machine,
-#: never a claim about a rig; `tests/test_measure_demo_drawing.py` holds the two to the committed
-#: results.
-PREVIEW_WIDTH_PX = 480
+#: `tools/measure_demo_drawing.py --drawer preview` drew (480, 640 and 960 px; 2 and 4), the largest
+#: whose median image -- `draw` with its background drawn too, its levels and its PNG -- took at
+#: most `GAZE_EVERY_MS` on the development machine on 2026-11-14: 640 px at 2, a median of 54 ms
+#: (`docs/measurements/dev-machine/2026-11-14-demo-drawing-preview.md`). The exact drawer alone took
+#: a median of 495 ms at 480 px and 2, and no pair fit (`2026-11-14-demo-drawing.md`). A display
+#: choice for that machine, never a claim about a rig; `tests/test_measure_demo_drawing.py` holds
+#: the two to the committed results.
+PREVIEW_WIDTH_PX = 640
 SUPERSAMPLE = 2
 
 #: The points a window's or an outline's true-angle circle is drawn with: a 64-gon, whose sides

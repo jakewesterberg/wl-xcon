@@ -21,8 +21,8 @@ viewport is `viewport.viewports(rig, geometry, pixels=(width, height))`, its hei
 times the panel's height over its width, rounded. Each pair is drawn once untimed, then
 `--repeats` times, the pairs taken in turn within each round so that a change in the host's load
 falls on all of them alike. Each drawing is `exact.draw` alone, timed by `time.perf_counter`, and
-then `exact.output_levels` through the sRGB standard, timed apart. The collector is left as
-`wlx serve`'s thread has it, on. The host's one-minute load average is read before and after, and
+then `exact.output_levels` through the sRGB standard and `demoscreen.png`, each timed apart. The
+collector is left as `wlx serve`'s thread has it, on. The host's one-minute load average is read before and after, and
 at the start of each round.
 
 **What it chooses.** `demoscreen.PREVIEW_WIDTH_PX` and `demoscreen.SUPERSAMPLE` are the largest pair
@@ -31,12 +31,21 @@ at the start of each round.
 call). **Where no pair is, the fastest pair** (the builder's call, demo mode's Task 7 report), and
 `within_bound` says so.
 
+**`--drawer preview` times the preview's own drawing**, `demoscreen.draw`: the exact drawer's image
+bit for bit, the background drawn once and each stimulus over its own box (the follow-up, XC-507).
+Its kept background is dropped before each drawing, so every time includes drawing it, as on a
+screen whose background is new. Each pair's drawing is held to `exact.draw`'s, bit for bit, before
+any is timed (`identical_to_exact`). With the drawing no longer most of the time, the pair is chosen
+by the whole image, the drawing, `exact.output_levels` and `demoscreen.png` together (`chosen_by`).
+
 **What this is not.** A development machine's drawing time with whatever else ran on it, for one
 screen. It is a display choice for a demo's preview on this machine, never a claim about a rig, a
 frame time or the display process (engine build E), and it says nothing about a machine or a
 screen it was not run on.
 
     python tools/measure_demo_drawing.py --out docs/measurements/dev-machine/2026-11-14-demo-drawing
+    python tools/measure_demo_drawing.py --drawer preview \\
+        --out docs/measurements/dev-machine/2026-11-14-demo-drawing-preview
 """
 
 from __future__ import annotations
@@ -129,51 +138,85 @@ def _spread(times_ms: list[float]) -> dict:
             "min": float(values.min()), "max": float(values.max())}
 
 
+def _preview_cold(drawn_screen, vp, *, supersample):
+    """`demoscreen.draw` with nothing kept from a drawing before: its background drawn too, as on
+    the first screen of a background."""
+    demoscreen._background.cache_clear()
+    return demoscreen.draw(drawn_screen, vp, supersample=supersample)
+
+
+#: **What `--drawer` times**: the exact drawer itself, or the preview's own drawing,
+#: `demoscreen.draw`, its kept background dropped before each drawing (`_preview_cold`).
+DRAWERS = {"exact": exact.draw, "preview": _preview_cold}
+
+
 def measure(drawn_screen, rig, geometry, *, widths=WIDTHS, supersamples=SUPERSAMPLES,
-            repeats=REPEATS, clock=time.perf_counter) -> dict:
-    """Each pair drawn once untimed, then `repeats` rounds of every pair in turn: `exact.draw`'s
-    time and `exact.output_levels`' apart, in milliseconds, and the load at each round's start."""
+            repeats=REPEATS, clock=time.perf_counter, draw=None) -> dict:
+    """Each pair drawn once untimed, then `repeats` rounds of every pair in turn: `draw`'s time,
+    `exact.output_levels`' and `demoscreen.png`'s apart, and the three together (the image),
+    in milliseconds, and the load at each round's start. `draw` is `exact.draw` unless another is
+    given, whose untimed drawing of each pair is then held to `exact.draw`'s, bit for bit
+    (`identical_to_exact`)."""
+    reference = exact.draw
+    checking = draw is not None and draw is not reference
+    draw = draw or reference
     pairs = [(width, n) for width in widths for n in supersamples]
     vps = {width: preview_viewport(rig, geometry, width) for width in widths}
     draws = {pair: [] for pair in pairs}
     levels = {pair: [] for pair in pairs}
+    pngs = {pair: [] for pair in pairs}
+    identical = {}
     for width, n in pairs:
-        exact.output_levels(exact.draw(drawn_screen, vps[width], supersample=n), SRGB)
+        image = draw(drawn_screen, vps[width], supersample=n)
+        demoscreen.png(exact.output_levels(image, SRGB))
+        if checking:
+            identical[(width, n)] = bool(np.array_equal(
+                image, reference(drawn_screen, vps[width], supersample=n)))
     loads = []
     for _ in range(repeats):
         loads.append(os.getloadavg()[0])
         for width, n in pairs:
             start = clock()
-            image = exact.draw(drawn_screen, vps[width], supersample=n)
+            image = draw(drawn_screen, vps[width], supersample=n)
             drawn_at = clock()
-            exact.output_levels(image, SRGB)
+            out = exact.output_levels(image, SRGB)
+            levelled = clock()
+            demoscreen.png(out)
             done = clock()
             draws[(width, n)].append((drawn_at - start) * 1000.0)
-            levels[(width, n)].append((done - drawn_at) * 1000.0)
+            levels[(width, n)].append((levelled - drawn_at) * 1000.0)
+            pngs[(width, n)].append((done - levelled) * 1000.0)
     runs = []
     for width, n in pairs:
         vp = vps[width]
-        runs.append({
+        pair = (width, n)
+        images = [a + b + c for a, b, c in zip(draws[pair], levels[pair], pngs[pair])]
+        run = {
             "width_px": vp.width_px, "height_px": vp.height_px, "supersample": n,
             "samples": vp.width_px * vp.height_px * n * n,
-            "draw_ms": draws[(width, n)], "levels_ms": levels[(width, n)],
-            "draw": _spread(draws[(width, n)]), "levels": _spread(levels[(width, n)]),
-        })
+            "draw_ms": draws[pair], "levels_ms": levels[pair], "png_ms": pngs[pair],
+            "draw": _spread(draws[pair]), "levels": _spread(levels[pair]),
+            "png": _spread(pngs[pair]), "image": _spread(images),
+        }
+        if pair in identical:
+            run["identical_to_exact"] = identical[pair]
+        runs.append(run)
     return {"repeats": repeats, "loads_each_round": loads, "runs": runs}
 
 
-def choose(runs: list[dict], bound_ms: float) -> dict:
+def choose(runs: list[dict], bound_ms: float, by: str = "draw") -> dict:
     """**The preview's pair**: the largest -- the widest, then the finer supersample -- whose
-    median `exact.draw` time is at most `bound_ms`; where none is, the fastest, by its median.
-    `within_bound` says which."""
-    passing = [run for run in runs if run["draw"]["median"] <= bound_ms]
+    median time `by` (the drawing, `"draw"`, or the whole image, drawing, levels and PNG,
+    `"image"`) is at most `bound_ms`; where none is, the fastest, by its median. `within_bound`
+    says which."""
+    passing = [run for run in runs if run[by]["median"] <= bound_ms]
     if passing:
         best = max(passing, key=lambda run: (run["width_px"], run["supersample"]))
     else:
-        best = min(runs, key=lambda run: (run["draw"]["median"], run["width_px"],
+        best = min(runs, key=lambda run: (run[by]["median"], run["width_px"],
                                           run["supersample"]))
     return {"width_px": best["width_px"], "supersample": best["supersample"],
-            "median_ms": best["draw"]["median"], "within_bound": bool(passing)}
+            "median_ms": best[by]["median"], "within_bound": bool(passing)}
 
 
 def _named(path: Path) -> str:
@@ -200,15 +243,17 @@ def table(found: dict) -> str:
     """The runs as a Markdown table, for the measurement's document."""
     rows = [
         "| width × height (px) | supersample | samples | draw median (ms) | draw p95 (ms) "
-        "| draw min / max (ms) | levels median (ms) |",
-        "|---|---|---|---|---|---|---|",
+        "| draw min / max (ms) | levels median (ms) | PNG median (ms) | image median (ms) "
+        "| image p95 (ms) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for run in found["runs"]:
-        draw, lv = run["draw"], run["levels"]
+        draw, lv, pn, im = run["draw"], run["levels"], run["png"], run["image"]
         rows.append(
             f"| {run['width_px']} × {run['height_px']} | {run['supersample']} | "
             f"{run['samples']:,} | {draw['median']:.1f} | {draw['p95']:.1f} | "
-            f"{draw['min']:.1f} / {draw['max']:.1f} | {lv['median']:.1f} |")
+            f"{draw['min']:.1f} / {draw['max']:.1f} | {lv['median']:.1f} | {pn['median']:.1f} | "
+            f"{im['median']:.1f} | {im['p95']:.1f} |")
     return "\n".join(rows) + "\n"
 
 
@@ -220,6 +265,9 @@ def main(argv=None) -> int:
     parser.add_argument("--tasks", type=Path, default=None,
                         help="a wl-xtasks checkout (default: the link here, then beside it)")
     parser.add_argument("--repeats", type=int, default=REPEATS)
+    parser.add_argument("--drawer", choices=sorted(DRAWERS), default="exact",
+                        help="exact: exact.draw; preview: demoscreen.draw, its background drawn "
+                             "each time, held to exact.draw bit for bit (default: exact)")
     args = parser.parse_args(argv)
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
@@ -237,7 +285,8 @@ def main(argv=None) -> int:
 
     started = datetime.now().astimezone()
     load_before = os.getloadavg()
-    found = measure(drawn_screen, rig, geometry, repeats=args.repeats)
+    found = measure(drawn_screen, rig, geometry, repeats=args.repeats,
+                    draw=DRAWERS[args.drawer])
     load_after = os.getloadavg()
     finished = datetime.now().astimezone()
 
@@ -273,9 +322,13 @@ def main(argv=None) -> int:
         "calibration": "photometry.SRGB",
         "bound_ms": demoscreen.GAZE_EVERY_MS,
         "bound_from": "wl_xcon.demoscreen.GAZE_EVERY_MS",
+        "drawer": args.drawer,
         **found,
     }
-    results["chosen"] = choose(found["runs"], demoscreen.GAZE_EVERY_MS)
+    # The exact drawer's own time chose the first preview; the preview's drawing is now a small part
+    # of its image, so the whole image -- drawing, levels and PNG -- is what must fit.
+    results["chosen_by"] = "draw" if args.drawer == "exact" else "image"
+    results["chosen"] = choose(found["runs"], demoscreen.GAZE_EVERY_MS, results["chosen_by"])
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
