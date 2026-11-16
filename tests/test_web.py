@@ -4109,7 +4109,8 @@ def test_the_key_list_names_each_input_b_and_the_limits():
         assert b < escape, "Escape's tracker loss sits beside B"
         assert "A number key pressed while B is held is not seen" in document
         assert (f"With no page steering, the eye reads as tracker loss after {pointer.LIVE_S:g} "
-                f"s, so an Escape mid-trial ends that trial as tracker lost") in document
+                f"s, so an Escape mid-trial ends that trial as tracker lost, and the run waits "
+                f"before the next until a page points again") in document
         assert html.escape(DEMO_KEYS_WHERE) in document
         for limit in DEMO_LIMITS:
             assert f"<li>{html.escape(limit)}</li>" in document

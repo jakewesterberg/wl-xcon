@@ -160,6 +160,37 @@ def _steered(service) -> None:
                                            held=0, presses=(0,) * pointer.KEYS))
 
 
+class _Page(Simulated):
+    """**A page steering a demo**, on the in-process link: from `steer()` on, a report a frame at
+    `REST`'s place in `tests/_demo.py`, `(0, -5)`, outside the fixation window, numbered from 1
+    (`sent`), `left` of them and then none, as a page that lets go of the eye (Escape), or until
+    the test ends. A run waits at each trial's boundary while no page steers (`pointer.Worlds`;
+    the whole-build review's I3), so a demo run of more than one trial needs one."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.steering, self.left, self.sent, self._given = False, None, 0, False
+
+    def steer(self, reports=None) -> None:
+        """A page steering from now: a report a frame, `reports` of them, or with none, on."""
+        self.steering, self.left = True, reports
+
+    def gaze_into(self, buffer):
+        # One report a drain while steering: the report, then nothing, so each frame takes one.
+        if self.steering and not self._given:
+            self._given = True
+            self.sent += 1
+            message = pointer.pack(self.sent, 0.0, -5.0, over=True, b=False, button=False,
+                                   held=0, presses=(0,) * pointer.KEYS)
+            buffer[:len(message)] = message
+            if self.left is not None:
+                self.left -= 1
+                self.steering = self.left > 0
+            return len(message)
+        self._given = False
+        return super().gaze_into(buffer)
+
+
 def _refused(frame) -> list[str]:
     return [refusal.why for refusal in frame.refusals]
 
@@ -531,13 +562,12 @@ def test_a_demo_paces_to_the_wall_clock_and_a_live_session_runs_flat_out(tmp_pat
 
     monkeypatch.setattr(pointer, "Source", _Source)
     pace = _Pace()
-    service = _rig_service(tmp_path, pace=pace)
+    service = _rig_service(tmp_path, pace=pace, link=_Page())
     service._seed = iter((41, 42, 43)).__next__
     _step(service, _demo())
-    service.link.gazes.append(pointer.pack(1, 0.0, 0.0, over=True, b=False, button=False,
-                                           held=0, presses=(0,) * pointer.KEYS))
+    service.link.steer()
     _step(service, _start(trials=2))
-    assert seeds == [41] and service.link.gazes == [], "the page's report was read"
+    assert seeds == [41] and service.link.sent > 100, "the page's reports were read"
     assert len(pace.slept) > 100
     assert all(s == pytest.approx(service_module.FRAME_PERIOD, abs=1e-9) for s in pace.slept)
     drawn = [f for f in service.link.published if isinstance(f, Drawn)]
@@ -613,15 +643,15 @@ def test_a_demo_task_naming_ten_inputs_fails_its_preflight_naming_them(tmp_path)
 # --- a run's first trial waits for its page's pointer (Task 10) ---------------------------------
 
 
-class _Unsteered(Simulated):
+class _Unsteered(_Page):
     """**A page that steers late**: once `armed`, each wait asked of the link (`idle`, which a run
     waiting for its pointer calls once a pass, as `Service.step` calls it once a housekeeping pass)
-    counted, and at the `at`-th, `then(self)` -- a report sent, a command queued, the wall moved on
-    -- with how much had been published by then kept in `before`. **Two backstops**: past
-    `BACKSTOP` passes (each a `drain`) a Stop is queued, so a run that never stopped waiting ends;
-    and past `BACKSTOP * 5` waits one raises, the run's fault, for a wait that never comes back to
-    the boundary: either way its test fails on what it finds rather than hanging. Never waits: a
-    simulated session's clocks are the test's."""
+    counted, and at the `at`-th, `then(self)` -- steering begun (`_Page.steer`), a command queued,
+    the wall moved on -- with how much had been published by then kept in `before`. **Two
+    backstops**: past `BACKSTOP` passes (each a `drain`) a Stop is queued, so a run that never
+    stopped waiting ends; and past `BACKSTOP * 5` waits one raises, the run's fault, for a wait
+    that never comes back to the boundary: either way its test fails on what it finds rather than
+    hanging. Never waits: a simulated session's clocks are the test's."""
 
     BACKSTOP = 40
 
@@ -676,8 +706,8 @@ def test_a_demo_runs_first_trial_waits_for_its_pages_pointer_with_the_field_draw
     nobody steers ends a trial as tracker lost, so **a demo run's first trial waits at the boundary
     until a pointer report arrives**: the field published blank for the page to point at, once a
     pass, the feed saying why once, and no trial drawn, opened or scored meanwhile. Then the run
-    plays, and its later trials never wait: the second, with no report since, runs at once."""
-    service, link = _unsteered(tmp_path, lambda service, link: _steered(service))
+    plays, and while the page steers no later trial waits: the second runs at once."""
+    service, link = _unsteered(tmp_path, lambda service, link: link.steer())
     published = link.published
     drawn = [(at, f) for at, f in enumerate(published) if isinstance(f, Drawn)]
     fields = [(at, f) for at, f in drawn if f.frame == 0]
@@ -698,7 +728,7 @@ def test_a_mark_while_a_demo_run_waits_for_its_pointer_is_stamped_there(tmp_path
     stamped there, between trials before the first, as the paused loop stamps one."""
     def then(service, link):
         link.marks.append(7)
-        _steered(service)
+        link.steer()
 
     service, link = _unsteered(tmp_path, then)
     stamped = [c.said for c in link.published[-1].controls if c.kind == "mark"]
@@ -729,6 +759,61 @@ def test_while_a_demo_run_waits_for_its_pointer_every_boundary_rule_holds(tmp_pa
     if case == "end":
         assert service.session is None
         assert _kinds(service.demo_root, DEMO)[-2:] == ["returned", "session ended"]
+
+
+def test_once_its_page_lets_go_a_demo_run_waits_before_its_next_trial_until_it_steers_again(
+        tmp_path):
+    """**The whole-build review's I3**: a page points (the first trial waits for it), steers the
+    run's first trial and then lets go of the eye (Escape, a tab closed or hidden): that trial ends
+    as tracker lost, as the rig's eye rules end it, and **the next trial waits at the boundary**,
+    as the first did -- the field published for the page, the feed saying why again, no trial
+    drawn, opened or scored -- until a report arrives; then the run plays on. Before it, every
+    later trial ended as tracker lost, about fifteen a second, and a 1,000-trial run played itself
+    out in about a minute."""
+    link = _Unsteered(4)
+    service = _rig_service(tmp_path, link=link)
+    steps = iter([lambda: link.steer(200), link.steer])
+    played, before = [], []
+
+    def then(link):
+        played.append(len(_trial_rows(service)))
+        before.append(len(link.published))
+        next(steps)()
+        link.at = link.waits + 3
+
+    link.then = then
+    _step(service, _demo())
+    link.armed = True
+    _step(service, _start(trials=3))
+
+    outcomes = [json.loads(row)["outcome"] for row in _trial_rows(service)]
+    assert outcomes == ["tracker_lost", "no_fixation", "no_fixation"], outcomes
+    assert played == [0, 1], "no trial while it waited, before the first or after the Escape"
+    published = link.published
+    waited = [at for at, f in enumerate(published)
+              if isinstance(f, Drawn) and f.trial == 1 and f.frame == 0]
+    assert len(waited) == 3 and all(before[0] < at < before[1] for at in waited), waited
+    assert not [f for f in published[:before[1]]
+                if isinstance(f, Drawn) and f.trial == 1 and f.frame >= 1], "trial 2 drew early"
+    said = [c.said for c in published[-1].controls if c.kind == "demo"]
+    assert said == [taskd_module.POINTER_AWAITED] * 2, "said as each wait began"
+    (ended,) = _run_ends(service)
+    assert link.drains < link.BACKSTOP and ended["stop_kind"] == "completed", ended
+
+
+def test_a_demo_runs_last_trial_ends_the_run_without_waiting_for_a_pointer(tmp_path):
+    """I3's wait is the boundary's last question, just before a trial is drawn: a run whose last
+    trial has played ends then, completed, though its page has let go, never waiting for a page to
+    point at a trial it will not play (the backstop's Stop would end it as the operator's)."""
+    link = _Unsteered(10**6)
+    service = _rig_service(tmp_path, link=link)
+    _step(service, _demo())
+    link.armed = True
+    link.steer(200)
+    _step(service, _start(trials=1))
+    assert [json.loads(row)["outcome"] for row in _trial_rows(service)] == ["tracker_lost"]
+    (ended,) = _run_ends(service)
+    assert ended["stop_kind"] == "completed" and link.waits == 1, (ended, link.waits)
 
 
 # --- the idle frame ------------------------------------------------------------------------------

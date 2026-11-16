@@ -34,7 +34,8 @@ release between two frames is seen once.
   `EASE_SLACK_S` more, at most `LIVE_S`, the arrival frame its first (planner's call; the slack
   since the whole-build review's I2). So a hand's path reaches the detector as motion, a glide
   whose reports come a little irregularly is one saccade, and a one-report flick is still a
-  saccade; reports one a frame are taken exactly, with no slack.
+  saccade; reports one a frame are taken exactly, with no slack. A first report, and the first
+  after the one in hand went stale, is taken at once, where the pointer is.
 - **At a trial's first frame** everything waiting but the newest report is discarded and the key
   counts are rebased, so a press in the gap between trials never fires the next trial's `Pressed`
   (`new_trial`).
@@ -59,10 +60,11 @@ outlined saying why, the setup's viewports, housings and field edge, and the key
 publishes one on the trial's first frame, on the first frame after its screen changed, and at least
 every `REDRAWN_EVERY_S`; and a blank one when the trial has ended (`Pointing.ended`, which the
 session calls at the boundary). A drawing and its publisher are given together or not at all.
-**A run's first trial waits for its page's pointer** (`Worlds.waiting`; demo mode's Task 10): until
-a report arrives the trial loop holds at the boundary before it, the field published blank
-(`Drawing.field`), since before the first screen a page has nothing to point at and an eye nobody
-steers is tracker loss.
+**A demo run's trial waits for its page's pointer** (`Worlds.waiting`; demo mode's Task 10, and
+since the whole-build review's I3 every trial, not only the first): while no page steers -- before
+the first report, and once the reports stop (Escape, a tab closed or hidden) -- the trial loop
+holds at the boundary before the next trial, the field published blank (`Drawing.field`), since
+before the first screen a page has nothing to point at, and an eye nobody steers is tracker loss.
 
 **Numbers fixed here, each with its reason** (the demo plan's Global Constraints; the PI's
 "everything adjustable in the console", 2026-11-07, is about a task's numbers, which stay settings):
@@ -276,15 +278,18 @@ class Source:
             pass
         self._rebase = True
 
-    def heard(self) -> bool:
-        """**Whether a page has sent a report this source can take**: everything waiting read, as
-        between trials (`new_trial`), the newest kept for the next trial's first frame; true once
-        one is kept or in hand, a malformed one never. Between trials only, never in a frame: a
-        run's first trial waits on it (`Worlds.waiting`; demo mode's Task 10)."""
+    def steered(self) -> bool:
+        """**Whether a page steers the eye now**: everything waiting read, as between trials
+        (`new_trial`), the newest kept for the next trial's first frame; true while one is kept,
+        or while the report in hand is current (`LIVE_S`) on the source's own clock, which stands
+        at the last trial's last frame between trials; a malformed one never counts. So false
+        before any report, and once a trial has outlived the last one. Between trials only, never
+        in a frame: each trial waits on it (`Worlds.waiting`; demo mode's Task 10, and the
+        whole-build review's I3)."""
         floor = self._seq if self._live(self._last) else -1
         while self._drain(floor) == DRAIN:
             pass
-        return self._pending or self._current
+        return self._pending or self._live(self._last)
 
     # --- Each frame ---------------------------------------------------------------------------
 
@@ -386,8 +391,8 @@ class Source:
         pointer is eased from where it is drawn now to the report's position, over the time since
         the previous report arrived, and `EASE_SLACK_S` more when that was over a frame, at most
         `LIVE_S`, starting a frame before `now` so that the arrival frame is the move's first (the
-        module docstring); a first report is taken at once, and one where the pointer already goes
-        leaves the move in flight as it was.
+        module docstring); a first report is taken at once, as is the first after the one in hand
+        went stale, and one where the pointer already goes leaves the move in flight as it was.
         Off the drawing, it is at `AWAY_DEG` at once. Its keys and button are taken as they are;
         the edges are `_edges`'."""
         fields = self._kept
@@ -398,13 +403,21 @@ class Source:
             self._x = self._to_x = _AWAY_X
             self._y = self._to_y = _AWAY_Y
             self._landed = True
-        elif self._current and x == self._to_x and y == self._to_y:
+        elif not self._live(now):
+            # **A first report, or the first after the one in hand went stale** (`LIVE_S`): taken
+            # at once, as a tracker finds the eye where it is, never eased from where it was lost
+            # -- once a page lets go and points again, the next trial's eye starts where it now
+            # points (the whole-build review's I3).
+            self._x = self._to_x = x
+            self._y = self._to_y = y
+            self._landed = True
+        elif x == self._to_x and y == self._to_y:
             # **A report where the pointer already goes, a still pointer's**: the move in flight
             # goes on as it was. Restarted from rest, it would stop and start again, which the
             # detector reads as a second saccade; with the slack below, a still pointer's next
             # report often comes before its move has landed (the whole-build review's I2).
             pass
-        elif self._current:
+        else:
             self._ease(now)
             span = now - self._arrived
             if span > 1.5 * self._step:
@@ -423,10 +436,6 @@ class Source:
             self._span = span
             self._start = now - self._step
             self._landed = False
-        else:
-            self._x = self._to_x = x
-            self._y = self._to_y = y
-            self._landed = True
         self._seq = self._best_seq
         self._flags = flags
         self._arrived = now
@@ -920,12 +929,14 @@ class Worlds:
     through `publish` drawn by `drawing`, given both. One source, one pace and one drawing for the
     run.
 
-    **And whether the run's first trial waits for its page's pointer** (`waiting`; demo mode's Task
-    10). Before a run's first screen there is nothing drawn to point at, so no page can steer, and
-    a trial whose eye nobody steers ends as tracker lost: a run's first trial would be scored before
-    anyone could play it. So the trial loop asks `waiting` at the boundary before the first trial
-    (`taskd.Session.run`), and while no report has arrived holds there, as a pause does, the field
-    published for a page to point at."""
+    **And whether each trial waits for its page's pointer** (`waiting`; demo mode's Task 10, every
+    trial since the whole-build review's I3). Before a run's first screen there is nothing drawn
+    to point at, so no page can steer, and a trial whose eye nobody steers ends as tracker lost: a
+    run's first trial would be scored before anyone could play it, and once a person lets go of
+    the eye (Escape, a tab closed or hidden), every trial after would, about fifteen a second. So
+    the trial loop asks `waiting` at the boundary before each trial (`taskd.Session.run`), and
+    while no page steers holds there, as a pause does, the field published for a page to point
+    at."""
 
     def __init__(self, source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
                  publish=None) -> None:
@@ -934,24 +945,22 @@ class Worlds:
         self.pace = pace
         self.drawing = drawing
         self.publish = publish
-        #: How many trials' worlds have been made: the run's first trial has begun once one has.
-        self.made = 0
 
     def __call__(self, trial: Trial, values: dict, index: int) -> Pointing:
         self.source.new_trial()
-        self.made += 1
         return Pointing(self.source, trial, self.pace.frame_period, values, pace=self.pace,
                         keys=inputs(trial), index=index, drawing=self.drawing,
                         publish=self.publish)
 
     def waiting(self, index: int) -> bool:
-        """**Whether trial `index`, the run's first, waits for a page's pointer**: true until a
-        report has arrived (`Source.heard`), and then never again this run; while it waits, the
-        field is published (`Drawing.field`), given a drawing, so a page has something to point at.
-        Asked between trials, once a housekeeping pass while it waits. **Only the run's first
-        trial waits**: a later one nobody steers ends as tracker lost under the task's
-        `tracker_lost`, as the rig's own eye rules end it (§3.3)."""
-        if self.made or self.source.heard():
+        """**Whether trial `index` waits for a page's pointer**: true while no page steers the eye
+        (`Source.steered`) -- before any report, and once the reports have stopped and the last is
+        past `LIVE_S`; while it waits, the field is published (`Drawing.field`), given a drawing, so
+        a page has something to point at. Asked between trials, once a housekeeping pass while it
+        waits. **The trial under way when the reports stop still ends as tracker lost**, under the
+        task's `tracker_lost`, as the rig's own eye rules end it (§3.3); the next one waits (the
+        whole-build review's I3)."""
+        if self.source.steered():
             return False
         if self.publish is not None:
             self.publish(self.drawing.field(index))
@@ -961,6 +970,6 @@ class Worlds:
 def worlds(source: Source, *, pace: Pace, drawing: "Drawing | None" = None,
            publish=None) -> Worlds:
     """**A demo run's worlds** (`Worlds`): `(trial, values, index) -> Pointing`, as
-    `taskd.Session.world` takes them, and `waiting`, which the trial loop asks before the run's
-    first trial."""
+    `taskd.Session.world` takes them, and `waiting`, which the trial loop asks before each
+    trial."""
     return Worlds(source, pace=pace, drawing=drawing, publish=publish)

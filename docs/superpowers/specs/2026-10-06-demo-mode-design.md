@@ -389,7 +389,11 @@ wlx demo TASK [--tasks DIR] [--rig PATH] [--allocation PATH] [--view direct|ster
    published, and the out-of-cage limit and a scheduled stop checked; nothing is drawn from the plan and no trial's
    time counted until a report arrives. This holds for every demo run, from either door, and only for its first
    trial: a later trial nobody steers ends as tracker lost (§7). `wlx demo` prints that the run begins when the
-   person points at the demo screen.
+   person points at the demo screen. *(2026-11-16, the build's review, I3: **every** trial waits so, not only the
+   first. Once the reports stop -- Escape, a tab closed or hidden -- the trial under way ends as tracker lost, and
+   the next waits at the boundary, as the first does, until a page points again (`pointer.Source.steered`).
+   Before it, a run nobody steered played itself out as tracker-lost trials, about fifteen a second, a 1,000-trial
+   run in about a minute.)*
 5. **It opens the default browser** on the full-window demo screen (Safari on the PI's Mac). The person is at the
    computer, so every control works: pause, stop, reward, a change mid-run, the trainer's panel, another run.
    `--no-browser` prints the address instead.
@@ -450,9 +454,10 @@ it), so they draw as §4.4 says until a run sets them.
 | `wlx taskd --demo` with `--subjects` or `--root`, or `DIR` existing | refused at start, nothing made |
 | A fourth link endpoint on a rig service without `--demo` | refused at start *(2026-11-14, as built (§15): taken; such a rig service opens a demo only with a `--demo-root` too)* |
 | `wlx demo` on a computer where a rig service runs | refused before anything starts |
-| A demo run's first trial, before any pointer report has arrived *(2026-11-14, the plan's Task 10)* | it waits at the boundary, the empty field published, commands drained, the out-of-cage limit and a scheduled stop checked (§5 item 4) |
+| A demo run's first trial, before any pointer report has arrived *(2026-11-14, the plan's Task 10; every trial since 2026-11-16, below)* | it waits at the boundary, the empty field published, commands drained, the out-of-cage limit and a scheduled stop checked (§5 item 4) |
 | The page closed, its network gone, or B held, mid-trial | tracker loss after `LIVE_S`, under the task's `tracker_lost` |
 | No page steering during a later trial (after Escape, or before the pointer reaches the drawing) *(2026-11-14)* | the same: tracker loss after `LIVE_S` |
+| No page steering at a later trial's boundary, its reports stopped *(2026-11-16, the build's review, I3)* | the next trial waits there as the first does, the field published, until a page points again; only the trial under way when the reports stopped ends as tracker lost |
 | The pointer off the drawing | gaze off the screen: no fixation, or a fixation break |
 | A report older than one already forwarded | dropped by `wlx serve` |
 | A malformed or non-finite gaze message | counted and dropped (§3.8); the frame goes on |

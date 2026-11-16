@@ -732,14 +732,15 @@ def test_a_drawing_and_a_publisher_go_together():
     world.ended()
 
 
-def test_a_runs_first_trial_waits_for_a_report_showing_the_field_and_no_later_one_waits():
+def test_a_trial_waits_while_no_page_steers_showing_the_field():
     """Demo mode's Task 10: before a run's first screen a page has nothing to point at, so
     `Worlds.waiting` says the first trial waits while no report has arrived -- a malformed one is
     none -- publishing the field each time it is asked: blank, frame 0, the trial's index, no
     windows and no keys, the setup's viewports and housings. Once a report is heard it waits no
-    longer, and the report is kept for the trial's first frame (`Source.heard`); once a trial's
-    world is made, no later trial waits, a report or none. Without a drawing nothing is
-    published."""
+    longer, and the report is kept for the trial's first frame (`Source.steered`). **And so does
+    every later trial** (the whole-build review's I3): once the reports stop and a trial outlives
+    the last by `LIVE_S`, the next waits, until a report arrives; one still current at the
+    boundary waits not at all. Without a drawing nothing is published."""
     clock, page, source, pace = _rig()
     link = Simulated()
     drawing = _drawing(session_id="demo-2026-11-14_1012")
@@ -764,25 +765,41 @@ def test_a_runs_first_trial_waits_for_a_report_showing_the_field_and_no_later_on
     world.display({}, 1)
     assert world.gaze_cyclopean(1) == pytest.approx((2.0, 1.0), abs=0.2), "the report, kept"
 
-    _, _, again, paced = _rig()
-    later = pointer.worlds(again, pace=paced)
-    later(FIX, {}, 0)
-    assert later.waiting(1) is False, "only the run's first trial waits"
+    # The page lets go (Escape): the trial outlives the last report, and the next trial waits.
+    _drive(world, round(pointer.LIVE_S / FRAME) + 2)
+    assert made.waiting(1) is True and made.waiting(1) is True, "nobody steers: it waits"
+    fields = [d for d in link.published if isinstance(d, Drawn) and d.frame == 0]
+    assert [(d.trial, d.screen, d.keys) for d in fields[3:]] == [(1, None, ())] * 2
+    page.pointer(clock.t, -1.0, 0.5)
+    assert made.waiting(1) is False, "a page points again"
+    later = made(FIX, {}, 1)
+    _drive(later, 4)
+    assert later.gaze_cyclopean(4) == pytest.approx((-1.0, 0.5), abs=0.2), "the report, kept"
+    assert made.waiting(2) is False, "a report still current at the boundary: no wait"
     _, _, alone, paced = _rig()
     assert pointer.worlds(alone, pace=paced).waiting(0) is True, "without a drawing too"
 
 
-def test_a_source_has_heard_a_report_kept_or_in_hand():
-    """`Source.heard`: false with nothing waiting, or only a malformed report; true once a report
-    is kept for the next trial's first frame, and while one is in hand."""
+def test_a_source_is_steered_while_a_report_is_kept_or_current_in_hand():
+    """`Source.steered`: false with nothing waiting, or only a malformed report; true once a report
+    is kept for the next trial's first frame, and while the one in hand is current; **false again
+    once a trial has outlived it by `LIVE_S`** (the whole-build review's I3), true again with the
+    next. The source's clock stands still between trials, so a report current at a trial's last
+    frame is current at its boundary."""
     clock, page, source, pace = _rig()
-    assert source.heard() is False
+    assert source.steered() is False
     page.send(clock.t, report(1, float("nan"), 0.0))
-    assert source.heard() is False and source.malformed == 1
+    assert source.steered() is False and source.malformed == 1
     page.pointer(clock.t, 0.0, 0.0)
-    assert source.heard() is True
-    _world(FIX, source, pace).display({}, 1)
-    assert source.heard() is True, "a report in hand"
+    assert source.steered() is True
+    world = _world(FIX, source, pace)
+    _drive(world, round(pointer.LIVE_S / FRAME) - 2)
+    assert source.steered() is True, "a report in hand, still current"
+    _drive(world, round(pointer.LIVE_S / FRAME) + 2)
+    assert source.steered() is False, "the trial outlived it"
+    assert source.steered() is False, "between trials the source's clock stands still"
+    page.pointer(clock.t, 1.0, 0.0)
+    assert source.steered() is True
 
 
 #: **A trial whose screen changes once**: the dot from its first frame; a transition that changes

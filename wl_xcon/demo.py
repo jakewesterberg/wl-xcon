@@ -590,7 +590,8 @@ def _run(args) -> int:
             address = ADDRESS.format(port=port)
             print(f"wlx demo: the demo screen is at {address}", flush=True)
             print("wlx demo: the run's first trial waits for the pointer: point at the demo "
-                  "screen to begin it. Ctrl-C here ends the demo", flush=True)
+                  "screen to begin it; whenever nobody points (after Escape) the run waits again. "
+                  "Ctrl-C here ends the demo", flush=True)
             if not args.no_browser:
                 webbrowser.open(address)
             demo.watch()

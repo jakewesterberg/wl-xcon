@@ -38,8 +38,8 @@ from then). **Hardware verified: none.**
   the PI's welfare review of its two `Service._open` changes as built (two numbered items with
   `tools/welfare_diff.py 1d77392 HEAD`: `service.Service._open` `DIFFERS`, naming his approval of 2026-11-07, every
   other item `SAME`); his try-out in Safari, `wlx demo wl-xtasks/tasks/popout_search.py --set response_deadline=3.0`,
-  told first that the run begins when he first points at the demo screen and that a later trial nobody steers (after
-  Escape) ends as tracker lost; and his merge, by his yes by name and a clean CI.
+  told first that the run begins when he first points at the demo screen, and that after Escape the trial under way
+  ends as tracker lost and the run waits until he points again; and his merge, by his yes by name and a clean CI.
 
 ## What exists
 - **Tasks**: the task object and its load check (`task.py`, `check.py`), engine builds A1-A2 (stimuli, color), B

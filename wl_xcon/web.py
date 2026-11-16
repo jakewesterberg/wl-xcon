@@ -212,7 +212,8 @@ DEMO_LIMITS = (
 
 #: The key list's rows that stand whatever the task (demo mode §3.3, §3.4, §4.3, §4.5, §4.6), each
 #: `(the key, what it does)`; B's says what the trial loop does with a key pressed while it is held
-#: (demo mode's Task 2), and Escape's what it does mid-trial (Task 8), beside it.
+#: (demo mode's Task 2), and Escape's what it does mid-trial (Task 8) and after (the whole-build
+#: review's I3), beside it.
 DEMO_INPUTS = (
     ("pointer", "the eye, over the drawing; off it the eye looks away, outside every window: no "
                 "fixation, or a break, never tracker loss"),
@@ -223,7 +224,7 @@ DEMO_INPUTS = (
           "asks no guard while the tracker is lost"),
     ("Esc", f"closes the full window and lets go of the eye. With no page steering, the eye reads "
             f"as tracker loss after {_LIVE_S:g} s, so an Escape mid-trial ends that trial as "
-            f"tracker lost, as does every trial after it until a page steers again"),
+            f"tracker lost, and the run waits before the next until a page points again"),
     ("F", "the full window; a click on the screen opens it too"),
     ("P · M", "pause or resume · mark, as everywhere on the page"),
 )
