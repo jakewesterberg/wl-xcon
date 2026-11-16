@@ -3731,8 +3731,8 @@ _REPORT = pointer.pack(7, 1.5, -2.0, over=True, b=False, button=True, held=0b101
 def test_the_gaze_endpoint_binds_loopback_only_even_with_allow_remote(zmq_cleanup):
     """§3.8: the gaze socket moves a demo's eye, so it is loopback's alone, `--link-allow-remote`
     or not -- refused before a context exists, as every remote bind is -- and a link told it may
-    bind remotely still binds it on loopback. Its queue holds `pointer.DRAIN` reports; a link given
-    no gaze endpoint has no gaze socket."""
+    bind remotely still binds it on loopback. It keeps only the newest report waiting (`CONFLATE`;
+    the whole-build review's M1); a link given no gaze endpoint has no gaze socket."""
     import zmq
 
     for allow_remote in (False, True):
@@ -3745,7 +3745,7 @@ def test_the_gaze_endpoint_binds_loopback_only_even_with_allow_remote(zmq_cleanu
 
     link = _gazed_link(zmq_cleanup, allow_remote=True)
     assert link.gaze_endpoint.startswith("tcp://127.0.0.1:")
-    assert link._gaze.getsockopt(zmq.RCVHWM) == pointer.DRAIN
+    assert link._gaze.getsockopt(zmq.CONFLATE) == 1
     assert link._gaze in link._sockets, "released with the rest (`_release`)"
     plain = zmq_cleanup(ZmqLink("tcp://127.0.0.1:0", "tcp://127.0.0.1:0"))
     assert plain.gaze_endpoint is None and plain._gaze is None
@@ -3758,7 +3758,8 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     object -- one a call, each once, its size whole, so an oversize one is told from a report. Its
     code builds nothing, and over a drain of reads it keeps nothing it allocates (`tracemalloc`, as
     `test_the_per_frame_check_keeps_nothing_it_allocates`; what pyzmq takes and gives back inside
-    one call it does not see, `ZmqLink.gaze_into` says how much)."""
+    one call it does not see, `ZmqLink.gaze_into` says how much). Of `DRAIN` reports sent at once,
+    the socket keeps the newest (M1): the last read is the last sent."""
     import tracemalloc
 
     link = _gazed_link(zmq_cleanup)
@@ -3773,8 +3774,10 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     assert _gazed(link, buffer) == 50 and bytes(buffer) == b"y" * pointer.MESSAGE.size
     assert builds_of(ZmqLink.gaze_into) == []
 
-    for _ in range(pointer.DRAIN):
-        assert _sent(gaze, _REPORT)
+    sent = [pointer.pack(seq, 1.5, -2.0, over=True, b=False, button=False, held=0,
+                         presses=(0,) * pointer.KEYS) for seq in range(1, pointer.DRAIN + 1)]
+    for report in sent:
+        assert _sent(gaze, report)
     take = link.gaze_into
     # A first read outside the measure, as the mark check's warms up.
     read = 1 if take(buffer) >= 0 else 0
@@ -3789,7 +3792,7 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
         after = tracemalloc.take_snapshot()
     finally:
         tracemalloc.stop()
-    while read < pointer.DRAIN and _gazed(link, buffer) >= 0:
+    while _gazed(link, buffer, tries=40) >= 0:
         read += 1
 
     import wl_xcon.link as link_module
@@ -3797,7 +3800,37 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     held = [stat for stat in after.compare_to(before, "filename")
             if stat.size_diff > 0 and stat.traceback[0].filename == link_module.__file__]
     assert held == []
-    assert read == pointer.DRAIN and bytes(buffer) == _REPORT
+    assert 1 <= read <= pointer.DRAIN and bytes(buffer) == sent[-1], read
+
+
+def test_after_a_pause_the_rig_reads_the_newest_report_and_no_send_is_refused(zmq_cleanup):
+    """**The whole-build review's M1**: while the rig reads nothing -- between runs, paused -- the
+    page's reports go on. Both ends keep only the newest waiting (`CONFLATE`), so not one send to
+    the connected rig is refused (the page is never told *not delivered* for it), and the first
+    report the rig reads after the pause is the newest, never the oldest of a queue: before it the
+    rig's queue held the first 64 and replayed them, and every send past both queues was refused."""
+    link = _gazed_link(zmq_cleanup)
+    gaze = zmq_cleanup(ZmqGaze(link.gaze_endpoint))
+    buffer = bytearray(pointer.MESSAGE.size)
+
+    def numbered(seq: int) -> bytes:
+        return pointer.pack(seq, float(seq), 0.0, over=True, b=False, button=False, held=0,
+                            presses=(0,) * pointer.KEYS)
+
+    assert _sent(gaze, numbered(1)) and _gazed(link, buffer) == pointer.MESSAGE.size, "connected"
+    refused = [seq for seq in range(2, 2002) if not gaze.send(numbered(seq))]
+    assert refused == []
+    time.sleep(0.5)  # the pause: the rig reads nothing
+    seen: list = []
+    deadline = time.monotonic() + 10.0
+    while (not seen or seen[-1] != 2001) and time.monotonic() < deadline:
+        if link.gaze_into(buffer) >= 0:
+            seen.append(pointer.MESSAGE.unpack(buffer)[0])
+        else:
+            time.sleep(0.005)
+    assert seen and seen[-1] == 2001, seen[:5]
+    assert seen[0] > 1000 and seen == sorted(seen), seen[:5]
+    assert link.gaze_into(buffer) == -1, "nothing older waits behind it"
 
 
 def test_gaze_into_answers_minus_one_with_none_waiting(zmq_cleanup):
@@ -3822,8 +3855,8 @@ def test_gaze_into_answers_minus_one_with_none_waiting(zmq_cleanup):
 
 def test_a_gaze_report_with_no_rig_is_not_sent_and_never_waits(zmq_cleanup):
     """§4.5: `wlx serve` pushes each report with ZeroMQ's non-blocking send. With no rig on the
-    gaze endpoint, `IMMEDIATE` queues nothing and `send` answers `False` at once; its queue, like the
-    rig's, holds `pointer.DRAIN` reports."""
+    gaze endpoint, `IMMEDIATE` queues nothing and `send` answers `False` at once; like the rig's, it
+    keeps only the newest report waiting (`CONFLATE`; the whole-build review's M1)."""
     import zmq
 
     (endpoint,) = free_endpoints(1)
@@ -3832,7 +3865,7 @@ def test_a_gaze_report_with_no_rig_is_not_sent_and_never_waits(zmq_cleanup):
     started = time.monotonic()
     assert [gaze.send(_REPORT) for _ in range(3)] == [False] * 3
     assert time.monotonic() - started < 1.0
-    assert gaze._push.getsockopt(zmq.SNDHWM) == pointer.DRAIN
+    assert gaze._push.getsockopt(zmq.CONFLATE) == 1
     assert gaze._push.getsockopt(zmq.IMMEDIATE) == 1
     assert gaze.endpoint == endpoint
 

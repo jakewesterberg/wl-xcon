@@ -3657,9 +3657,11 @@ _SCRIPT = """
     x: null, y: null, inside: false,
     b: false, button: false, held: 0, presses: [0, 0, 0, 0, 0, 0, 0, 0, 0]
   };
-  // What a page says while the demo reads no reports (`wlx serve`'s 504 and 503): between runs or
-  // paused the rig's queue fills, and that is no fault (Task 8's carried (a)).
-  var DEMO_WAITING = "the demo is not reading the pointer now (between runs or paused); this page keeps its eye for the next run";
+  // What a page says while the demo takes no reports (`wlx serve`'s 504 and 503): no rig connected
+  // to the gaze endpoint, or the gaze thread busy, which is no fault (Task 8's carried (a); since
+  // the whole-build review's M1 a rig between runs or paused keeps the newest report, refusing
+  // none).
+  var DEMO_WAITING = "the demo is not reading the pointer now; this page keeps its eye for the next run";
   var DEMO_STEERING = "steering: this page's pointer is the demo's eye";
   function demoFrame() {
     var tag = el("demo-tag").querySelector("[data-demo]");
@@ -3847,8 +3849,8 @@ _SCRIPT = """
     });
   }
   // What `wlx serve` made of a report (`serve.Steering`): sent, the steer this page's; another page
-  // steers, said; no demo running; not delivered or busy, which between runs and while paused is no
-  // fault and is said quietly, the page keeping its eye; a refusal, said.
+  // steers, said; no demo running; not delivered or busy, which is no fault and is said quietly,
+  // the page keeping its eye; a refusal, said.
   function steered(answer) {
     var status = answer.status;
     if (status === "sent") {

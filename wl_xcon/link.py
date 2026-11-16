@@ -3743,9 +3743,12 @@ class ZmqLink:
         socket a demo's `pointer.Source` reads the page's pointer reports from, up to
         `pointer.DRAIN` a frame, through `gaze_into`. **Loopback only, whatever `allow_remote`
         says**: whoever reaches it moves a demo's eye, and nothing but `wlx serve` on this box is
-        meant to (`ZmqGaze`). Its queue holds `pointer.DRAIN` reports (`RCVHWM`), so what a frame
-        or a trial's first frame drains is bounded and recent. Without it, this link steers no
-        demo, as every link before demo mode.
+        meant to (`ZmqGaze`). **It keeps only the newest report waiting** (`CONFLATE`; the
+        whole-build review's M1, 2026-11-16): each report carries the pointer's place, B, the
+        button, the keys held and their running press counts, so the newest stands for every older
+        one, and after a pause or between runs a trial's first frame takes where the pointer is
+        now, never a replay of where it was. Without it, this link steers no demo, as every link
+        before demo mode.
 
         S9a §7 states the assumption this link runs on, in as many words: `taskd`
         trusts the actor named in a command *"because they are the same machine and
@@ -3865,14 +3868,19 @@ class ZmqLink:
             #: What ZeroMQ bound it to, for `wlx serve` and the idle frame; `None` without one.
             self.gaze_endpoint: str | None = None
             if gaze_endpoint is not None:
-                from wl_xcon.pointer import DRAIN
-
                 self._gaze = self._ctx.socket(zmq.PULL)
                 self._sockets.append(self._gaze)
                 self._gaze.setsockopt(zmq.LINGER, 0)
-                # Before the bind, so it holds for every connection: a frame drains at most
-                # `DRAIN`, and a trial's first frame everything waiting (`pointer.Source`).
-                self._gaze.setsockopt(zmq.RCVHWM, DRAIN)
+                # Before the bind, so it holds for every connection: **only the newest report
+                # waits**. libzmq's `ZMQ_CONFLATE`: "a socket shall keep only one message in its
+                # inbound/outbound queue, this message being the last message received/the last
+                # message to be sent" (zmq_setsockopt(3), libzmq.readthedocs.io, read 2026-11-16).
+                # On this venv's pyzmq 27.1.0 with libzmq 4.3.5 a probe sent 2,000 unread reports
+                # and read the 2,000th alone. The page's note that an unread socket's memory grows:
+                # the same probe, 2,000,000 unread, more than eight hours of a page's reports, grew
+                # the process 3.1 MB (counts, not a measurement of this system's timing). A frame
+                # still reads at most `DRAIN` (`pointer.Source`).
+                self._gaze.setsockopt(zmq.CONFLATE, 1)
                 self._gaze.bind(gaze_endpoint)
                 self.gaze_endpoint = self._gaze.getsockopt_string(zmq.LAST_ENDPOINT)
         except BaseException:
@@ -4501,12 +4509,14 @@ class ZmqGaze:
     **Never blocking**: `send` hands a report over with ZeroMQ's non-blocking send and answers
     whether it went, so a rig that is not reading -- gone, or between runs -- costs a page one
     `False`, never a wait. **`IMMEDIATE`**, as `ZmqMarks`, so a report is queued only to a
-    completed connection. **Its queue holds `pointer.DRAIN` reports** (`SNDHWM`), as the rig's
-    does (`ZmqLink`), so what waits for a rig that has stopped reading is a few frames' drains,
-    never a minute of a hand's path: a scratchpad probe, 2026-11-14, on loopback with pyzmq 27.1.0
-    and libzmq 4.3.5, queued 192 reports before a send was refused at this bound, and 3,000 at
-    ZeroMQ's default of 1,000 (a count, not a measurement of this system's timing). A report is
-    the newest wins on the rig (`pointer.Source`), so one refused here is one superseded.
+    completed connection. **It keeps only the newest report waiting** (`CONFLATE`), as the rig's
+    socket does (`ZmqLink`; the whole-build review's M1, 2026-11-16): a rig not reading -- between
+    runs, paused -- holds the pointer as it is now, never the oldest of a queue, and a send to a
+    connected rig is never refused for a full one. Before it a probe, 2026-11-14, saw 192 reports
+    queued and then every send refused, the page told *not delivered* until the next run, which
+    replayed the oldest; with both ends conflating, 2,000 unread reports sent, none refused, and the
+    2,000th the one read (pyzmq 27.1.0, libzmq 4.3.5, loopback; counts, not a measurement of this
+    system's timing).
 
     Released the way `ZmqLink` and `ZmqMarks` are: `_release`, from `close()` or from its
     finalizer, with its one socket in the list the finalizer holds.
@@ -4516,8 +4526,6 @@ class ZmqGaze:
         """Connect to `gaze_endpoint`. Nothing waits: ZeroMQ connects in the background."""
         import zmq
 
-        from wl_xcon.pointer import DRAIN
-
         self._ctx = zmq.Context()
         self._sockets: list = []
         self._finalizer = weakref.finalize(self, _release, self._ctx, self._sockets)
@@ -4525,7 +4533,7 @@ class ZmqGaze:
         self._sockets.append(self._push)
         self._push.setsockopt(zmq.LINGER, 0)
         self._push.setsockopt(zmq.IMMEDIATE, 1)
-        self._push.setsockopt(zmq.SNDHWM, DRAIN)
+        self._push.setsockopt(zmq.CONFLATE, 1)
         self._push.connect(gaze_endpoint)
         #: Where this sends.
         self.endpoint = gaze_endpoint

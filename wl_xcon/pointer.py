@@ -20,7 +20,12 @@ release between two frames is seen once.
 - **The newest report wins, in sequence order**: a frame reads at most `DRAIN` reports (bounded
   work, whatever arrives) and keeps the one of highest sequence; one older than it, or than the
   report in hand while that is current, is counted `stale`, and one of the wrong size or not finite
-  is counted `malformed` and dropped, as a malformed mark is.
+  is counted `malformed` and dropped, as a malformed mark is. **The rig's gaze socket keeps only
+  the newest report waiting** (`link.ZmqLink`, ZeroMQ's conflation; the whole-build review's M1),
+  so a drain reads one, or the few that arrived while it read; those the socket dropped for a
+  newer are never read, so never counted. What `stale` counts is a report out of order: one read
+  beside a newer, or numbered below the one in hand, as after `wlx serve` restarted, counting from
+  1 again.
 - **A report is current for `LIVE_S`**: through a page's stall the last position is held, with
   fresh noise each frame, and counts toward holds; past it the source gives nothing, the tracker
   goes stale (`eye.Tracker.staleness`) and the loop sees tracker loss under the task's
@@ -129,7 +134,9 @@ B_HELD = 2
 BUTTON = 4
 #: How many number keys a demo gives a task's inputs, 1 to 9 (§3.4): bounded work a frame.
 KEYS = 9
-#: How many reports a frame reads at most, keeping the newest (§3.8): bounded work a frame.
+#: How many reports a frame reads at most, keeping the newest (§3.8): bounded work a frame, whatever
+#: a link gives. The rig's own socket keeps only the newest waiting (`link.ZmqLink`), so a frame
+#: there reads one or two.
 DRAIN = 64
 #: How long a report stays current, in seconds: five of the page's slowest report intervals
 #: (§3.3), so a page's stall is held and counts toward holds, and a page gone quiet is tracker

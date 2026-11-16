@@ -1164,10 +1164,11 @@ GAZE_BUSY = (
     },
 )
 #: Why a report was not sent: the rig's gaze socket took none, because no demo service is
-#: connected, or it is not reading them (between runs, paused) and its queue is full.
+#: connected. **Not between runs or paused** since the whole-build review's M1: both ends keep only
+#: the newest report waiting (`link.ZmqGaze`), so a connected rig's socket never refuses one.
 GAZE_NOT_TAKEN = (
-    "the demo is not taking pointer reports now: it is between runs or paused, or its service "
-    "is gone; the next report is sent in its place"
+    "the demo is not taking pointer reports now: its service is not connected, or is gone; the "
+    "next report is sent in its place"
 )
 #: Why a report is not sent from a console with no gaze endpoint.
 NO_GAZE_ENDPOINT = (

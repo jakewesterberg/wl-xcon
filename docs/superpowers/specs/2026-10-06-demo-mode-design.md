@@ -262,7 +262,9 @@ it and a `--demo-root`; a demo service requires it. Loopback only whatever `--li
 newest**: bounded work, whatever arrives. A message is fixed-size binary, read into a buffer allocated once: the
 page's sequence number, the pointer's x and y in degrees, whether it is over the drawing, B, the mouse button, the
 keys held, and each key's press count. One the wrong size, or not finite, is counted and dropped, as a malformed
-mark is.
+mark is. *(2026-11-16, the build's review, M1: the rig's PULL and `wlx serve`'s PUSH keep only the newest report
+waiting, ZeroMQ's `CONFLATE`, so after a pause or between runs the pointer is where it is now, never a replay of a
+queue's oldest, and a page is no longer told *not delivered* between runs. `DRAIN` still bounds a frame's reads.)*
 
 ### 3.9 The screen, from the rig
 

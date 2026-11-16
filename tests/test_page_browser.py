@@ -2875,9 +2875,10 @@ def test_a_page_says_steered_from_another_page_and_lets_go_on_escape_and_when_it
 
 
 def test_not_delivered_between_runs_is_said_quietly_and_reports_go_on(demo_box):
-    """Task 8's carried (a): between runs and while paused the rig's gaze queue fills, and each
-    report is answered 504 *not delivered*; the page says so quietly, never as an error, keeps
-    sending, and steers again the moment a run takes reports."""
+    """Task 8's carried (a): a report answered 504 *not delivered* -- no rig on the gaze endpoint;
+    before the whole-build review's M1, every report between runs and while paused -- is said
+    quietly, never as an error; the page keeps sending, and steers again the moment one is
+    taken."""
     page = demo_box.page
     page.goto(demo_box.url)
     demo_box.demo()
