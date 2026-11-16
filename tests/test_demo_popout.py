@@ -295,9 +295,9 @@ def test_a_suggestion_answered_from_the_trainers_panel_moves_the_stage(answered)
 
 def test_a_demo_record_reads_back_through_wl_preproc(answered):
     """The path, not the piece: the demo's record, read by wl-preproc's own code -- its trial lines,
-    runs, session and change rows -- with no problem but the change kinds it does not list yet
-    (XC-461), its `config.json`'s `demo` key among what it reads without complaint (Task 1's ask,
-    XC-502, not yet answered); and the simulated card's strobed stream decoded and assembled into
+    runs, session and change rows -- with no problem at all, its `config.json`'s `demo` key among
+    what it reads without complaint (Task 1's ask, accepted as named on 2026-11-14); and the
+    simulated card's strobed stream decoded and assembled into
     one trial per trial line, each ending on its outcome's marker."""
     try:
         from wl_preproc.contracts import events as their_events

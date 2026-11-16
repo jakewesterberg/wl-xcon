@@ -4155,12 +4155,12 @@ def test_the_dialog_on_a_demo_service_offers_reference_alone_with_now_filled():
     assert fragments(frame(), view())["dn-demo"] == ""
 
 
-def test_the_rig_pages_demo_box_is_greyed_without_reference_or_gaze_saying_why():
+def test_the_rig_pages_demo_box_is_grayed_without_reference_or_gaze_saying_why():
     """§4.1 and the PI's folder answer (2026-11-14): a rig service's dialog has a **demo** box,
     offered only where its idle frame says `gaze` (a gaze endpoint and a `--demo-root`) and offers
-    `REFERENCE`; greyed otherwise, saying why where it is greyed and in its title: no REFERENCE,
+    `REFERENCE`; grayed otherwise, saying why where it is grayed and in its title: no REFERENCE,
     no gaze, or both. Ticked, the script locks the subject to `REFERENCE` (read from the box) and
-    fills the departure and id as a demo service does. A viewer who cannot write sees it greyed as
+    fills the departure and id as a demo service does. A viewer who cannot write sees it grayed as
     every control, and the https page's waits for the sign-in."""
     def box(frame_, view_=None):
         return fragments(frame_, view_ or view())["dn-demo"]
@@ -4175,10 +4175,10 @@ def test_the_rig_pages_demo_box_is_greyed_without_reference_or_gaze_saying_why()
         (False, ("A",)): f"{NO_GAZE}; {NO_REFERENCE}",
     }
     for (gaze, animals), why in cases.items():
-        greyed = box(idle(gaze=gaze, animals=animals))
+        grayed = box(idle(gaze=gaze, animals=animals))
         assert re.search(r'id="dn-demo-box" data-reference="REFERENCE" disabled title="'
-                         + re.escape(html.escape(why, quote=True)) + '">', greyed), why
-        assert f'<span class="sub" id="dn-demo-why">{html.escape(why)}</span>' in greyed, why
+                         + re.escape(html.escape(why, quote=True)) + '">', grayed), why
+        assert f'<span class="sub" id="dn-demo-why">{html.escape(why)}</span>' in grayed, why
     assert NO_REFERENCE == "no REFERENCE folder under --subjects"
     assert NO_GAZE == "this rig names no gaze endpoint or no --demo-root"
     lan = box(idle(gaze=True, animals=_RIG_ANIMALS), view(can_write=False))
@@ -4200,7 +4200,7 @@ def test_the_rig_pages_demo_box_is_greyed_without_reference_or_gaze_saying_why()
 def test_a_stranded_demo_in_the_demo_folder_holds_up_only_demos_and_new_session_stays():
     """XC-504: a rig's stranded demo (`Stranded.demo_folder`) holds up only another demo, so the
     page says so in a banner of its own, offers *end session…* and no resume, keeps *new session*
-    live beside it, and greys the demo box saying why. A stranded session under `--root`, a demo
+    live beside it, and grays the demo box saying why. A stranded session under `--root`, a demo
     service's own demo among them, still holds up every open, as before."""
     demo = Stranded("demo-20261114-101200", "REFERENCE", 1_700_000_000.0, False,
                     "a demo is never resumed, only ended: record its return with End session",

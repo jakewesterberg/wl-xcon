@@ -503,7 +503,9 @@ class _Demo:
     def close(self, keep: Path | None) -> None:
         """Both children stopped, the console closed, `keep` given a copy of the session's folder,
         and the folder this command made deleted; the rig lock let go. Ctrl-C is ignored meanwhile,
-        so nothing is left half-done."""
+        so nothing is left half-done. **A copy to `keep` that fails** -- no permission, a full disk
+        (the whole-build review's M7) -- is said, naming where the session's folder is, and this
+        command's folder is kept, not deleted; the lock is let go whatever happens."""
         previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
         try:
             for child in reversed(self.children):
@@ -511,17 +513,29 @@ class _Demo:
             for closing in (self.frames, self.commands):
                 if closing is not None:
                     closing.close()
+            copied = True
             if keep is not None:
                 kept = self.root / self.session_id if self.session_id else None
                 if kept is not None and kept.is_dir():
-                    shutil.copytree(kept, keep)
-                    print(f"wlx demo: session {self.session_id}'s folder copied to {keep}")
+                    try:
+                        shutil.copytree(kept, keep)
+                    except OSError as why:
+                        # `shutil.Error`, a partial copy's, is an `OSError` too.
+                        copied = False
+                        print(f"wlx demo: session {self.session_id}'s folder could not be copied "
+                              f"to {keep} ({why}); it is kept where it is, {kept}, and this "
+                              f"command's folder is not deleted", file=sys.stderr, flush=True)
+                    else:
+                        print(f"wlx demo: session {self.session_id}'s folder copied to {keep}")
                 else:
                     print(f"wlx demo: no session was opened, so nothing was copied to {keep}")
-            shutil.rmtree(self.folder, ignore_errors=True)
-            os.close(self.lock)
+            if copied:
+                shutil.rmtree(self.folder, ignore_errors=True)
         finally:
-            signal.signal(signal.SIGINT, previous)
+            try:
+                os.close(self.lock)
+            finally:
+                signal.signal(signal.SIGINT, previous)
 
 
 def run(args) -> int:

@@ -409,6 +409,42 @@ def test_keep_naming_an_existing_dir_is_refused_before_anything_starts(wlx, tmp_
     assert list(kept.iterdir()) == []
 
 
+def test_a_keep_copy_that_fails_says_where_the_folder_is_keeps_it_and_lets_the_lock_go(
+        monkeypatch, tmp_path, capsys):
+    """The whole-build review's M7: a `--keep` copy that fails at the end -- here no permission
+    to make `DIR` -- is said, naming where the session's folder is; the folder `wlx demo` made is
+    kept, not deleted, so the record survives; and the rig lock is let go all the same."""
+    from wl_xcon import demo as demo_module
+    from wl_xcon import service
+    from wl_xcon.actor import Box
+
+    monkeypatch.setenv("WLX_RIG_LOCK", str(tmp_path / "rig.lock"))
+    lock = service.lock_rig(exclusive=True)
+    folder = tmp_path / "wlx-demo-x"
+    made = demo_module._Demo(folder, lock, Box("t"))
+    made.session_id = "demo-20270114-120000"
+    session = made.root / made.session_id
+    (session / "xcon").mkdir(parents=True)
+    (session / "xcon" / "config.json").write_text("{}")
+    shut = tmp_path / "shut"
+    shut.mkdir()
+    shut.chmod(0o500)
+    try:
+        made.close(shut / "kept")
+    finally:
+        shut.chmod(0o700)
+    err = capsys.readouterr().err
+    assert (f"wlx demo: session {made.session_id}'s folder could not be copied to "
+            f"{shut / 'kept'} (") in err, err
+    assert (f"); it is kept where it is, {session}, and this command's folder is not deleted"
+            in err), err
+    assert (session / "xcon" / "config.json").read_text() == "{}"
+    assert not (shut / "kept").exists()
+    free = service.lock_rig(exclusive=True)
+    assert free is not None, "the rig lock outlived the command"
+    os.close(free)
+
+
 # --- Refused -------------------------------------------------------------------------------------
 
 

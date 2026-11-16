@@ -480,8 +480,8 @@ class Demo:
     (`geometry.stand_in_housings`, §3.6). `config.json` carries it as `"demo"`
     (`Session._fixed_config`), and no other session has the key; every frame of the session says
     `demo` (`link.Telemetry.of`). The key's name and shape were written for wl-preproc before any
-    session wrote it (`docs/pending-wl-preproc-amendments.md`; XC-502 waits on that session to
-    send them)."""
+    session wrote it (`docs/pending-wl-preproc-amendments.md`), and accepted as named on 2026-11-14;
+    its marking of a demo in what it publishes is XC-502."""
 
     stand_in_housings: bool
     gaze: str = "mouse"
@@ -1294,7 +1294,7 @@ class Session:
     #: Optional. `(run) -> (trial, values, index) -> World`, called once a run when `world` is
     #: not given: **a run's worlds made from the run itself** -- a demo's mouse, whose noise is
     #: drawn from the run's seed (demo mode §3.3, §14 item 16), since `world` is never told the
-    #: run and a `wlx taskd` session's own seed is 0 in every session. `None`: the behaviour
+    #: run and a `wlx taskd` session's own seed is 0 in every session. `None`: the behavior
     #: agent, as with neither given. A world that has `ended()` is told so at each trial's
     #: boundary (`run`), where a demo's blanks the screen its page shows (§3.9). **Worlds that have
     #: `waiting(index)`** (`pointer.Worlds`) are asked it before the run's first trial, which waits

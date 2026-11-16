@@ -171,7 +171,7 @@ FRAGMENT_IDS = (
 #: not import (`tests/test_web.py` holds the two equal).
 REFERENCE = "REFERENCE"
 
-#: **Why the live rig's demo box is greyed** (the PI, 2026-11-14: a demo is offered on a rig only
+#: **Why the live rig's demo box is grayed** (the PI, 2026-11-14: a demo is offered on a rig only
 #: where its idle frame says `gaze`): no `REFERENCE` to open one for, or nowhere for one to run.
 NO_REFERENCE = "no REFERENCE folder under --subjects"
 NO_GAZE = "this rig names no gaze endpoint or no --demo-root"
@@ -2314,7 +2314,7 @@ def _idle_banners(frame: Idle, view: View) -> str:
 
 def _idle_setup(frame: Idle, view: View) -> str:
     """The Session panel with no session open (the mockup's Setup tab): *new session*,
-    greyed while an animal is stranded -- not for a rig's stranded demo, which holds up only
+    grayed while an animal is stranded -- not for a rig's stranded demo, which holds up only
     another demo (XC-504) -- and what `wlx taskd` offers a session."""
     why = (
         "an animal's return is not recorded: end its session from its Stranded banner first"
@@ -2457,7 +2457,7 @@ def _dn_demo(frame: Idle, view: View) -> str:
     on a demo service, a line saying every session here is a demo, for `REFERENCE` alone; on a rig
     service, a **demo** box, offered where its idle frame says `gaze` and offers `REFERENCE`, which
     the script ticks to lock the subject to `REFERENCE` and fill the departure and the id, and the
-    open then sends `demo: true`. Greyed, saying why, where it cannot open one: no `REFERENCE`
+    open then sends `demo: true`. Grayed, saying why, where it cannot open one: no `REFERENCE`
     (`NO_REFERENCE`), no gaze endpoint or no demo folder (`NO_GAZE`), or a demo stranded in the
     demo folder (`DEMO_STRANDED`), which the service would refuse."""
     if frame.demo:

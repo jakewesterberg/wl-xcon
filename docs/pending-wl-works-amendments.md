@@ -104,6 +104,8 @@ Proposed readings, in the existing readings format:
 At the protocol's proposed 60 s poll cadence this gives wl-works a live rig dashboard for
 the cost of a field list, and it needs no new endpoint, no callback and no push.
 
+> **Changed by demo mode, 2026-11-14 (written here 2026-11-16, the build's review, M8):** the rig's `/health` no longer turns `degraded` for a stranded demo in a rig's demo folder (`--demo-root`), since no animal's return is missing: its `state` reading then says `idle · no session open · a demo's return is not recorded`, and its `stranded` reading names it `<session> · REFERENCE · demo · return not recorded`. An animal's stranded session still makes it `degraded`, one found in the demo folder included (anything there but a demo's record for `REFERENCE`, the review's I1).
+
 **The finished session summary is *not* asked for over this protocol.**
 
 It goes where session data already goes: a file in the session directory, ingested by

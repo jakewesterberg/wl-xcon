@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-511.**
+**Next free ID: XC-512.**
 
 ## Brainstorms queued for the PI
 
@@ -294,6 +294,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-498** `screen._Lights.xyz` allocates a `dataclasses.replace` per color-set light per call: harmless while `screen.resolve` is off the frame path, and a per-frame allocation once build E calls it every frame (the build's review, M9). — 2026-11-07, [`wl_xcon/screen.py`](../wl_xcon/screen.py) — waits on: build E
 - **XC-499** `tools/welfare_diff.py` reads `taskd.Session._command` SAME though it gained the approved `Decline` branch, since the manifest pins only two of its lines; a reader of its output should be told SAME there means the pinned lines, not the function (the build's review, M10). — 2026-11-07, [`tools/welfare_diff.py`](../tools/welfare_diff.py) — waits on: nothing
 - **XC-500** Share the nightly full sweep's functions out by time, not by count: `tools/mutation_gate.py --shard K/N` cuts contiguous equal counts, and `web`'s mutants each run a suite of about ten minutes, so the 36-job sweep of 2026-11-09 (run 42578387303) still stopped one job, shard 35/36 (40 `web` functions), at GitHub's six hours with 4 unjudged (`_moments`, `_setup`, `_end`, `_question_banner`, each caught on main's nightly 42471895949); the PI merged on that run with this line filed (2026-11-09, "Merge now"). — 2026-11-09, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — waits on: nothing
+- **XC-511** British spellings on `main` against CLAUDE.md's US English: at `1d77392`, about 170 lines of code comments, help text, tests and documents say grey, greyed or greys, and about 92 say behaviour (others, colour and centre among them, too); sweep them to gray and behavior, leaving quoted titles and other people's words as written (demo mode's own added lines were fixed in its review's fix round, M4). — 2026-11-16, [CLAUDE.md, "Rules"](../CLAUDE.md) (demo mode's whole-build review, M4) — waits on: nothing
 
 ## Needs the rig
 

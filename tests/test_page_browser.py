@@ -2977,7 +2977,7 @@ def test_a_demo_services_dialog_fills_now_offers_reference_and_opens_a_demo(demo
 def test_the_rig_pages_demo_box_locks_reference_fills_now_and_opens_a_demo(demo_box):
     """§4.1 on a live rig: where the idle frame says `gaze` and offers `REFERENCE`, the demo box
     locks the subject to `REFERENCE` and fills the departure and id; unticked, the subject is the
-    person's again and the fills go; the open sends `demo`. Greyed with its reason where the frame
+    person's again and the fills go; the open sends `demo`. Grayed with its reason where the frame
     says no gaze."""
     page = demo_box.page
     demo_box.hub.offer(idle(gaze=True, animals=("A", "REFERENCE")))

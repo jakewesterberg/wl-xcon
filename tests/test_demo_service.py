@@ -22,7 +22,7 @@ from _rig import PATH as RIG_FILE
 from _rig import RIG
 from _sessions import OPEN_ACCEPTED, WALL, typed
 from _zmq_release import _every_zmq_context_released  # noqa: F401
-from wl_xcon import cli, dio, pointer, preflight, stranded
+from wl_xcon import cli, dio, health, pointer, stranded
 from wl_xcon import service as service_module
 from wl_xcon import taskd as taskd_module
 from wl_xcon.actor import Box
@@ -906,3 +906,161 @@ def test_an_end_naming_a_stranded_demo_whose_id_a_real_session_has_is_refused_en
     assert [s.session_id for s in service.stranded_demos] == [DEMO], "the demo is still stranded"
     assert [s.session_id for s in service.stranded] == ([] if returned else [DEMO])
     assert (service.root, service.question) == (first.root, None)
+
+
+# --- a real session stranded in the demo folder is the session it is (the review's I1) -----------
+
+#: The real session a rig service ran and left stranded, and the next one for its animal.
+REAL, NEXT = "2027-01-14_01", "2027-01-14_02"
+
+
+def _old_root_as_demo_root(tmp_path, animal="M1"):
+    """**The whole-build review's probe** (I1): rig service A runs a real session for `animal`
+    and dies, so that session is stranded under its `--root`; the next start uses a new `--root`
+    and names A's old one as `--demo-root` -- a typo, last week's root, a sibling rig's share.
+    The service so started, and A's old root."""
+    subjects, tasks, old = _folders(tmp_path, animals=("REFERENCE", "M1"))
+    first = _made((subjects, tasks, old), demo_root=tmp_path / "demos-a")
+    _step(first, _open(session_id=REAL, animal=animal))
+    first.shutdown()
+    new = tmp_path / "sessions-b"
+    new.mkdir()
+    return _made((subjects, tasks, new), demo_root=old), old
+
+
+def _degraded(frame) -> bool:
+    return health.verdict(frame, frame_age_s=0.0, stale_after_s=5.0, rejected=None) == "degraded"
+
+
+def test_a_real_session_stranded_in_the_demo_folder_holds_up_every_open_until_its_return(tmp_path):
+    """**I1**: only a record whose `config.json` says `demo` and whose animal is `REFERENCE` is a
+    demo. M1's session found in the demo folder is the real session it is: in `stranded`, where it
+    holds up a new real open for M1 and a demo alike, said as an animal's on the page and on
+    `/health`, degraded, and offered resume or end as one under `--root` is. Its End records its
+    return in its own record, in the demo folder; then M1's next session opens under `--root`."""
+    service, old = _old_root_as_demo_root(tmp_path)
+    assert service.stranded_demos == []
+    assert [(s.session_id, s.subject, s.resumable) for s in service.stranded] == [
+        (REAL, "M1", True)]
+    assert service.stranded_astray == service.stranded
+    frame = _step(service)
+    assert [(s.session_id, s.subject, s.demo_folder) for s in frame.stranded] == [
+        (REAL, "M1", False)]
+    assert _degraded(frame)
+    assert health._state_text(frame) == (
+        "idle · no session open · an animal's return is not recorded")
+
+    refused = _step(service, _open(session_id=NEXT, animal="M1"))
+    assert _refused(refused)[-1] == (
+        f"no session opens while an animal's return is not recorded: M1 in session {REAL}. Resume "
+        f"it, or record its return with End session, naming its session")
+    assert not (service.root / NEXT).exists() and service.session is None
+    held = _step(service, _demo())
+    assert _refused(held)[-1].startswith("no session opens while an animal's return is not")
+    assert not (old / DEMO).exists()
+
+    ended = _step(service, _end(session_id=REAL))
+    assert ended.stranded == () and not _degraded(ended)
+    assert (service.stranded, service.stranded_astray) == ([], [])
+    assert _kinds(old, REAL)[-1] == "returned", "its return is written into its own record"
+    assert service.root == tmp_path / "sessions-b" and list(service.root.iterdir()) == []
+    opened = _step(service, _open(session_id=NEXT, animal="M1"))
+    assert isinstance(opened, Telemetry) and opened.session_id == NEXT
+    assert _kinds(service.root, NEXT)[:2] == ["departure", "session opened"]
+
+
+def test_a_real_session_stranded_in_the_demo_folder_is_resumed_in_its_own_folder(tmp_path):
+    """I1: its banner offers resume as one under `--root` does, and the resume reads and writes its
+    own record, where it is; `--root` stays the service's, and nothing is made under it."""
+    service, old = _old_root_as_demo_root(tmp_path)
+    resumed = _step(service, ResumeSession(by=BY, session_id=REAL))
+    assert isinstance(resumed, Telemetry) and resumed.session_id == REAL
+    assert service.session.spec.root == old
+    assert (service.stranded, service.stranded_astray) == ([], [])
+    assert service.root == tmp_path / "sessions-b" and list(service.root.iterdir()) == []
+    assert _kinds(old, REAL)[-1] == "session resumed"
+    _step(service, _end())
+    assert service.session is None and _kinds(old, REAL)[-2:] == ["returned", "session ended"]
+
+
+@pytest.mark.parametrize("record", ["demo, another animal", "REFERENCE, no demo"])
+def test_a_demo_is_a_record_saying_demo_for_reference_and_nothing_else_is(tmp_path, record):
+    """I1's two edges, each real: a record whose `config.json` says `demo` but whose animal is
+    another (here a demo's record hand-edited to M1), and `REFERENCE`'s session with no `demo` (a
+    real session for the test monkey). Each holds up every open, is said as an animal's, and is
+    offered what one under `--root` is: a record saying `demo` is never resumed."""
+    if record == "REFERENCE, no demo":
+        service, old = _old_root_as_demo_root(tmp_path, animal="REFERENCE")
+        found_id, animal, resumable, why = REAL, "REFERENCE", True, ""
+    else:
+        first = _made(_folders(tmp_path, animals=("REFERENCE", "M1")),
+                      demo_root=tmp_path / "demos")
+        _step(first, _demo())
+        first.shutdown()
+        old = first.demo_root
+        for name in ("welfare_notes.jsonl", "config.json"):
+            path = _xcon(old, DEMO) / name
+            text = path.read_text()
+            assert '"subject": "REFERENCE"' in text, name
+            path.write_text(text.replace('"subject": "REFERENCE"', '"subject": "M1"'))
+        assert "demo" in _config(old, DEMO)
+        service = _made((first.subjects, first.tasks, first.root), demo_root=old)
+        found_id, animal, resumable, why = DEMO, "M1", False, DEMO_UNRESUMED
+    assert service.stranded_demos == []
+    assert [(s.session_id, s.subject, s.resumable, s.why) for s in service.stranded] == [
+        (found_id, animal, resumable, why)]
+    frame = _step(service)
+    assert [(s.session_id, s.demo_folder) for s in frame.stranded] == [(found_id, False)]
+    assert _degraded(frame)
+    refused = _step(service, _open(session_id=NEXT))
+    assert _refused(refused)[-1].startswith("no session opens while an animal's return is not")
+    assert not (service.root / NEXT).exists()
+
+
+def test_wlx_taskd_warns_of_a_real_session_in_the_demo_folder_and_starts(tmp_path, monkeypatch,
+                                                                         capsys):
+    """I1, warned and never refused (the PI's warnings over refusals): `wlx taskd` starts, says the
+    session found in the demo folder is stranded as any is, and warns that a demo folder holds
+    demos alone."""
+    service, old = _old_root_as_demo_root(tmp_path)
+    monkeypatch.setattr(Service, "serve", _interrupted)
+    assert main(_taskd("--subjects", str(service.subjects), "--tasks", str(service.tasks),
+                       "--root", str(service.root), "--demo-root", str(old))) == 130
+    out = capsys.readouterr().out
+    assert (f"  stranded: session {REAL} (M1); no session opens until its return is recorded"
+            in out)
+    assert (f"  warning: the demo folder {old} holds session {REAL} (M1), which is no demo: a "
+            f"demo is REFERENCE's, its config.json saying demo, and a demo folder holds demos "
+            f"alone. It is held as the stranded session it is; once its return is recorded, move "
+            f"it out of {old}, or name another folder as --demo-root") in out
+    assert "stranded demo:" not in out
+
+
+
+@pytest.mark.parametrize("command", ["end", "resume"])
+def test_a_real_session_in_the_demo_folder_whose_id_one_under_root_has_is_refused_doing_nothing(
+    tmp_path, command
+):
+    """I1, as a demo's End is (`_end_stranded_demo`): a session under `--root` with the same id --
+    only a hand makes one -- means a command naming it could be read as either, so it is refused,
+    both records untouched byte for byte and the session still stranded."""
+    service, old = _old_root_as_demo_root(tmp_path)
+    twin = _xcon(service.root, REAL)
+    twin.mkdir(parents=True)
+    (twin / "config.json").write_text(json.dumps({"session_id": REAL, "subject": "M1"}))
+
+    def files(root: Path) -> dict:
+        return {path: path.read_bytes() for path in sorted((root / REAL).rglob("*"))
+                if path.is_file()}
+
+    before = files(old), files(service.root)
+    sent = (_end(session_id=REAL) if command == "end"
+            else ResumeSession(by=BY, session_id=REAL))
+    frame = _step(service, sent)
+    assert _refused(frame)[-1] == (
+        f"session {REAL} of M1 is stranded in the demo folder ({old}), and a session under "
+        f"--root ({service.root}) has the same id, so a command naming it could be read as "
+        f"either; nothing was done. Move one of the two folders by hand, then restart wlx taskd")
+    assert (files(old), files(service.root)) == before
+    assert service.session is None and [s.session_id for s in service.stranded] == [REAL]
+    assert service.stranded_astray == service.stranded and service.root == tmp_path / "sessions-b"

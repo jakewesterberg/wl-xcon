@@ -1633,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
         help="the session's endpoints, exactly as given to `wlx run --link` or `wlx taskd "
         "--link`. Telemetry is read from the first, commands are sent to the second, an "
         "operator's mark signal to the third, and a demo's pointer reports, the page's "
-        "POST /gaze, to the fourth; without the third the page's mark control is greyed, "
+        "POST /gaze, to the fourth; without the third the page's mark control is grayed, "
         "and without the fourth no demo is steered from this page",
     )
     server_parser.add_argument(

@@ -292,7 +292,7 @@ A demo service's New session dialog offers `REFERENCE` alone, the one animal its
 *2026-11-14, as built (§15, "Also from a live rig's page"): a rig's page does.* Its New session dialog has a
 **demo** box, offered when the idle frame says `gaze` (a gaze endpoint and a `--demo-root`) and the rig's
 `--subjects` holds `REFERENCE`; ticked, it locks the subject to `REFERENCE` and fills *←cage at* and the id as
-above, and the open carries `demo`. Otherwise it is greyed, saying why; also while a demo in the demo folder is
+above, and the open carries `demo`. Otherwise it is grayed, saying why; also while a demo in the demo folder is
 stranded. On a demo service the dialog offers `REFERENCE` alone, as above.
 
 ### 4.2 The tag
@@ -464,8 +464,10 @@ it), so they draw as §4.4 says until a run sets them.
 | `wlx demo`: a task that fails its checks or pre-flight | its sentences printed; nothing left running |
 | `wlx demo`: a child process dies | the other stopped, the command ends, naming which and why |
 | `wlx demo --keep DIR` with `DIR` existing | refused before anything starts |
+| `wlx demo --keep DIR`: the copy fails at the end (no permission, a full disk) *(2026-11-16, the build's review, M7)* | said, naming where the session's folder is; the command's folder is kept, not deleted; the rig lock let go |
 | `wlx demo` killed outright, with no Ctrl-C | its folder stays in the temporary folder, outside any rig's data |
 | A demo stranded in a rig's `--demo-root` *(2026-11-14, as built)* | only *end* is offered, and only another demo's open waits on it; `/health` names it a demo's, featured when nothing more urgent is, and leaves the verdict `ok`, since no animal's return is missing (`health._animal_stranded`) |
+| Any other stranded record in a rig's `--demo-root`: one not saying `demo`, or not `REFERENCE`'s *(2026-11-16, the build's review, I1)* | the real session it is: every open waits on it, resume or end offered as for one under `--root`, `/health` `degraded`; `wlx taskd` starts, warning that a demo folder holds demos alone |
 
 ## 8. Welfare
 
@@ -497,7 +499,11 @@ With them, outside the list: a demo is never resumed, only ended (`_resume` refu
 `_open`'s existing stranded rule blocks every real animal's open. *(2026-11-14, as built (§15 item 2): a rig's
 demos are written under its own `--demo-root`, never its `--root`, so a crashed demo blocks only another demo's
 open, never a real animal's; its return is recorded by the unchanged `_end` and `_close_stranded`, the service
-pointed at the demo folder for that one call. No welfare-listed code changed for it.)*
+pointed at the demo folder for that one call. No welfare-listed code changed for it.)* *(2026-11-16, the whole-build
+review's I1: only a record whose `config.json` says `demo` and whose animal is `REFERENCE` is a demo in the demo
+folder. Any other stranded record found there is the real session it is: it blocks every open under `_open`'s
+unchanged rule, the page and `/health` say it is an animal's, it is resumed or ended in its own folder, and
+`wlx taskd` warns of it at start, saying a demo folder holds demos alone.)*
 
 ## 9. Testing (sim first)
 
@@ -673,8 +679,8 @@ review, by number):
     `screen.Screen`, which it carries.
 12. **Schema 15 also carries `gaze`** (this rig service has a gaze endpoint), for §4.1's greying
     (F12). **Changed**: schema 21 carries `demo`, since a whole service is a demo's or not (§3.7), and no page
-    greys a choice (§4.1). *(2026-11-14, as built (§15): schema 21 carries `Idle.gaze` as well, a gaze endpoint and,
-    on a rig service, a `--demo-root`, and a rig's page greys its demo box on it, saying why.)*
+    grays a choice (§4.1). *(2026-11-14, as built (§15): schema 21 carries `Idle.gaze` as well, a gaze endpoint and,
+    on a rig service, a `--demo-root`, and a rig's page grays its demo box on it, saying why.)*
 13. **`/gaze` is gated exactly as `/commands` is** (`_command`'s checks, factored out), never by
     `may_write`, which is false on the https page (F9). Each report on the https page costs a
     connection and a token check: stated, not measured. **Done**: §4.5.
