@@ -3758,9 +3758,14 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     object -- one a call, each once, its size whole, so an oversize one is told from a report. Its
     code builds nothing, and over a drain of reads it keeps nothing it allocates (`tracemalloc`, as
     `test_the_per_frame_check_keeps_nothing_it_allocates`; what pyzmq takes and gives back inside
-    one call it does not see, `ZmqLink.gaze_into` says how much). Of `DRAIN` reports sent at once,
-    the socket keeps the newest (M1): the last read is the last sent."""
+    one call it does not see, `ZmqLink.gaze_into` says how much). **The window holds a live read**:
+    a report is seen waiting (`POLLIN`) before the first snapshot, unread, and at least one read is
+    counted inside it (the build's re-review, N6: with `CONFLATE` a read before the window could
+    take the only one). Of `DRAIN` reports sent at once, the socket keeps the newest (M1): the last
+    read is the last sent."""
     import tracemalloc
+
+    import zmq
 
     link = _gazed_link(zmq_cleanup)
     gaze = zmq_cleanup(ZmqGaze(link.gaze_endpoint))
@@ -3779,19 +3784,27 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     for report in sent:
         assert _sent(gaze, report)
     take = link.gaze_into
-    # A first read outside the measure, as the mark check's warms up.
-    read = 1 if take(buffer) >= 0 else 0
+    # The reads above warmed the path; now one waits, unread, before the window opens.
+    waiting = False
+    for _ in range(400):
+        waiting = bool(link._gaze.getsockopt(zmq.EVENTS) & zmq.POLLIN)
+        if waiting:
+            break
+        time.sleep(0.005)
+    assert waiting, "no report was waiting to be read inside the measure"
+    inside = 0
     tracemalloc.start()
     try:
         before = tracemalloc.take_snapshot()
         calls = 0
         while calls < 100_000:
             if take(buffer) >= 0:
-                read += 1
+                inside += 1
             calls += 1
         after = tracemalloc.take_snapshot()
     finally:
         tracemalloc.stop()
+    read = inside
     while _gazed(link, buffer, tries=40) >= 0:
         read += 1
 
@@ -3800,7 +3813,8 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     held = [stat for stat in after.compare_to(before, "filename")
             if stat.size_diff > 0 and stat.traceback[0].filename == link_module.__file__]
     assert held == []
-    assert 1 <= read <= pointer.DRAIN and bytes(buffer) == sent[-1], read
+    assert inside >= 1, "the measure held no read"
+    assert read <= pointer.DRAIN and bytes(buffer) == sent[-1], read
 
 
 def test_after_a_pause_the_rig_reads_the_newest_report_and_no_send_is_refused(zmq_cleanup):

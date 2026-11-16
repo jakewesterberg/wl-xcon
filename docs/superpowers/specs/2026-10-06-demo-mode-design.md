@@ -392,10 +392,12 @@ wlx demo TASK [--tasks DIR] [--rig PATH] [--allocation PATH] [--view direct|ster
    time counted until a report arrives. This holds for every demo run, from either door, and only for its first
    trial: a later trial nobody steers ends as tracker lost (§7). `wlx demo` prints that the run begins when the
    person points at the demo screen. *(2026-11-16, the build's review, I3: **every** trial waits so, not only the
-   first. Once the reports stop -- Escape, a tab closed or hidden -- the trial under way ends as tracker lost, and
-   the next waits at the boundary, as the first does, until a page points again (`pointer.Source.steered`).
-   Before it, a run nobody steered played itself out as tracker-lost trials, about fifteen a second, a 1,000-trial
-   run in about a minute.)*
+   first. Once the reports stop -- Escape, a tab closed, or a tab hidden, which the page lets go of as Escape
+   does (its re-review, N1: a hidden tab's throttled timers would otherwise go on reporting) -- the trial under way
+   ends as tracker lost, and the next waits at the boundary, as the first does, until a page points again
+   (`pointer.Source.steered`); after Escape or a hidden tab, only once the pointer moves on the page. Before it, a
+   run nobody steered played itself out as tracker-lost trials, about fifteen a second, a 1,000-trial run in about
+   a minute.)*
 5. **It opens the default browser** on the full-window demo screen (Safari on the PI's Mac). The person is at the
    computer, so every control works: pause, stop, reward, a change mid-run, the trainer's panel, another run.
    `--no-browser` prints the address instead.
@@ -474,7 +476,7 @@ it), so they draw as §4.4 says until a run sets them.
 | `wlx demo --keep DIR`: the copy fails at the end (no permission, a full disk) *(2026-11-16, the build's review, M7)* | said, naming where the session's folder is; the command's folder is kept, not deleted; the rig lock let go |
 | `wlx demo` killed outright, with no Ctrl-C | its folder stays in the temporary folder, outside any rig's data |
 | A demo stranded in a rig's `--demo-root` *(2026-11-14, as built)* | only *end* is offered, and only another demo's open waits on it; `/health` names it a demo's, featured when nothing more urgent is, and leaves the verdict `ok`, since no animal's return is missing (`health._animal_stranded`) |
-| Any other stranded record in a rig's `--demo-root`: one not saying `demo`, or not `REFERENCE`'s *(2026-11-16, the build's review, I1)* | the real session it is: every open waits on it, resume or end offered as for one under `--root`, `/health` `degraded`; `wlx taskd` starts, warning that a demo folder holds demos alone |
+| Any other stranded record in a rig's `--demo-root`: one not saying `demo`, or not `REFERENCE`'s *(2026-11-16, the build's review, I1)* | the real session it is: every open waits on it, resume or end offered as for one under `--root`, `/health` `degraded`; `wlx taskd` starts, warning that a demo folder holds demos alone; it names every session there that is no demo, stranded or not, at every start, with its folder (the re-review, N2) |
 
 ## 8. Welfare
 
@@ -676,7 +678,13 @@ review, by number):
    whose reports come a few milliseconds early or late stays one saccade, not a second look, and
    a report where the pointer already goes (a still pointer's) leaves the move in flight as it was;
    closes XC-508. A 600 ms glide still sometimes ends on the pop-out's own 0.3 s landing bound,
-   with regular reports too: the task's bound, which the PI's try-out judges.)*
+   with regular reports too: the task's bound, which the PI's try-out judges. **What the slack
+   costs** (its re-review, N4; `tools/measure_demo_ease_slack.py`, on an injected clock with assumed
+   report timings, `docs/measurements/dev-machine/2026-11-16-demo-ease-slack.md`; no timing claim
+   about a rig): the eye trails the hand by about 21 ms more; a stop of 50 ms or less between two
+   moves can merge them into one saccade; a 600 ms glide meets the landing bound 5 or 6 times in
+   100, not 2, its flight 4.5 ms longer on average; and 1 in 100 jittered 600 ms glides still
+   splits.)*
 10. **The apparatus and field rule**: decided in `Service._open` (on the welfare list) and passed
     to `_build`; **a simulation is never resumed, only ended** (`resume.read` reads the flag;
     `_resume` refuses it), so a crashed simulation cannot come back as a live session. Both go

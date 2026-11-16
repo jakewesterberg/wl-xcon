@@ -85,11 +85,24 @@ class EmptySpace(Person):
 
 class SecondLook(Person):
     """At the go, looks short of the odd disc, 4° out on the line to it, outside the fixation
-    window and the disc's; two reports there, then on to the odd disc: a second look, which counts
-    wherever it goes."""
+    window and the disc's, stops there, then looks on to the odd disc: a second look, which counts
+    wherever it goes. **Its stop is timed, not left to the schedule** (the build's re-review, N7):
+    the look short is sent 50 ms after the go's first report and the look on 200 ms after it
+    (`next_in`), so the move short, eased over its 50 ms gap and `pointer.EASE_SLACK_S`, lands 75
+    ms on and **the pointer stops there 125 ms**: at least 75 ms with either report 50 ms late, well
+    clear of the 50 ms or less that can merge two moves into one saccade, and the second look begins
+    about 220 ms into the flight, inside the pop-out's 0.3 s landing bound. On the schedule, the
+    stop was 75 ms less twice a late report's lateness, and three reports short (300 ms) reach that
+    bound before the second look is seen (probed in process, 2026-11-16: 44 of 216 runs across
+    0-50 ms of lateness, against 0 of 216 so)."""
 
     def go(self, drawn):
-        return (*(toward_target(drawn, 4.0) if self.since_go <= 2 else target(drawn)), False)
+        if self.since_go == 1:
+            return (*FIX, False)
+        return (*(toward_target(drawn, 4.0) if self.since_go == 2 else target(drawn)), False)
+
+    def next_in(self):
+        return {1: 0.05, 2: 0.2}.get(self.since_go)
 
 
 class TargetBreak(Person):

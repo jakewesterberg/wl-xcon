@@ -1116,9 +1116,47 @@ def test_wlx_taskd_warns_of_a_real_session_in_the_demo_folder_and_starts(tmp_pat
             in out)
     assert (f"  warning: the demo folder {old} holds session {REAL} (M1), which is no demo: a "
             f"demo is REFERENCE's, its config.json saying demo, and a demo folder holds demos "
-            f"alone. It is held as the stranded session it is; once its return is recorded, move "
-            f"it out of {old}, or name another folder as --demo-root") in out
+            f"alone. Its folder is {old / REAL}. It is held as the stranded session it is; once "
+            f"its return is recorded, move it out of {old}, or name another folder as "
+            f"--demo-root") in out
     assert "stranded demo:" not in out
+
+
+def test_wlx_taskd_names_every_real_session_in_the_demo_folder_at_every_start(tmp_path,
+                                                                             monkeypatch, capsys):
+    """The build's re-review, N2: a real session in the demo folder is named at every start,
+    stranded or not -- here M1's, its return recorded, so it holds up nothing and no banner shows
+    it, yet it still sits among the demos -- with where its folder is; and so is every other record
+    there that is no demo: `REFERENCE`'s without `demo`, `demo` for another animal, and one whose
+    `config.json` cannot be read. A demo (`demo` for `REFERENCE`), stranded beside them, is not."""
+    service, old = _old_root_as_demo_root(tmp_path)
+    _step(service, _end(session_id=REAL))
+    assert _kinds(old, REAL)[-1] == "returned" and service.stranded == []
+    demo = _rig_service(tmp_path / "beside", demo_root=True)
+    _step(demo, _demo())
+    demo.shutdown()
+    shutil.copytree(demo.demo_root / DEMO, old / DEMO)
+    planted = {"ref-real": {"subject": "REFERENCE"}, "m1-demo": {"subject": "M1", "demo": {}},
+               "unreadable": None}
+    for name, config in planted.items():
+        _xcon(old, name).mkdir(parents=True)
+        (_xcon(old, name) / "config.json").write_text(
+            "{not json" if config is None else json.dumps(config))
+    monkeypatch.setattr(Service, "serve", _interrupted)
+    assert main(_taskd("--subjects", str(service.subjects), "--tasks", str(service.tasks),
+                       "--root", str(service.root), "--demo-root", str(old))) == 130
+    out = capsys.readouterr().out
+    assert (f"  warning: the demo folder {old} holds session {REAL} (M1), which is no demo: a "
+            f"demo is REFERENCE's, its config.json saying demo, and a demo folder holds demos "
+            f"alone. Its folder is {old / REAL}. Move it out of {old}, or name another folder as "
+            f"--demo-root") in out
+    for name, animal in (("m1-demo", "M1"), ("ref-real", "REFERENCE"),
+                         ("unreadable", "record unreadable")):
+        assert (f"  warning: the demo folder {old} holds session {name} ({animal}), which is no "
+                f"demo") in out, name
+    assert out.count("  warning: the demo folder") == 4, "the demo beside them is not named"
+    assert f"  stranded demo: session {DEMO} in the demo folder" in out
+    assert "  stranded: session" not in out
 
 
 

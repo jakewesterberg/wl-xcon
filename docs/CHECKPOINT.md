@@ -30,16 +30,18 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   PI's "Merge it". wl-preproc's pop-out reader is on its main, `d8fe06b`, and reads them.
 - **Demo mode is built on `demo-build-2026-11-14`** (worktree `.claude/worktrees/demo-plan-2026-11-10`; its plan
   `docs/superpowers/plans/2026-11-10-demo-mode.md`, its design `docs/superpowers/specs/2026-10-06-demo-mode-design.md`),
-  with main `1d77392` merged in; its whole-build review (2026-11-16: 0 Critical, 3 Important, 8 Minor) is answered,
-  every finding fixed in one round. **It waits on, in order:** a scoped re-review of that round; the PI's welfare
-  review of its two `Service._open` changes (two numbered items with `tools/welfare_diff.py 1d77392 HEAD`: `_open`
-  `DIFFERS`, naming his approval of 2026-11-07, every other item `SAME`); his try-out in Safari, `wlx demo
+  with main `1d77392` merged in; its whole-build review and the scoped re-review of its fix round (2026-11-16) are
+  answered, every finding fixed. **It waits on, in order:** the PI's welfare review, two numbered items, `_open`'s two
+  changes (`tools/welfare_diff.py 1d77392 HEAD`: `_open` `DIFFERS`, naming his approval of 2026-11-07, all else
+  `SAME`), and a third to hear, no change to the list: a real record found in the demo folder is ended or resumed
+  there through the unchanged `_end`, `_close_stranded` and `_resume`; his try-out in Safari, `wlx demo
   wl-xtasks/tasks/popout_search.py --set response_deadline=3.0`; and his merge, by his yes by name and a clean CI.
-- **Tell him first, in plain words**: the run begins when he first points at the demo screen; after Escape the trial
-  under way ends as tracker lost and the run waits until he points again; a slow glide (600 ms) can still end on the
-  pop-out's own 0.3 s landing bound, the question the try-out is for, and a quick flick is the steady answer; one page
-  steers at a time; colors and durations cannot be judged on the Mac's monitor; and a rig's `--demo-root` must be a
-  folder of its own (a real session found there is held as the session it is, and warned of).
+- **Tell him first, in plain words**: the run begins when he first points at the demo screen; after Escape or a
+  switch of tab the trial under way ends as tracker lost and the run waits until he moves the pointer on it again; a
+  slow glide (600 ms) can still end on the pop-out's own 0.3 s landing bound, the try-out's question, a little more
+  often for the easing (a few ms longer on average), and a quick flick is the steady answer; one page steers at a
+  time; colors and durations cannot be judged on the Mac's monitor; and a rig's `--demo-root` is a folder of its own
+  (a real session found there is held as the session it is, and named at every start).
 
 ## What exists
 - **Tasks**: the task object and its load check (`task.py`, `check.py`), engine builds A1 to C3; five reference
@@ -49,21 +51,19 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   a session gets wrong: a crashed session's first run goes on from the run its process stopped in
   (`Session._going_on`), the previous session's end only *shown* at a start; a value held at a staircase's hardest
   level counts toward moving up.
-- **Running**: the trial loop (`run.py`), the session daemon and CLI (`taskd.py`, `cli.py`), the simulated animal
-  and eye (`simulate.py`, `simeye.py`, through the rig's gaze world, `gaze.Tracked`).
-- **The console**: a browser page on the LAN (`serve.py`, `web.py`, `link.py`); writes from the box only; sign-in from
-  wl.works designed, waiting on the rig's https page (XC-151, XC-152).
+- **Running**: the trial loop, daemon and CLI (`run.py`, `taskd.py`, `cli.py`); the simulated animal and eye.
+- **The console**: a page on the LAN (`serve.py`, `web.py`, `link.py`), writes from the box only; wl.works sign-in
+  waits on the rig's https page (XC-151, XC-152).
 - **Demo mode** (on the branch above; XC-013): the mouse as the eye (`pointer.py`), the exact drawer's frames on the
-  page (`demoscreen.py`), `POST /gaze`, `wlx taskd --demo`, `wlx demo` (`demo.py`), and a demo for `REFERENCE` from a
-  live rig's page (`--demo-root`, `--link`'s fourth endpoint). Its fidelity limit is XC-506; the rig lock's macOS
-  reach is XC-509.
+  page (`demoscreen.py`), `POST /gaze`, `wlx taskd --demo`, `wlx demo` (`demo.py`), and a demo from a live rig's page
+  (`--demo-root`, `--link`'s fourth endpoint). Open: XC-506 (fidelity), XC-509 (the rig lock on macOS).
 - **Welfare** (`bounds.py`, `welfare.py`, `marks.py`, `stranded.py` and the functions architecture.md lists, held to
   `tests/welfare_manifest.json`): one limit, out of the cage to back in, eight hours (the institution's); the day's
-  fluid is a floor; each delivery's size is a ceiling; a task names how reward is configured, never how much.
-- **The record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
+  fluid is a floor; each delivery's size is a ceiling; a task names how reward is configured, never how much. **The
+  record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07 and 2026-11-14)
-1. **Demo mode's re-review, welfare review, try-out and merge** (above).
+1. **Demo mode's welfare review, try-out and merge** (above).
 2. **The XC-505 warning**, a side build after demo mode (the PI, 2026-11-14: "Warn when settings allow it").
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
 4. **Side work on the January path**: the sync-box client (XC-460), the operator's guide (XC-014, with a rig's demo

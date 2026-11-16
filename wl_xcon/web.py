@@ -222,9 +222,10 @@ DEMO_INPUTS = (
     ("B", "held: tracker loss, as a rig's tracker loses the eye; the trial ends as its "
           "tracker_lost says. A number key pressed while B is held is not seen, since the trial "
           "asks no guard while the tracker is lost"),
-    ("Esc", f"closes the full window and lets go of the eye. With no page steering, the eye reads "
-            f"as tracker loss after {_LIVE_S:g} s, so an Escape mid-trial ends that trial as "
-            f"tracker lost, and the run waits before the next until a page points again"),
+    ("Esc", f"closes the full window and lets go of the eye, as hiding the tab does. With no page "
+            f"steering, the eye reads as tracker loss after {_LIVE_S:g} s, so an Escape mid-trial "
+            f"ends that trial as tracker lost, and the run waits before the next until a page "
+            f"points again"),
     ("F", "the full window; a click on the screen opens it too"),
     ("P · M", "pause or resume · mark, as everywhere on the page"),
 )
@@ -3871,10 +3872,10 @@ _SCRIPT = """
           answer.reason === "not_accepted" || answer.reason === "no_token") { forget(); }
     }
   }
-  // **Letting go of the eye** (§4.5): Escape, the page going away, or the demo session's end. A
-  // release goes even as the page unloads (`keepalive`); an answer to a report sent before it is
-  // not taken as the steer kept (`epoch`). After an Escape (`hush`) nothing is sent until the
-  // pointer moves again.
+  // **Letting go of the eye** (§4.5): Escape, the tab hidden, the page going away, or the demo
+  // session's end. A release goes even as the page unloads (`keepalive`); an answer to a report
+  // sent before it is not taken as the steer kept (`epoch`). After an Escape or a hidden tab
+  // (`hush`) nothing is sent until the pointer moves again.
   function letGo(hush) {
     var held = gaze.engaged || gaze.inFlight;
     gaze.engaged = false;
@@ -3942,6 +3943,14 @@ _SCRIPT = """
   });
   window.addEventListener("pagehide", function () {
     if (gaze.engaged || gaze.inFlight) { letGo(false); }
+  });
+  // **A hidden tab lets go as Escape does** (the build's re-review, N1): a browser throttles a
+  // hidden tab's timers but runs them, so a still pointer's reports would go on and let a trial
+  // through each boundary to end as tracker lost. Hushed whether or not it steers, it sends nothing
+  // until the pointer moves on the page again.
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "hidden") { return; }
+    if (gaze.engaged || gaze.inFlight) { letGo(true); } else { gaze.hush = true; }
   });
   el("demo-screen").addEventListener("click", function () { if (!demo.full) { openFull(); } });
   // The New session dialog's demo choice (§4.1): on a demo service the departure and the id filled

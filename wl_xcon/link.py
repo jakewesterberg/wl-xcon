@@ -4540,7 +4540,8 @@ class ZmqGaze:
 
     def send(self, message: bytes) -> bool:
         """Hand `message`, one packed report, to the rig's socket without waiting: `True` if it
-        went, `False` if no rig is connected or its queue is full."""
+        went, `False` if no rig is connected. A connected rig's socket never refuses one: both ends
+        keep only the newest waiting (`CONFLATE`)."""
         import zmq
 
         try:

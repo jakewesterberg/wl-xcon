@@ -76,6 +76,7 @@ import argparse
 import dataclasses
 import fcntl
 import gc
+import json
 import os
 import re
 import secrets
@@ -242,6 +243,32 @@ def _demos_marked(found: list, root: Path) -> list:
         else entry
         for entry in found
     ]
+
+
+def _not_demos(demo_root: Path) -> list[tuple[str, str]]:
+    """**Every session in a rig's demo folder that is no demo**, stranded or not, as `(session id,
+    animal)`, in folder order: a folder holding an `xcon` record whose `config.json` does not say
+    `demo` for `REFERENCE` (`resume.is_demo`), the animal its `config.json` names, or `""` when it
+    cannot be read. What `wlx taskd` warns of at every start (the build's re-review, N2): a demo
+    folder holds demos alone, and a real session left there -- ended, resumed and ended, or
+    stranded -- is named each time until it is moved out."""
+    found = []
+    root = Path(demo_root)
+    if not root.is_dir():
+        return found
+    for record in sorted(root.glob(f"*/{XCON_DIRNAME}")):
+        if not record.is_dir():
+            continue
+        try:
+            config = json.loads((record / "config.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            config = None
+        subject = config.get("subject") if isinstance(config, dict) else None
+        subject = subject if isinstance(subject, str) else ""
+        if subject == REFERENCE and _resume_mod.is_demo(record):
+            continue
+        found.append((record.parent.name, subject))
+    return found
 
 
 def _demo_folder_split(found: list, demo_root: Path) -> tuple[list, list]:
@@ -2066,16 +2093,22 @@ def _serve(args, rig: Rig, allocation: Allocation, parts: list) -> int:
                 f"return is recorded",
                 flush=True,
             )
-        for found in service.stranded_astray:
+        held = {found.session_id: found for found in service.stranded_astray}
+        for session_id, subject in ([] if service.demo_root is None
+                                    else _not_demos(service.demo_root)):
             # **Warned, never refused** (the whole-build review's I1; the PI's warnings over
-            # refusals, 2026-10-11): the service starts, holding it as the session it is.
+            # refusals, 2026-10-11), **every start, stranded or not** (its re-review, N2): the
+            # service starts, holding a stranded one as the session it is.
+            found = held.get(session_id)
+            animal = (found.subject if found is not None else subject) or "record unreadable"
+            then = ("It is held as the stranded session it is; once its return is recorded, move "
+                    "it out" if found is not None else "Move it out")
             print(
-                f"  warning: the demo folder {service.demo_root} holds session "
-                f"{found.session_id} ({found.subject or 'record unreadable'}), which is no "
-                f"demo: a demo is REFERENCE's, its config.json saying demo, and a demo folder "
-                f"holds demos alone. It is held as the stranded session it is; once its return "
-                f"is recorded, move it out of {service.demo_root}, or name another folder as "
-                f"--demo-root",
+                f"  warning: the demo folder {service.demo_root} holds session {session_id} "
+                f"({animal}), which is no demo: a demo is REFERENCE's, its config.json saying "
+                f"demo, and a demo folder holds demos alone. Its folder is "
+                f"{service.demo_root / session_id}. {then} of {service.demo_root}, or name "
+                f"another folder as --demo-root",
                 flush=True,
             )
         for found in service.stranded_demos:

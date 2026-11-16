@@ -2874,7 +2874,45 @@ def test_a_page_says_steered_from_another_page_and_lets_go_on_escape_and_when_it
         demo_box.steer.reports()[0].page}
 
 
-def test_not_delivered_between_runs_is_said_quietly_and_reports_go_on(demo_box):
+#: **The tab hidden, or shown again**, as the browser says it: `document.visibilityState` set and
+#: `visibilitychange` sent, which is what a page sees when its tab goes behind another or comes back
+#: (Playwright has no call that hides a page; this is the event the page listens for).
+_VISIBILITY = (
+    "(state) => { Object.defineProperty(document, 'visibilityState',"
+    " {configurable: true, get: () => state});"
+    " document.dispatchEvent(new Event('visibilitychange')); }")
+
+
+def test_a_hidden_tab_lets_go_of_the_eye_and_steers_again_once_the_pointer_moves(demo_box):
+    """The build's re-review, N1: a hidden tab's timers are throttled, not stopped, so a still
+    pointer's reports would go on and let a trial through each boundary to end as tracker lost.
+    **Hidden, the page lets go as Escape does** (`release`), and sends nothing more, its timer
+    running or not; shown again, still nothing until the pointer moves on it, and then it steers."""
+    page = demo_box.page
+    page.goto(demo_box.url)
+    demo_box.demo()
+    page.wait_for_selector(_DRAWN, state="attached")
+    screen = _box_of(page, "#demo-drawing svg")
+    middle = (screen["x"] + screen["width"] / 2, screen["y"] + screen["height"] / 2)
+    page.mouse.move(*middle)
+    page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+    demo_box.wait_for(lambda: len(demo_box.steer.reports()) >= 3)
+
+    page.evaluate(_VISIBILITY, "hidden")
+    demo_box.wait_for(lambda: len(demo_box.steer.releases()) == 1)
+    quiet = len(demo_box.steer.reports())
+    time.sleep(0.5)  # five of the still pointer's report intervals (`GAZE_EVERY_MS`)
+    assert len(demo_box.steer.reports()) <= quiet + 1, "nothing while hidden but one in flight"
+    page.evaluate(_VISIBILITY, "visible")
+    time.sleep(0.3)
+    assert len(demo_box.steer.reports()) <= quiet + 1, "nothing shown again until it moves"
+    page.mouse.move(middle[0], middle[1] + 3)
+    demo_box.wait_for(lambda: len(demo_box.steer.reports()) > quiet + 1)
+    page.wait_for_selector('#demo-pane[data-steer="steering"]', state="attached")
+    assert len(demo_box.steer.releases()) == 1
+
+
+def test_a_report_not_delivered_is_said_quietly_and_reports_go_on(demo_box):
     """Task 8's carried (a): a report answered 504 *not delivered* -- no rig on the gaze endpoint;
     before the whole-build review's M1, every report between runs and while paused -- is said
     quietly, never as an error; the page keeps sending, and steers again the moment one is

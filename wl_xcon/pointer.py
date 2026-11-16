@@ -40,7 +40,10 @@ release between two frames is seen once.
   since the whole-build review's I2). So a hand's path reaches the detector as motion, a glide
   whose reports come a little irregularly is one saccade, and a one-report flick is still a
   saccade; reports one a frame are taken exactly, with no slack. A first report, and the first
-  after the one in hand went stale, is taken at once, where the pointer is.
+  after the one in hand went stale (`LIVE_S`), is taken at once, where the pointer is, as a
+  tracker finds the eye again: between trials, and mid-trial too, where a page's stall past
+  `LIVE_S` that ends inside the task's `tracker_lost` grace moves the eye at once to where it
+  points, a jump, not a saccade.
 - **At a trial's first frame** everything waiting but the newest report is discarded and the key
   counts are rebased, so a press in the gap between trials never fires the next trial's `Pressed`
   (`new_trial`).
@@ -67,7 +70,8 @@ every `REDRAWN_EVERY_S`; and a blank one when the trial has ended (`Pointing.end
 session calls at the boundary). A drawing and its publisher are given together or not at all.
 **A demo run's trial waits for its page's pointer** (`Worlds.waiting`; demo mode's Task 10, and
 since the whole-build review's I3 every trial, not only the first): while no page steers -- before
-the first report, and once the reports stop (Escape, a tab closed or hidden) -- the trial loop
+the first report, and once the reports stop (Escape, a tab closed, or a tab hidden, which the
+page lets go of as Escape does) -- the trial loop
 holds at the boundary before the next trial, the field published blank (`Drawing.field`), since
 before the first screen a page has nothing to point at, and an eye nobody steers is tracker loss.
 
@@ -150,7 +154,14 @@ LIVE_S = 0.5
 #: the next report, and a glide reached the detector as two saccades. 25 ms, a frame and a half at
 #: 60 Hz, is what the review's probe found keeping 400 ms and 600 ms glides one saccade at 2-12 ms
 #: round trips, as `tests/test_pointer.py`'s glide test holds; only a report more than a frame
-#: after the one before takes it. Playable, and claiming nothing.
+#: after the one before takes it. Playable, and claiming nothing. **What it costs** (the build's
+#: re-review, N4; from `tools/measure_demo_ease_slack.py`, on an injected clock with assumed report
+#: timings, `docs/measurements/dev-machine/2026-11-16-demo-ease-slack.md`; not timing claims about
+#: a rig): the eye trails the hand by about 21 ms more, so a hand that leaves less than about that
+#: before the go reads as leaving after it; a stop of 50 ms or less between two moves can merge
+#: them into one saccade (5 of 10 at 0-17 ms, 1 of 10 at 33-50 ms); a 600 ms glide meets the
+#: pop-out's own 0.3 s landing bound 5 or 6 times in 100, not 2; and 1 in 100 jittered 600 ms
+#: glides still splits into two looks.
 EASE_SLACK_S = 0.025
 #: **Where the pointer off the drawing looks**, in degrees: straight up, beyond any field a rig
 #: shows, so outside every window, as an animal looking away.
@@ -412,9 +423,12 @@ class Source:
             self._landed = True
         elif not self._live(now):
             # **A first report, or the first after the one in hand went stale** (`LIVE_S`): taken
-            # at once, as a tracker finds the eye where it is, never eased from where it was lost
-            # -- once a page lets go and points again, the next trial's eye starts where it now
-            # points (the whole-build review's I3).
+            # at once, as a tracker finds the eye again where it is, never eased from where it
+            # was lost. Between trials, once a page lets go and points again, the next trial's eye
+            # starts where it now points (the whole-build review's I3); **mid-trial too**: after a
+            # page's stall past `LIVE_S` that ends inside the task's `tracker_lost` grace, the eye
+            # is where the page points at once, a jump the detector reads as no saccade (its
+            # re-review, N3), as a rig's tracker regaining the eye.
             self._x = self._to_x = x
             self._y = self._to_y = y
             self._landed = True
@@ -940,7 +954,8 @@ class Worlds:
     trial since the whole-build review's I3). Before a run's first screen there is nothing drawn
     to point at, so no page can steer, and a trial whose eye nobody steers ends as tracker lost: a
     run's first trial would be scored before anyone could play it, and once a person lets go of
-    the eye (Escape, a tab closed or hidden), every trial after would, about fifteen a second. So
+    the eye (Escape, a tab closed, or hidden, which the page lets go of as Escape does; the build's
+    re-review, N1), every trial after would, about fifteen a second. So
     the trial loop asks `waiting` at the boundary before each trial (`taskd.Session.run`), and
     while no page steers holds there, as a pause does, the field published for a page to point
     at."""

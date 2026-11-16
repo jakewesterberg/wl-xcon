@@ -150,6 +150,12 @@ class Person:
         """From the go: where the pointer is, `drawn` the screen the discs came on in."""
         raise NotImplementedError
 
+    def next_in(self) -> "float | None":
+        """**How long after the report just sent the next one goes**, in seconds, timed from
+        when it was sent; `None`, the schedule's, every `REPORT_EVERY_S`: for a script that must
+        time a move finer than the schedule (`test_demo_popout.py`'s second look)."""
+        return None
+
 
 def shown_names(drawn: Drawn) -> set[str]:
     """What `drawn` shows, by item name: an array's object `search.0` is drawn as an item of that
@@ -222,7 +228,8 @@ class Pointer:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="scripted pointer", daemon=True)
         self.fault: BaseException | None = None
-        #: Reports sent, and those the PUSH could not hand over (no rig reading, its queue full).
+        #: Reports sent, and those the PUSH could not hand over (no rig connected; a connected
+        #: one's socket keeps the newest and refuses none, `link.ZmqGaze`).
         self.sent = self.refused = 0
 
     def start(self) -> None:
@@ -243,7 +250,9 @@ class Pointer:
                         self.sent += 1
                     else:
                         self.refused += 1
-                    due = max(due + REPORT_EVERY_S, time.perf_counter())
+                    wait = self.person.next_in()
+                    due = (time.perf_counter() + wait if wait is not None
+                           else max(due + REPORT_EVERY_S, time.perf_counter()))
                 try:
                     frame = self._drawn.receive()
                 except TimeoutError:
