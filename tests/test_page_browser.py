@@ -2529,8 +2529,10 @@ GLIDE_STEP_S = 0.002
 #: **A flick**, for an answer that must reach the rig as one saccade: the mouse moved at once, this
 #: long after the page's last report, so the one report that carries the whole move is eased by
 #: the rig over the time since the one before (`pointer.Source`), as `tests/_demo.py`'s scripted
-#: pointer flicks. A glide reported a frame at a time is a saccade on a quiet machine but split in
-#: two under the suite's load (XC-508). Engine test material.
+#: pointer flicks. A glide reported a frame at a time is a saccade on a quiet machine, and split in
+#: two under the suite's load until `pointer.EASE_SLACK_S` (2026-11-16, the build's review, I2,
+#: whose glide test is `tests/test_pointer.py`'s, on an injected clock); a flick stays the answer
+#: here, where the suite's load is on the wall clock. Engine test material.
 FLICK_AFTER_S = 0.06
 
 

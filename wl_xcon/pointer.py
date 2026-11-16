@@ -30,9 +30,11 @@ release between two frames is seen once.
   animal looking away, so no fixation or a fixation break, never tracker loss.
 - **A report's move spans the frames it took** (§14 item 9): the position is eased from where it
   was to where the report puts it on the minimum-jerk profile the simulated eye flies
-  (`10τ³ - 15τ⁴ + 6τ⁵`), over as many frames as passed since the previous report arrived, at most
-  `LIVE_S`, the arrival frame its first (planner's call). So a hand's path reaches the detector as
-  motion, and a one-report flick is still a saccade; reports one a frame are taken exactly.
+  (`10τ³ - 15τ⁴ + 6τ⁵`), over as many frames as passed since the previous report arrived and
+  `EASE_SLACK_S` more, at most `LIVE_S`, the arrival frame its first (planner's call; the slack
+  since the whole-build review's I2). So a hand's path reaches the detector as motion, a glide
+  whose reports come a little irregularly is one saccade, and a one-report flick is still a
+  saccade; reports one a frame are taken exactly, with no slack.
 - **At a trial's first frame** everything waiting but the newest report is discarded and the key
   counts are rebased, so a press in the gap between trials never fires the next trial's `Pressed`
   (`new_trial`).
@@ -66,9 +68,10 @@ steers is tracker loss.
 "everything adjustable in the console", 2026-11-07, is about a task's numbers, which stay settings):
 `KEYS` and `DRAIN`, bounded work a frame (§3.4, §3.8); `LIVE_S`, five of the page's slowest report
 intervals (`web.GAZE_EVERY_MS`, 100 ms, demo mode's Task 9), so a demo is playable, claiming
-nothing (§3.3); `AWAY_DEG`, beyond any field a rig shows; the noise, `simeye.NOISE_DEG`, imported,
-drawn from the run's seed (§14 item 16); `REDRAWN_EVERY_S`, inside `wlx console`'s 5 s timeout and
-a page's patience (§3.9); `OUTLINE_DEG`, a mark claiming no size. **Planner's calls**: the ease's
+nothing (§3.3); `EASE_SLACK_S`, a report's usual lateness (the whole-build review's I2);
+`AWAY_DEG`, beyond any field a rig shows; the noise, `simeye.NOISE_DEG`, imported, drawn from the
+run's seed (§14 item 16); `REDRAWN_EVERY_S`, inside `wlx console`'s 5 s timeout and a page's
+patience (§3.9); `OUTLINE_DEG`, a mark claiming no size. **Planner's calls**: the ease's
 span; the agreement test.
 
 **Hot path.** `Pointing.display` and `happened` run every frame, and so do the source's `poll` and
@@ -130,6 +133,16 @@ DRAIN = 64
 #: (§3.3), so a page's stall is held and counts toward holds, and a page gone quiet is tracker
 #: loss. Playable, and claiming nothing.
 LIVE_S = 0.5
+#: **How much longer than the gap since the report before a report's move is eased**, in seconds
+#: (the whole-build review's I2, 2026-11-16, closing XC-508): a report's usual lateness. The page
+#: reports once an animation frame while the pointer moves, 16.7 ms apart at 60 Hz, and each
+#: arrives some milliseconds earlier or later than the last did (a busy browser, the network;
+#: assumed, not measured), so a move eased over only the gap before it could land and stop before
+#: the next report, and a glide reached the detector as two saccades. 25 ms, a frame and a half at
+#: 60 Hz, is what the review's probe found keeping 400 ms and 600 ms glides one saccade at 2-12 ms
+#: round trips, as `tests/test_pointer.py`'s glide test holds; only a report more than a frame
+#: after the one before takes it. Playable, and claiming nothing.
+EASE_SLACK_S = 0.025
 #: **Where the pointer off the drawing looks**, in degrees: straight up, beyond any field a rig
 #: shows, so outside every window, as an animal looking away.
 AWAY_DEG = (0.0, 60.0)
@@ -371,8 +384,10 @@ class Source:
     def _adopt(self, now: float) -> None:
         """**The kept report becomes the one in hand**, arriving `now`. Over the drawing, the
         pointer is eased from where it is drawn now to the report's position, over the time since
-        the previous report arrived, at most `LIVE_S`, starting a frame before `now` so that the
-        arrival frame is the move's first (the module docstring); a first report is taken at once.
+        the previous report arrived, and `EASE_SLACK_S` more when that was over a frame, at most
+        `LIVE_S`, starting a frame before `now` so that the arrival frame is the move's first (the
+        module docstring); a first report is taken at once, and one where the pointer already goes
+        leaves the move in flight as it was.
         Off the drawing, it is at `AWAY_DEG` at once. Its keys and button are taken as they are;
         the edges are `_edges`'."""
         fields = self._kept
@@ -383,9 +398,22 @@ class Source:
             self._x = self._to_x = _AWAY_X
             self._y = self._to_y = _AWAY_Y
             self._landed = True
+        elif self._current and x == self._to_x and y == self._to_y:
+            # **A report where the pointer already goes, a still pointer's**: the move in flight
+            # goes on as it was. Restarted from rest, it would stop and start again, which the
+            # detector reads as a second saccade; with the slack below, a still pointer's next
+            # report often comes before its move has landed (the whole-build review's I2).
+            pass
         elif self._current:
             self._ease(now)
             span = now - self._arrived
+            if span > 1.5 * self._step:
+                # **A report after a gap, eased over it and `EASE_SLACK_S` more**: one
+                # a little later than that gap finds the pointer still moving, not stopped at the
+                # last report, so a glide is one saccade. One the frame after the last (half a
+                # frame's margin for the clock's rounding) has no gap to bridge, and is taken
+                # exactly, as before.
+                span += EASE_SLACK_S
             if span > LIVE_S:
                 span = LIVE_S
             self._from_x = self._x

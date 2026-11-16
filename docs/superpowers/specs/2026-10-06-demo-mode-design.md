@@ -664,7 +664,12 @@ review, by number):
    `Pointing`, built as the simulated eye's `simeye.Seeing` is.
 9. **A reported move spans the frames it took**: the source eases each report over the report
    interval, so a one-report flick is still a saccade; tests move the pointer across several
-   frames (F3). **Done**: §3.3, §9.
+   frames (F3). **Done**: §3.3, §9. *(2026-11-16, the build's review, I2: a report more than a frame
+   after the one before is eased over that gap and `pointer.EASE_SLACK_S`, 25 ms more, so a glide
+   whose reports come a few milliseconds early or late stays one saccade, not a second look, and
+   a report where the pointer already goes (a still pointer's) leaves the move in flight as it was;
+   closes XC-508. A 600 ms glide still sometimes ends on the pop-out's own 0.3 s landing bound,
+   with regular reports too: the task's bound, which the PI's try-out judges.)*
 10. **The apparatus and field rule**: decided in `Service._open` (on the welfare list) and passed
     to `_build`; **a simulation is never resumed, only ended** (`resume.read` reads the flag;
     `_resume` refuses it), so a crashed simulation cannot come back as a live session. Both go

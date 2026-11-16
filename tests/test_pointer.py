@@ -391,6 +391,27 @@ def test_a_one_report_flick_is_still_a_saccade(monkeypatch):
     assert world.in_window("flick", result.frames)
 
 
+def test_a_still_pointers_report_during_its_flick_leaves_the_flick_one_saccade(monkeypatch):
+    """The whole-build review's I2, with `pointer.EASE_SLACK_S`: a flick's report after 100 ms
+    of none is eased over 125 ms, so the still pointer's next report, here 50 ms later, as a page
+    on a busy computer sends it, comes before the flick has landed. **A report where the pointer
+    already goes leaves the move in flight as it was**: restarted from rest it would stop and start
+    again, a second saccade (23 of 40 seeds, probed), and in the pop-out a second look, an abort
+    (`tests/test_demo_popout.py`'s look to empty space, once, under the suite's load)."""
+    confirmed = _count_saccades(monkeypatch)
+    trial = Trial(start="s", states=[State("s", go=[On(After(3.0), Outcome.CORRECT)])])
+    for seed in range(10):
+        confirmed.clear()
+        clock, page, source, pace = _rig(seed=seed)
+        for frame in range(1, 300, 24):
+            page.pointer(frame_at(T0, frame), 0.0, 0.0)
+        for frame in (300, *range(312, 720, 24)):
+            page.pointer(frame_at(T0, frame), 6.0, 6.0)
+        _play(trial, source, pace)
+        flicks = [found for found in confirmed if found.amplitude_deg > 1.0]
+        assert len(flicks) == 1 and confirmed[-1] is flicks[0], (seed, confirmed)
+
+
 # --- Keys, touch and the light sensor ---------------------------------------------------------
 
 
@@ -477,8 +498,10 @@ def test_press_counts_rebase_at_a_trials_first_frame():
     stale = source.stale
     world = make(trial, {}, 1)
     assert source.stale == stale + 2
-    assert _drive(world, 8, guards=(Pressed("lever"), Released("lever"))) == [(False, False)] * 8
-    assert world.gaze_cyclopean(8) == pytest.approx((4.0, 4.0), abs=0.1)
+    # Sixteen frames: the move to the newest report is eased over the gap since the last report
+    # and `EASE_SLACK_S`, landed well inside them.
+    assert _drive(world, 16, guards=(Pressed("lever"), Released("lever"))) == [(False, False)] * 16
+    assert world.gaze_cyclopean(16) == pytest.approx((4.0, 4.0), abs=0.1)
     page.waiting.clear()
     assert played(1, clock.t) is Outcome.CORRECT
     assert played(1, clock.t, pressed_at=9) is Outcome.FALSE_ALARM
@@ -1040,6 +1063,82 @@ def _popout():
     from wl_xcon.cli import _load_task
 
     return _load_task(_XTASKS / "tasks" / "popout_search.py")
+
+
+#: **The page's animation frames**, which it reports the pointer on while it moves: 60 Hz.
+_ANIMATION = 1 / 60
+
+
+def _glided(task, glide_s: float, seed: int) -> str:
+    """**One pop-out trial answered by a hand's glide**, as the whole-build review's probe played it
+    (I2): the pointer resting off the fixation point, onto it at 0.5 s, and at 1.1 s,
+    long after the discs are on, a glide of `glide_s` on the minimum-jerk profile to the odd disc
+    8° away. **The page as it reports**: a report every animation frame while the pointer moves,
+    every 100 ms while it is still, each reaching the rig half a round trip after it was sent, the
+    round trip drawn for each report from 2 to 12 ms (assumed, not measured), from `seed`, which
+    seeds the mouse's noise too. How it ended: `"correct"`; `"landing bound"`, the pop-out's
+    `flight` ended by its own 0.3 s bound on landing (an abort); `"second look"`, ended by a second
+    saccade's onset in flight (an abort); or the outcome's value."""
+    trial = task.trial
+    values = {param.name: param.start for param in task.params if param.start is not None}
+    odd, among = task.pool.choices[0]
+    values.update(odd_color=odd, distractor_color=among, set_size=4, array_rotation=0.0,
+                  response_deadline=3.0, inter_trial=0.3, fix_hold=0.3, target_hold=0.1,
+                  timeout=0.0)
+    clock, page, source, pace = _rig(seed=seed)
+    timing = random.Random(f"{seed}: the page's round trips")
+
+    def sent(at: float, x: float, y: float) -> None:
+        page.pointer(at + timing.uniform(0.002, 0.012) / 2, x, y)
+
+    for k in range(5):
+        sent(T0 + 0.1 * k, -4.0, -4.0)
+    for k in range(6):
+        sent(T0 + 0.5 + 0.1 * k, 0.0, 0.0)
+    start, k = T0 + 1.1, 0
+    while True:
+        tau = min(k * _ANIMATION / glide_s, 1.0)
+        sent(start + k * _ANIMATION, 8.0 * tau ** 3 * (10 - 15 * tau + 6 * tau * tau), 0.0)
+        if tau >= 1.0:
+            break
+        k += 1
+    for j in range(1, 40):
+        sent(start + k * _ANIMATION + 0.1 * j, 8.0, 0.0)
+    world = pointer.worlds(source, pace=pace)(trial, values, 0)
+    began: dict = {}
+    told = world.began
+
+    def beginning(state: str, frame: int) -> None:
+        began.setdefault(state, frame)
+        told(state, frame)
+
+    world.began = beginning
+    outcome = run_trial(trial, world, FRAME, values=values, effects=Recorded()).outcome
+    if outcome is not Outcome.ABORT or "astray" not in began:
+        return outcome.value
+    flown = (began["astray"] - began["flight"]) * FRAME
+    return "landing bound" if flown >= 0.3 - FRAME / 2 else "second look"
+
+
+def test_a_glide_reported_irregularly_is_one_saccade_scored_correct():
+    """**The whole-build review's I2, closing XC-508**: the pop-out answered by a hand's glide to
+    the odd disc, the page's reports an animation frame apart arriving a few milliseconds early or
+    late.
+    Eased only over the gap since the report before, a move whose next report came a little later
+    than that gap stopped between the two, and the rig's detector saw two saccades, the second a
+    second look in flight, an abort: the old code ends 5 of these twelve 400 ms glides so, and all
+    twelve 600 ms ones. `pointer.EASE_SLACK_S` eases each over the gap and that slack: **every 400
+    ms glide is scored correct, and no glide is a second look.** A 600 ms glide is slow enough that
+    the pop-out's own 0.3 s bound on landing sometimes ends it, with regular reports too (3 of 60
+    seeds here, 2 of 30 in the review's probe): that bound is the task's, which the PI's try-out is
+    to judge, so it is told apart here, never counted against the reports (one of these twelve).
+    Fixed seeds."""
+    task = _popout()
+    ended = {(glide_s, seed): _glided(task, glide_s, seed)
+             for glide_s in (0.4, 0.6) for seed in range(12)}
+    assert {how for (glide_s, _), how in ended.items() if glide_s == 0.4} == {"correct"}, ended
+    assert set(ended.values()) <= {"correct", "landing bound"}, ended
+    assert sum(how == "correct" for (glide_s, _), how in ended.items() if glide_s == 0.6) >= 10
 
 
 def test_the_drawn_windows_are_those_tracked_scores_with_the_target_flagged():
