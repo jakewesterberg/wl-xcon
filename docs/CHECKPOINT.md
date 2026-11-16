@@ -31,10 +31,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
 - **Demo mode is built on `demo-build-2026-11-14`** (worktree `.claude/worktrees/demo-plan-2026-11-10`; its plan
   `docs/superpowers/plans/2026-11-10-demo-mode.md`, its design `docs/superpowers/specs/2026-10-06-demo-mode-design.md`),
   with main `1d77392` merged in; its whole-build review and the scoped re-review of its fix round (2026-11-16) are
-  answered, every finding fixed. **It waits on, in order:** the PI's welfare review, two numbered items, `_open`'s two
-  changes (`tools/welfare_diff.py 1d77392 HEAD`: `_open` `DIFFERS`, naming his approval of 2026-11-07, all else
-  `SAME`), and a third to hear, no change to the list: a real record found in the demo folder is ended or resumed
-  there through the unchanged `_end`, `_close_stranded` and `_resume`; his try-out in Safari, `wlx demo
+  answered, every finding fixed. **His welfare review is done** (2026-11-16, design §15 item 3): `_open`'s two
+  changes approved as built (`tools/welfare_diff.py 1d77392 HEAD`: `_open` alone `DIFFERS`), and a real record in
+  the demo folder held and settled there "fine as built". **It waits on, in order:** his try-out in Safari, `wlx demo
   wl-xtasks/tasks/popout_search.py --set response_deadline=3.0`; and his merge, by his yes by name and a clean CI.
 - **Tell him first, in plain words**: the run begins when he first points at the demo screen; after Escape or a
   switch of tab the trial under way ends as tracker lost and the run waits until he moves the pointer on it again; a

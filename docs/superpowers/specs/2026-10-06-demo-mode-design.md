@@ -741,3 +741,12 @@ review, by number):
    names its demo folder when its service starts (`wlx taskd --demo-root DIR`), so demos never sit among real
    sessions, nothing downstream has to skip them, and a crashed demo never holds up a real animal's session. This
    changes no welfare-listed code (the plan, Task 4).
+
+3. (The welfare review of the build, 2026-11-16.) Approve the two `Service._open` changes as built (`tools/welfare_diff.py
+   1d77392 HEAD`: `_open` alone `DIFFERS`)? And a real animal's unfinished session found in the demo folder: held as
+   the session it is (every open refused until its return is recorded, `/health` degraded, a warning at every
+   start), and ended or resumed there from its banner through the unchanged `_end`, `_close_stranded` and `_resume`,
+   on the rig's own card and pump: is that wanted, or should `wlx taskd` refuse to start?
+
+   **Answered 2026-11-16, asked in the UI:** **"Approve both as built (Recommended)"**; and of the demo folder,
+   **"Fine as built (Recommended)"**: warned and held, never a refusal to start. No change to the welfare list.
