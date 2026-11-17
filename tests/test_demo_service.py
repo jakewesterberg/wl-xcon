@@ -1159,6 +1159,30 @@ def test_wlx_taskd_names_every_real_session_in_the_demo_folder_at_every_start(tm
     assert "  stranded: session" not in out
 
 
+def test_a_ctrl_c_while_wlx_taskd_reads_its_demo_folder_is_an_interrupt(tmp_path, monkeypatch,
+                                                                       capsys):
+    """XC-512: `wlx taskd` says its ready line, then reads its demo folder for the startup warnings
+    (`_not_demos`). A Ctrl-C there, which a supervisor or a test may send once the ready line is
+    out, ended it by an uncaught `KeyboardInterrupt` (status -2, not 130): seen once under the full
+    suite's load in `test_demo_command.py`. The startup lines are said inside `_serve`'s `try`, so
+    it is an interrupt like any: 130, and *taskd: interrupted*."""
+    service, old = _old_root_as_demo_root(tmp_path)
+
+    def interrupted(demo_root):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(service_module, "_not_demos", interrupted)
+    try:
+        status = main(_taskd("--subjects", str(service.subjects), "--tasks", str(service.tasks),
+                             "--root", str(service.root), "--demo-root", str(old)))
+    except KeyboardInterrupt:
+        pytest.fail("a Ctrl-C while the startup lines were said escaped wlx taskd uncaught")
+    said = capsys.readouterr()
+    assert status == 130
+    assert "wlx taskd: publishing on " in said.out, "the ready line came first"
+    assert "taskd: interrupted" in said.err
+
+
 
 @pytest.mark.parametrize("command", ["end", "resume"])
 def test_a_real_session_in_the_demo_folder_whose_id_one_under_root_has_is_refused_doing_nothing(

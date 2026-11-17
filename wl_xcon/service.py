@@ -2033,6 +2033,75 @@ def run(args) -> int:
         os.close(held)
 
 
+def _say_started(service: Service, link, demo) -> None:
+    """**`wlx taskd`'s startup lines**, each flushed (the whole-build review's M6): where it
+    publishes, its demo folder, each stranded session, each record in the demo folder that is no
+    demo (its re-review, N2) and a refused calibration. Said inside `_serve`'s `try` (XC-512): the
+    first line is the one a supervisor or a test waits for, and a Ctrl-C taken while the rest are
+    said -- the demo folder read for them -- is an interrupt like any, not an uncaught
+    `KeyboardInterrupt`."""
+    if demo is not None:
+        print(
+            f"wlx taskd: --link {link.pub_endpoint},{link.rep_endpoint},"
+            f"{link.mark_endpoint},{link.gaze_endpoint}",
+            flush=True,
+        )
+    else:
+        # Each startup line flushed (the whole-build review's M6), as a demo service's is: a
+        # terminal or a supervisor reading the service's output sees them as it starts.
+        print(
+            f"wlx taskd: publishing on {link.pub_endpoint}, commands on "
+            f"{link.rep_endpoint}"
+            + (f", marks on {link.mark_endpoint}" if link.mark_endpoint else "")
+            + (f", pointer reports on {link.gaze_endpoint}" if link.gaze_endpoint else ""),
+            flush=True,
+        )
+        if service.demo_root is not None:
+            print(f"  demos: written under {service.demo_root}, apart from --root",
+                  flush=True)
+    for found in service.stranded:
+        print(
+            f"  stranded: session {found.session_id} "
+            f"({found.subject or 'record unreadable'}); no session opens until its "
+            f"return is recorded",
+            flush=True,
+        )
+    held = {found.session_id: found for found in service.stranded_astray}
+    for session_id, subject in ([] if service.demo_root is None
+                                else _not_demos(service.demo_root)):
+        # **Warned, never refused** (the whole-build review's I1; the PI's warnings over
+        # refusals, 2026-10-11), **every start, stranded or not** (its re-review, N2): the
+        # service starts, holding a stranded one as the session it is.
+        found = held.get(session_id)
+        animal = (found.subject if found is not None else subject) or "record unreadable"
+        then = ("It is held as the stranded session it is; once its return is recorded, move "
+                "it out" if found is not None else "Move it out")
+        print(
+            f"  warning: the demo folder {service.demo_root} holds session {session_id} "
+            f"({animal}), which is no demo: a demo is REFERENCE's, its config.json saying "
+            f"demo, and a demo folder holds demos alone. Its folder is "
+            f"{service.demo_root / session_id}. {then} of {service.demo_root}, or name "
+            f"another folder as --demo-root",
+            flush=True,
+        )
+    for found in service.stranded_demos:
+        print(
+            f"  stranded demo: session {found.session_id} in the demo folder; no demo opens "
+            f"until its return is recorded, and it holds up no other session",
+            flush=True,
+        )
+    if service.calibration_refused:
+        # Said where the operator started it (the second review's Minor 12), whole: the
+        # open's warning quotes it cut (XC-352's E1). Through `_printable`, as the console
+        # prints it: the sentence quotes the record's path and what its loader said.
+        print(
+            f"  calibration: {_printable(service.calibration_refused)}; sessions run on the "
+            f"default calibration, the sRGB standard, with a warning, until the record is "
+            f"repaired and wlx taskd started again",
+            flush=True,
+        )
+
+
 def _serve(args, rig: Rig, allocation: Allocation, parts: list) -> int:
     """`run`'s own, once its refusals are past and, for a rig service, the rig lock is held: the
     link bound, the service built, and served until interrupted."""
@@ -2067,67 +2136,8 @@ def _serve(args, rig: Rig, allocation: Allocation, parts: list) -> int:
                     f"refused: --demo-root {_printable(str(args.demo_root))} cannot be made a "
                     f"folder: {why.strerror}"
                 ) from why
-        if demo is not None:
-            print(
-                f"wlx taskd: --link {link.pub_endpoint},{link.rep_endpoint},"
-                f"{link.mark_endpoint},{link.gaze_endpoint}",
-                flush=True,
-            )
-        else:
-            # Each startup line flushed (the whole-build review's M6), as a demo service's is: a
-            # terminal or a supervisor reading the service's output sees them as it starts.
-            print(
-                f"wlx taskd: publishing on {link.pub_endpoint}, commands on "
-                f"{link.rep_endpoint}"
-                + (f", marks on {link.mark_endpoint}" if link.mark_endpoint else "")
-                + (f", pointer reports on {link.gaze_endpoint}" if link.gaze_endpoint else ""),
-                flush=True,
-            )
-            if service.demo_root is not None:
-                print(f"  demos: written under {service.demo_root}, apart from --root",
-                      flush=True)
-        for found in service.stranded:
-            print(
-                f"  stranded: session {found.session_id} "
-                f"({found.subject or 'record unreadable'}); no session opens until its "
-                f"return is recorded",
-                flush=True,
-            )
-        held = {found.session_id: found for found in service.stranded_astray}
-        for session_id, subject in ([] if service.demo_root is None
-                                    else _not_demos(service.demo_root)):
-            # **Warned, never refused** (the whole-build review's I1; the PI's warnings over
-            # refusals, 2026-10-11), **every start, stranded or not** (its re-review, N2): the
-            # service starts, holding a stranded one as the session it is.
-            found = held.get(session_id)
-            animal = (found.subject if found is not None else subject) or "record unreadable"
-            then = ("It is held as the stranded session it is; once its return is recorded, move "
-                    "it out" if found is not None else "Move it out")
-            print(
-                f"  warning: the demo folder {service.demo_root} holds session {session_id} "
-                f"({animal}), which is no demo: a demo is REFERENCE's, its config.json saying "
-                f"demo, and a demo folder holds demos alone. Its folder is "
-                f"{service.demo_root / session_id}. {then} of {service.demo_root}, or name "
-                f"another folder as --demo-root",
-                flush=True,
-            )
-        for found in service.stranded_demos:
-            print(
-                f"  stranded demo: session {found.session_id} in the demo folder; no demo opens "
-                f"until its return is recorded, and it holds up no other session",
-                flush=True,
-            )
-        if service.calibration_refused:
-            # Said where the operator started it (the second review's Minor 12), whole: the
-            # open's warning quotes it cut (XC-352's E1). Through `_printable`, as the console
-            # prints it: the sentence quotes the record's path and what its loader said.
-            print(
-                f"  calibration: {_printable(service.calibration_refused)}; sessions run on the "
-                f"default calibration, the sRGB standard, with a warning, until the record is "
-                f"repaired and wlx taskd started again",
-                flush=True,
-            )
         try:
+            _say_started(service, link, demo)
             service.serve(threading.Event())
         except KeyboardInterrupt:
             open_session = service.session is not None
