@@ -1,8 +1,9 @@
 # Console settings from the demo try-out: timing, limits, scaling, colors, sections, training
 
-**Status:** design, brainstormed with the PI on 2026-11-16 during his Safari try-out of demo mode. It is not yet
-approved. A companion design, [the pop-out's revision](2026-11-16-popout-revision-design.md), uses what this one
-builds.
+**Status:** Approved by the PI on 2026-11-16, asked in the UI: 'Approve both'. Brainstormed with him that day during
+his Safari try-out of demo mode; its plan is
+[`2026-11-16-console-settings.md`](../plans/2026-11-16-console-settings.md). A companion design, [the pop-out's
+revision](2026-11-16-popout-revision-design.md), uses what this one builds.
 
 ## 1. Why
 

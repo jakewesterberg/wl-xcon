@@ -1,6 +1,6 @@
 # The pop-out search, revised after the demo try-out: the fixation rule, the go delay, special trials
 
-**Status:** design, brainstormed with the PI on 2026-11-16. It is not yet approved.
+**Status:** Approved by the PI on 2026-11-16, asked in the UI: 'Approve both'. Brainstormed with him that day.
 - It revises the pop-out search task, `wl-xtasks/tasks/popout_search.py`, whose design is
   [2026-11-07-popout-search-design.md](2026-11-07-popout-search-design.md).
 - It uses [the console settings design](2026-11-16-console-settings-design.md): timing switches, hard limits,
