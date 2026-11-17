@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-16-popout-revision-design.md`, approved by the PI on 2026-11-16, asked in the UI: "Approve both". Section numbers below are its. It revises `docs/superpowers/specs/2026-11-07-popout-search-design.md`. Its companion's plan, `docs/superpowers/plans/2026-11-16-console-settings.md` ("the console plan"), is built first; this build branches from its head after its whole-build review and builds on its interfaces by their names there (the seam, below).
 
+**The PI on this plan** (2026-11-16, asked in the UI): in Alone, a lone distractor at the run's distractor brightness, as planned ("The run's distractor brightness"); the blink and tracker-loss graces become settings ("Yes, a setting", Task 7); built the same way, after the console settings build ("Yes, the same way").
+
+
 ## Reading the design against the code (`f417ceb`)
 
 - **The loop takes one edge a frame.** `run._Loop.frame` breaks after `_take`, so a state whose wait is 0 lasts one frame today: an array shown on entering a delay state of `go_delay` 0 and the dot's change on leaving it would be a frame apart. §3 item 5 asks for one frame, hence Task 2.
@@ -33,7 +36,7 @@
 | `target=1` on each condition; `Array(target=0)` | a stage's minimum; the odd one's index | the builder's (TSK-75; TSK-74 (b)) | kept: structure, no number a trainer tunes |
 | `{"set_size": 1}`, `{"set_size": 4}`, `{"distractor_fraction": 1.0}` | the stages' own values | the PI's (the first design §3.3) | kept: conditions' values a person's live value overrides |
 | `n=1` in the two lone kinds' arrays (new) | the kinds' definition | the PI's table (§4) | fixed, with its reason |
-| `Tolerances()`, blink 0 and tracker lost 0.05 s | not in the file: the engine's defaults | S5; the tracker's a placeholder until V3(a) | unchanged; the report asks whether the blink grace should be a pop-out setting |
+| `Tolerances()`, blink 0 and tracker lost 0.05 s | not in the file: the engine's defaults | S5; the tracker's a placeholder until V3(a) | settings: `blink_grace` 0 s and `tracker_lost_grace` 0.05 s, section Timing (the PI, 2026-11-16, asked in the UI: "Yes, a setting"); Task 7 |
 
 ## Global Constraints
 
@@ -242,6 +245,7 @@
   - `go`: `Exited("fix")` to `flight` with `SACCADE_ONSET`; `After(P("response_deadline"))` as before.
   - `flight`: `After(P("landing_limit"))`.
   - `on_target`: `After(P("target_hold_limit"))`.
+  - **The graces as settings** (the PI, 2026-11-16, "Yes, a setting"): `blink_grace` 0 s and `tracker_lost_grace` 0.05 s, unit `s`, section Timing, given to the trial's `Tolerances`. If `Tolerances` cannot take a `P(...)` today, this task gives it one (in wl-xcon, with its test), at the starts unchanged, so no outcome moves.
   - Each error's blank hides the point and the array.
   - `Counting(after_stimulus=SPENT, appears="delay")`.
   - `ReactionTime(state="go", to=("flight",))`, its note "from the go, the frame the fixation point takes its act look, to the eye leaving the fixation window".

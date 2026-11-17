@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-16-console-settings-design.md`, approved by the PI on 2026-11-16, asked in the UI: "Approve both". Section numbers below are its. Its companion, `docs/superpowers/specs/2026-11-16-popout-revision-design.md`, is the next plan's (the seam, below). The decay's literature: `.superpowers/side-2026-11-17/nonaging-decay-report.md`.
 
+**The PI on this plan** (2026-11-16, asked in the UI): frozen trials stay out of the bars ("They don't count"); new colors go to the proposed file first ("Proposed file first"); built with a fresh builder per task once demo mode has merged ("Fresh builder per task").
+
+
 ## Reading the design against the code (`b3d4dd3`)
 
 - **What the code already has, which the design's words do not show:**
