@@ -343,11 +343,23 @@ class _Steering(Simulated):
     at the window the newest `Drawn` flags as the target while the array is shown, else at the
     fixation point; and a
     person's Stop once `trials` trials have ended, each ending on a blank `Drawn`. So it plays the
-    pop-out as a person does, reading the drawing the rig published."""
+    pop-out as a person does, reading the drawing the rig published.
+
+    **Two backstops, so a run that does not stop fails its test rather than hanging it** (the demo
+    build's CI fix, 2026-11-17: with `Pointing.ended` neutered no blank screen came, so no Stop,
+    and the run played on until the mutation sweep's limit killed it). A trial drawn past the
+    `trials` this plays sends the Stop then, said in `overran`; and a run still asking for the
+    pointer `PLAYED_WITHIN_S` into the demo's clock raises, said there too, a fault the service
+    contains (`Service._run`), for a run whose trials never come back to a boundary. Both count
+    the demo's own trials and its own clock, injected, never the wall's, so a loaded computer
+    reaches neither."""
 
     #: Where the pointer rests while nothing is shown: outside the fixation window (2° to start)
     #: and every disc's on the 8° ring.
     REST = (0.0, -5.0)
+    #: **How far the demo's clock may run while this plays**, in its seconds: far past the open
+    #: and the trials this plays, which end well inside it on the same seed every time.
+    PLAYED_WITHIN_S = 60.0
 
     def __init__(self, clock, trials: int) -> None:
         super().__init__()
@@ -355,6 +367,9 @@ class _Steering(Simulated):
         self.drawn: Drawn | None = None
         self.ended = self.seq = 0
         self.next_at = float("-inf")
+        self.until = clock() + self.PLAYED_WITHIN_S
+        #: What a backstop found, as a sentence; `None` while the run stops as this plays it.
+        self.overran: str | None = None
 
     def publish(self, telemetry) -> None:
         super().publish(telemetry)
@@ -364,6 +379,12 @@ class _Steering(Simulated):
                 self.ended += 1
                 if self.ended == self.trials:
                     self.queue(Stop(by=BY))
+            elif telemetry.trial >= self.trials and self.overran is None:
+                self.overran = (
+                    f"trial {telemetry.trial + 1} was drawn, though this plays {self.trials}: "
+                    f"{self.ended} ended on a blank screen (`Pointing.ended`), so the Stop was "
+                    f"sent only then")
+                self.queue(Stop(by=BY))
 
     def _aim(self) -> tuple[float, float]:
         """The target's window while its object is on the screen (a window is listed whether or
@@ -380,6 +401,12 @@ class _Steering(Simulated):
 
     def gaze_into(self, buffer: bytearray) -> int:
         now = self.clock()
+        if now > self.until:
+            self.overran = (
+                f"the run was still asking for the pointer {self.PLAYED_WITHIN_S:g} s into the "
+                f"demo's clock, {self.ended} of the {self.trials} trials this plays ended on a "
+                f"blank screen: it never stopped")
+            raise AssertionError(self.overran)
         if not self.gazes and now >= self.next_at:
             self.next_at = now + pointer.LIVE_S / 5
             self.seq += 1
@@ -422,6 +449,7 @@ def test_a_demo_from_a_live_rigs_page_opens_runs_and_ends_through_open_start_and
     unknown = tuple(name for name, result in results.items() if result == "unknown")
     _step(service, StartRun(by=BY, trials=1, acknowledged=unknown, **run))
     _step(service)
+    assert service.link.overran is None, service.link.overran
 
     rows = [json.loads(line) for line in
             (_xcon(service.demo_root, DEMO) / "trials.jsonl").read_text().splitlines()]
