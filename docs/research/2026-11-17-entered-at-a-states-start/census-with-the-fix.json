@@ -1,0 +1,309 @@
+{
+ "adaptive_detection eye seed 3": {
+  "frames": 181641,
+  "outcomes": {
+   "Outcome.CORRECT": 387,
+   "Outcome.FIXATION_BREAK": 58,
+   "Outcome.NO_FIXATION": 59,
+   "Outcome.NO_RESPONSE": 96
+  },
+  "paths": 4
+ },
+ "adaptive_detection eye seed 7": {
+  "frames": 254527,
+  "outcomes": {
+   "Outcome.CORRECT": 370,
+   "Outcome.FIXATION_BREAK": 22,
+   "Outcome.NO_FIXATION": 111,
+   "Outcome.NO_RESPONSE": 97
+  },
+  "paths": 4
+ },
+ "adaptive_detection eye seed 9": {
+  "frames": 182648,
+  "outcomes": {
+   "Outcome.CORRECT": 164,
+   "Outcome.NO_RESPONSE": 436
+  },
+  "paths": 2
+ },
+ "adaptive_detection subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 841,
+   "Outcome.FIXATION_BREAK": 196,
+   "Outcome.NO_FIXATION": 268,
+   "Outcome.NO_RESPONSE": 86,
+   "Outcome.TARGET_BREAK": 109
+  },
+  "responses": {}
+ },
+ "adaptive_detection subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 788,
+   "Outcome.FIXATION_BREAK": 232,
+   "Outcome.NO_FIXATION": 288,
+   "Outcome.NO_RESPONSE": 80,
+   "Outcome.TARGET_BREAK": 112
+  },
+  "responses": {}
+ },
+ "calibration eye seed 3": {
+  "frames": 55955,
+  "outcomes": {
+   "Outcome.CORRECT": 499,
+   "Outcome.FIXATION_BREAK": 92,
+   "Outcome.NO_FIXATION": 9
+  },
+  "paths": 2
+ },
+ "calibration eye seed 7": {
+  "frames": 55272,
+  "outcomes": {
+   "Outcome.CORRECT": 557,
+   "Outcome.FIXATION_BREAK": 35,
+   "Outcome.NO_FIXATION": 8
+  },
+  "paths": 2
+ },
+ "calibration eye seed 9": {
+  "frames": 43952,
+  "outcomes": {
+   "Outcome.CORRECT": 600
+  },
+  "paths": 1
+ },
+ "calibration subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 1054,
+   "Outcome.FIXATION_BREAK": 210,
+   "Outcome.NO_FIXATION": 236
+  },
+  "responses": {}
+ },
+ "calibration subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 997,
+   "Outcome.FIXATION_BREAK": 226,
+   "Outcome.NO_FIXATION": 277
+  },
+  "responses": {}
+ },
+ "fixation_detection eye seed 3": {
+  "frames": 182434,
+  "outcomes": {
+   "Outcome.CORRECT": 391,
+   "Outcome.FIXATION_BREAK": 54,
+   "Outcome.NO_FIXATION": 58,
+   "Outcome.NO_RESPONSE": 97
+  },
+  "paths": 4
+ },
+ "fixation_detection eye seed 7": {
+  "frames": 261283,
+  "outcomes": {
+   "Outcome.CORRECT": 370,
+   "Outcome.FIXATION_BREAK": 18,
+   "Outcome.NO_FIXATION": 119,
+   "Outcome.NO_RESPONSE": 93
+  },
+  "paths": 4
+ },
+ "fixation_detection eye seed 9": {
+  "frames": 183903,
+  "outcomes": {
+   "Outcome.CORRECT": 162,
+   "Outcome.NO_RESPONSE": 438
+  },
+  "paths": 2
+ },
+ "fixation_detection subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 841,
+   "Outcome.FIXATION_BREAK": 196,
+   "Outcome.NO_FIXATION": 268,
+   "Outcome.NO_RESPONSE": 86,
+   "Outcome.TARGET_BREAK": 109
+  },
+  "responses": {}
+ },
+ "fixation_detection subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 788,
+   "Outcome.FIXATION_BREAK": 232,
+   "Outcome.NO_FIXATION": 288,
+   "Outcome.NO_RESPONSE": 80,
+   "Outcome.TARGET_BREAK": 112
+  },
+  "responses": {}
+ },
+ "popout_search eye seed 3": {
+  "frames": 394556,
+  "outcomes": {
+   "Outcome.CORRECT": 386,
+   "Outcome.FIXATION_BREAK": 55,
+   "Outcome.NO_FIXATION": 70,
+   "Outcome.WRONG_TARGET": 89
+  },
+  "paths": 4
+ },
+ "popout_search eye seed 7": {
+  "frames": 443014,
+  "outcomes": {
+   "Outcome.ABORT": 4,
+   "Outcome.CORRECT": 316,
+   "Outcome.FIXATION_BREAK": 81,
+   "Outcome.NO_FIXATION": 120,
+   "Outcome.WRONG_TARGET": 79
+  },
+  "paths": 5
+ },
+ "popout_search eye seed 9": {
+  "frames": 488924,
+  "outcomes": {
+   "Outcome.CORRECT": 473,
+   "Outcome.NO_RESPONSE": 21,
+   "Outcome.WRONG_TARGET": 106
+  },
+  "paths": 3
+ },
+ "popout_search subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.ABORT": 100,
+   "Outcome.CORRECT": 94,
+   "Outcome.FIXATION_BREAK": 287,
+   "Outcome.NO_FIXATION": 448,
+   "Outcome.NO_RESPONSE": 417,
+   "Outcome.TARGET_BREAK": 32,
+   "Outcome.WRONG_TARGET": 122
+  },
+  "responses": {}
+ },
+ "popout_search subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.ABORT": 96,
+   "Outcome.CORRECT": 116,
+   "Outcome.FIXATION_BREAK": 292,
+   "Outcome.NO_FIXATION": 449,
+   "Outcome.NO_RESPONSE": 387,
+   "Outcome.TARGET_BREAK": 24,
+   "Outcome.WRONG_TARGET": 136
+  },
+  "responses": {}
+ },
+ "visual_search eye seed 3": {
+  "frames": 163630,
+  "outcomes": {
+   "Outcome.CORRECT": 385,
+   "Outcome.FIXATION_BREAK": 59,
+   "Outcome.NO_FIXATION": 46,
+   "Outcome.WRONG_TARGET": 110
+  },
+  "paths": 4
+ },
+ "visual_search eye seed 7": {
+  "frames": 252148,
+  "outcomes": {
+   "Outcome.CORRECT": 356,
+   "Outcome.FIXATION_BREAK": 28,
+   "Outcome.NO_FIXATION": 114,
+   "Outcome.NO_RESPONSE": 23,
+   "Outcome.WRONG_TARGET": 79
+  },
+  "paths": 4
+ },
+ "visual_search eye seed 9": {
+  "frames": 182206,
+  "outcomes": {
+   "Outcome.CORRECT": 167,
+   "Outcome.NO_RESPONSE": 382,
+   "Outcome.WRONG_TARGET": 51
+  },
+  "paths": 2
+ },
+ "visual_search subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 433,
+   "Outcome.FIXATION_BREAK": 192,
+   "Outcome.NO_FIXATION": 275,
+   "Outcome.NO_RESPONSE": 40,
+   "Outcome.TARGET_BREAK": 66,
+   "Outcome.WRONG_TARGET": 494
+  },
+  "responses": {}
+ },
+ "visual_search subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 419,
+   "Outcome.FIXATION_BREAK": 238,
+   "Outcome.NO_FIXATION": 244,
+   "Outcome.NO_RESPONSE": 29,
+   "Outcome.TARGET_BREAK": 66,
+   "Outcome.WRONG_TARGET": 504
+  },
+  "responses": {}
+ },
+ "visual_search_training eye seed 3": {
+  "frames": 163630,
+  "outcomes": {
+   "Outcome.CORRECT": 385,
+   "Outcome.FIXATION_BREAK": 59,
+   "Outcome.NO_FIXATION": 46,
+   "Outcome.WRONG_TARGET": 110
+  },
+  "paths": 4
+ },
+ "visual_search_training eye seed 7": {
+  "frames": 252148,
+  "outcomes": {
+   "Outcome.CORRECT": 356,
+   "Outcome.FIXATION_BREAK": 28,
+   "Outcome.NO_FIXATION": 114,
+   "Outcome.NO_RESPONSE": 23,
+   "Outcome.WRONG_TARGET": 79
+  },
+  "paths": 4
+ },
+ "visual_search_training eye seed 9": {
+  "frames": 182206,
+  "outcomes": {
+   "Outcome.CORRECT": 167,
+   "Outcome.NO_RESPONSE": 382,
+   "Outcome.WRONG_TARGET": 51
+  },
+  "paths": 2
+ },
+ "visual_search_training subject seed 11": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 433,
+   "Outcome.FIXATION_BREAK": 192,
+   "Outcome.NO_FIXATION": 275,
+   "Outcome.NO_RESPONSE": 40,
+   "Outcome.TARGET_BREAK": 66,
+   "Outcome.WRONG_TARGET": 494
+  },
+  "responses": {}
+ },
+ "visual_search_training subject seed 5": {
+  "hangs": 0,
+  "outcomes": {
+   "Outcome.CORRECT": 419,
+   "Outcome.FIXATION_BREAK": 238,
+   "Outcome.NO_FIXATION": 244,
+   "Outcome.NO_RESPONSE": 29,
+   "Outcome.TARGET_BREAK": 66,
+   "Outcome.WRONG_TARGET": 504
+  },
+  "responses": {}
+ }
+}

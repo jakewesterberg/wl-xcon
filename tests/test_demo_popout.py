@@ -220,6 +220,49 @@ def test_the_popout_by_a_scripted_pointer_records_each_outcome(case, tmp_path, z
             "on the second look's onset, before the landing bound")
 
 
+class Centered(Person):
+    """**At the center from its first report**, where the fixation point will come on, through the
+    blank between trials and as the point comes on, never moving before the go; then to the odd
+    disc, and stays. `before_go` counts its reports before the go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.before_go = 0
+
+    def aim(self):
+        if self.go_drawn is None and not self.ended:
+            self.before_go += 1
+            return (*FIX, False)
+        return super().aim()
+
+    def go(self, drawn):
+        return (*target(drawn), False)
+
+
+def test_a_pointer_already_at_the_center_as_the_fixation_point_comes_on_has_entered_it(
+        tmp_path, zmq_cleanup, began):
+    """**The PI's try-out, 2026-11-17**, through the path he found it on: "if i already have the
+    "gaze" near the center when the fixation dot appears, i have to leave the window and reenter to
+    start the trial. If I am already at the center, i shouldn't have to leave and reenter". A
+    pointer resting at the center from before the trial began, across the boundary from `between`
+    to `await_fix`, has entered the fixation window on `await_fix`'s first frame, and the trial goes
+    on to the discs without the pointer moving. Until then it ended `NO_FIXATION` (decisions.md
+    EYE-30)."""
+    person = Centered()
+    with Demo(tmp_path, person, zmq_cleanup) as demo:
+        demo.open()
+        demo.start({**SHORT, "fix_acquisition": 0.5})
+        demo.ended_run()
+        demo.end()
+
+    (line,) = demo.rows("trials.jsonl")
+    assert line["outcome"] == Outcome.CORRECT.value, line
+    assert tuple(state for _, state, _ in began) == (*ANSWERED, "on_target")
+    entered = {state: frame for _, state, frame in began}
+    assert entered["hold_fix"] == entered["await_fix"] + 1, "entered on await_fix's first frame"
+    assert person.before_go > 0 and person.go_drawn is not None
+
+
 # --- A suggestion answered from the trainer's panel ------------------------------------------
 
 

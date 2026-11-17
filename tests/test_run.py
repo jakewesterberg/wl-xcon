@@ -331,6 +331,91 @@ def test_a_hold_is_measured_from_state_entry_not_from_when_gaze_arrived():
     assert result.frames == 60, f"the delay ran {(result.frames - 30) / 100:.2f} s"
 
 
+# --- An eye already inside a window as its state begins has entered it (the PI, during demo
+# mode's try-out, 2026-11-17: "If I am already at the center, i shouldn't have to leave and
+# reenter"; decisions.md EYE-30). `Entered` fires on a state's first judged frame on being inside,
+# as on gaze coming in from outside on any later frame; `Exited` and holds are unchanged. Until
+# then both were edges against the frame before, and membership is judged in every state.
+
+
+class _Lost(_Membership):
+    """`_Membership`, with the tracker lost on the frames `lost`."""
+
+    def __init__(self, inside: dict[int, str], lost: set[int]) -> None:
+        super().__init__(inside)
+        self.lost = lost
+
+    def signal(self, frame: int) -> str:
+        return "lost" if frame in self.lost else "ok"
+
+
+def _then(asked: list) -> Trial:
+    """`blank` for 30 ms (frames 1 to 3, left on frame 3), then `asked`'s edges from frame 4, at
+    the default graces (tracker loss forgiven for 50 ms, five 10 ms frames)."""
+    return Trial(
+        start="blank",
+        windows=[Window("fix", at=(0.0, 0.0), radius=2.0)],
+        states=[State("blank", go=[On(After(0.03), "asked")]), State("asked", go=asked)],
+    )
+
+
+@pytest.mark.parametrize(("inside", "outcome", "frames"), [
+    # Outside all along: an eye outside a window as its state begins has left nothing.
+    ({}, Outcome.NO_RESPONSE, 8),
+    # Inside through `blank`, out on `asked`'s first frame: it left, as before.
+    ({1: "fix", 2: "fix", 3: "fix"}, Outcome.FIXATION_BREAK, 4),
+])
+def test_exited_at_a_states_start_is_still_an_edge_against_the_frame_before(inside, outcome,
+                                                                            frames):
+    """**`Exited` is unchanged** (EYE-30, the controller's ruling): an eye outside a window as its
+    state begins fires no `Exited`, and one leaving on the state's first judged frame, inside on
+    the frame before, still does. So the rule that makes `Entered` fire on a state's first frame is
+    not one that forgets the frame before at a transition, which would lose this exit."""
+    trial = _then([On(Exited("fix"), Outcome.FIXATION_BREAK), On(After(0.05), Outcome.NO_RESPONSE)])
+
+    result = run_trial(trial, _Membership(inside), frame_period=0.01)
+
+    assert (result.outcome, result.frames) == (outcome, frames)
+
+
+def test_entered_on_a_frozen_first_frame_fires_on_the_states_first_judged_frame():
+    """**A state's first judged frame, not its first frame** (EYE-30, the controller's ruling):
+    `asked` begins on frame 4 with the tracker lost on frames 4 and 5, inside the 50 ms grace, so
+    the trial's view of gaze is frozen there and no edge is derived (EYE-18). Gaze inside the window
+    since frame 1 has entered it on frame 6, the first judged frame, though it was inside on the
+    frame before too."""
+    trial = _then([On(Entered("fix"), Outcome.CORRECT), On(After(0.2), Outcome.NO_FIXATION)])
+    world = _Lost({frame: "fix" for frame in range(1, 40)}, lost={4, 5})
+
+    result = run_trial(trial, world, frame_period=0.01)
+
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, 6)
+
+
+def test_a_hold_after_an_entered_taken_on_a_states_first_frame_counts_from_its_own_first_frame():
+    """**Holds are unchanged** (EYE-30): gaze inside the window from frame 1 has entered it on
+    `asked`'s first frame, 4, and the hold that follows counts from `held`'s first frame, 5, never
+    from before (entering a state clears every hold, the rule of 2026-08-31): 50 ms of it is frames
+    5 to 9."""
+    trial = Trial(
+        start="blank",
+        windows=[Window("fix", at=(0.0, 0.0), radius=2.0)],
+        states=[
+            State("blank", go=[On(After(0.03), "asked")]),
+            State("asked", go=[On(Entered("fix"), "held"), On(After(0.2), Outcome.NO_FIXATION)]),
+            State("held", go=[On(Hold("fix", 0.05), Outcome.CORRECT),
+                              On(Exited("fix"), Outcome.FIXATION_BREAK),
+                              On(After(1.0), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+    result = run_trial(trial, _Membership({frame: "fix" for frame in range(1, 200)}),
+                       frame_period=0.01)
+
+    assert result.visited == ("blank", "asked", "held")
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, 9)
+
+
 # --- the I/O layer: marks and rewards leaving the loop -----------------------
 #
 # Until 2026-09-06 `_apply` executed the display actions and silently dropped the

@@ -481,6 +481,20 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    keeping to a saccade that begins in its state; a state a timer or a completed hold begins whose
    `SaccadeOnset` edge goes on to another state gets a warning at load (XC-455, not built yet).
    The world is told each state's first frame and no longer the edge that entered it.
+   *Note, 2026-11-17 (the PI, trying demo mode: "If I am already at the center, i shouldn't have to
+   leave and reenter"):* **an eye already inside a window as its state begins has entered it.**
+   `Entered` fires on a state's first judged frame -- the first on which the loop derives gaze
+   edges, not one frozen inside a blink or tracker-loss grace -- if gaze is inside the window then,
+   and on any later frame on gaze coming in from outside, as before. Membership is judged on every
+   frame whatever the state, so an edge against the frame before had made an eye that rested at the
+   center through the pop-out's blank before the fixation point invisible to `Entered("fix")`, and
+   the trial waited for it to leave and come back. Every `Entered`, every state, every window (the
+   controller's ruling, engineering; it is EYE-29's object moved onto where gaze is, entered with no
+   eye movement). `Exited` is unchanged: an eye outside a window as its state begins has left
+   nothing, and one leaving on the state's first judged frame, inside on the frame before, has left
+   it. Holds are unchanged: entering a state clears every hold, so a hold after an `Entered` taken
+   on a state's first frame counts from its own state's first frame. Such an `Entered` carries a
+   saccade in flight as any edge does (the note of 2026-11-07 above). (EYE-30; `wl_xcon/run.py`.)
 8. **Off the field**: only when declared; check 8 grows to test extents (XC-143, XC-144).
 9. **Head-free chaired sessions**: nominal head position, recorded and listed; a task may require a
    fixed head.

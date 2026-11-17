@@ -28,6 +28,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P21** | **A guardrail nothing calls, behind a comment that went stale** | **High** | A safety component needs a *consumer* in the same commit, and a test that the consumer is on the only path — see expanded note |
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
 | **P23** | **A coordinate read as a distance** | Medium | The angles the engine measures between positions are true visual angle, measured where they are, and what is still per axis is named (STE-27); a mean pixels per degree is used by no drawing, window or check by name — see expanded note |
+| **P24** | **A condition true as a state begins, read as an edge** | Medium | A guard derived from a signal judged in every state says what holds as its state begins, not only what changed on its frame; a test setup that steers round a behavior asks whether it is meant — see expanded note |
 
 ## Expanded notes
 
@@ -375,3 +376,18 @@ exactly (STE-29), and the load check reads the task file with the parser and war
 `sin` in a position (`computed-position`): written there, through a name the file assigns at its
 top level, or among a position setting's choices. It does not see a position a function returns
 or one built in another module.
+
+**P24 — A condition true as a state begins, read as an edge.** The trial loop judges window
+membership on every frame, for every window any state asks about, whatever state the trial is in,
+and `Entered` was an edge against the frame before. So an eye that came to rest in a window during
+one state was invisible to a later state's `Entered` on it: in the pop-out search an eye at the
+center through the blank before the fixation point waited for it to leave and come back, or ran out
+as `NO_FIXATION`, and a slow simulated eye's one no response made each of the 532 trials after it
+`NO_FIXATION` with the eye on the point it was waiting for (EYE-30's census). The PI found it
+trying demo mode with the mouse (2026-11-17). Nothing in the suite had seen it: no test had an eye
+already inside a window as a later state asked `Entered` of it (the suite passed unchanged with the
+rule changed), and the two scripted pointers of demo mode's tests rested away from the fixation
+point until it was drawn, "since a pointer already on the point as it appears never enters its
+window" -- the defect written down in a harness as a fact about the world, and steered round.
+Mitigation: `Entered` fires on a state's first judged frame on being inside (EYE-30), and a test
+whose setup avoids a behavior says why, so a reader can ask whether the behavior is meant.

@@ -569,7 +569,8 @@ class _Loop:
         self.visited = [self.current.name]
         self.scored: list[Scored] = []
         #: Window membership on the previous frame, so entering and leaving are edges
-        #: rather than states, and the frame a hold began, so leaving restarts it.
+        #: rather than states (but for a state's first judged frame, `fresh`), and the frame a
+        #: hold began, so leaving restarts it.
         tracked = {
             guard.window
             for state in trial.states
@@ -624,6 +625,11 @@ class _Loop:
         self.was_inside: dict[str, bool] = dict.fromkeys(asked, False)
         self.inside_now: dict[str, bool] = dict.fromkeys(asked, False)
         self.holding_since: "dict[str, int | None]" = dict.fromkeys(asked)
+        #: **Whether the state's first judged frame is still to come**: set as a state is entered
+        #: (`_take`), cleared on the next frame that derives gaze edges, so one frozen inside a
+        #: grace leaves it set. On that frame an eye already inside a window has entered it
+        #: (EYE-30). The start state's is set too, as `was_inside` starting all `False` makes it.
+        self.fresh = True
 
         #: When each `since` guard fired, per state entry. Reset on every transition,
         #: because a clock started in one state saying something about a later one is
@@ -727,7 +733,8 @@ class _Loop:
             return False
 
         # Membership first, once per frame: entering and leaving are edges against
-        # the previous frame, and a hold that lapses restarts rather than pausing.
+        # the previous frame (an eye inside on a state's first judged frame has entered too:
+        # `fresh`, below), and a hold that lapses restarts rather than pausing.
         membership = self.membership
         concretes = self.concretes
         concrete_eyes = self.concrete_eyes
@@ -773,6 +780,15 @@ class _Loop:
                         self.confirmed.append(Confirmed(since.patch, frame))
 
         was_inside = self.was_inside
+        # **An eye already inside a window as its state begins has entered it** (the PI, during
+        # demo mode's try-out, 2026-11-17: "If I am already at the center, i shouldn't have to
+        # leave and reenter"; EYE-30): on the state's first judged frame `Entered` fires on being
+        # inside, as on gaze coming in from outside on any later one. Membership is judged on
+        # every frame whatever the state, so an edge against the frame before hid an eye resting
+        # in a window through the state before from this state's `Entered` on it. `Exited` is
+        # unchanged: an eye outside as its state begins has left nothing.
+        fresh = self.fresh
+        self.fresh = False
         index = 0
         while index < len(go):
             edge = go[index]
@@ -788,7 +804,7 @@ class _Loop:
                         >= _resolve(guard.seconds, bound)
                     )
             elif isinstance(guard, Entered):
-                fired = inside_now[guard.window] and not was_inside[guard.window]
+                fired = inside_now[guard.window] and (fresh or not was_inside[guard.window])
             elif isinstance(guard, Exited):
                 fired = was_inside[guard.window] and not inside_now[guard.window]
             elif isinstance(guard, Hold):
@@ -832,6 +848,9 @@ class _Loop:
             return True
         self.current = current = self.by_name[edge.to]
         self.entered_at = frame
+        # Its first judged frame is still to come: an eye already inside a window then has
+        # entered it (read in `frame`; EYE-30).
+        self.fresh = True
         # **A saccade counts for a state by its onset or its stop against the state's first frame**
         # (`World.began`: XC-410, the PI, 2026-10-30; "Count it both ways", the PI, 2026-11-06), as
         # a hold counts only gaze since its state began (below): the world is told the state's

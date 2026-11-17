@@ -1,6 +1,6 @@
 # Where this build is
 
-**Last updated 2026-11-16**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
+**Last updated 2026-11-17**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
 is the current state only, and stays one page** (the PI, 2026-11-07, after a whole-project audit). Every earlier
 entry, 2026-08-31 to 2026-11-07, is in `docs/CHECKPOINT-history-2026-08-31-to-2026-11-07.md`, unchanged: read one
 there only when this page or a backlog line sends you to it. A session ends by updating this page (CLAUDE.md).
@@ -35,6 +35,7 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   changes approved as built (`tools/welfare_diff.py 1d77392 HEAD`: `_open` alone `DIFFERS`), and a real record in
   the demo folder held and settled there "fine as built". **It waits on, in order:** his try-out in Safari, `wlx demo
   wl-xtasks/tasks/popout_search.py --set response_deadline=3.0`; and his merge, by his yes by name and a clean CI.
+  **Changed during the try-out** (2026-11-17, his find): an eye already in a window as its state begins has entered it (EYE-30).
 - **Tell him first, in plain words**: the run begins when he first points at the demo screen; after Escape or a
   switch of tab the trial under way ends as tracker lost and the run waits until he moves the pointer on it again; a
   slow glide (600 ms) can still end on the pop-out's own 0.3 s landing bound, the try-out's question, a little more
@@ -76,7 +77,7 @@ is settled from his stated principles and told to him in one line; every merge w
 ## Working here
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, at `d8fe06b` or later, and a `wl-xtasks`
-  one, git-ignored at `/wl-xtasks`; wl-sync at the commit `wl-preproc/pyproject.toml` pins). **6192 passed on
+  one, git-ignored at `/wl-xtasks`; wl-sync at the commit `wl-preproc/pyproject.toml` pins). **6198 passed on
   `demo-build-2026-11-14`**, none skipped; 5858 on `main`.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`), the nightly all, in 36 shards;
   a big branch runs that sweep by hand before its merge (`gh workflow run ci.yml --ref <branch>`). Read every shard's

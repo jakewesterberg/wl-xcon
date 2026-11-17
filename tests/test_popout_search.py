@@ -209,11 +209,11 @@ class _Seen(Tracked):
         Tracked.display(self, visible, frame)
 
 
-def _play(task, moves, **values):
-    """One trial of the task, its eye making `moves`: the result, the eye, and its marks and
-    rewards in order."""
+def _play(task, moves, *, eye_at=(6.0, 6.0), **values):
+    """One trial of the task, its eye making `moves` from `eye_at`: the result, the eye, and its
+    marks and rewards in order."""
     bound = _values(task, **values)
-    eye = _Eye(moves)
+    eye = _Eye(moves, start=eye_at)
     effects = Recorded()
     result = run_trial(task.trial, _Seen(eye, task.trial, bound), FRAME, values=dict(bound),
                        effects=effects)
@@ -493,6 +493,30 @@ def test_no_response_after_the_go_is_a_failure_with_no_timeout_and_no_reward(tas
     assert result.frames == eye.begun["go"] + round(_start(task, "response_deadline") * HZ) - 1
     assert ("mark", TIMEOUT_ON) not in log
     assert not [entry for entry in log if entry[0] == "reward"], log
+
+
+def test_an_eye_already_at_the_center_as_the_fixation_point_comes_on_has_entered_it(task):
+    """**The PI's try-out of demo mode, 2026-11-17**: "if i already have the "gaze" near the center
+    when the fixation dot appears, i have to leave the window and reenter to start the trial. If I
+    am already at the center, i shouldn't have to leave and reenter". An eye resting at the center
+    through `between`, the blank before the fixation point, has entered `fix` on `await_fix`'s
+    first frame, the one the point is first drawn on, and the trial goes on to `hold_fix` the next
+    frame without the eye moving. **The hold counts from `hold_fix`'s first frame**, never from
+    before the point came on, so the go comes `fix_hold` after it, not sooner. Until then `Entered`
+    fired only on an edge against the frame before, and membership is judged in every state, so the
+    eye was already inside as `await_fix` began and the trial ended `NO_FIXATION` (decisions.md
+    EYE-30)."""
+    result, eye, log = _play(task, [("go", 48, ODD_ONE)], eye_at=FIXATION)
+
+    assert result.outcome is Outcome.CORRECT, result.visited
+    assert result.visited[:4] == ("between", "await_fix", "hold_fix", "go")
+    shown = _shown(result)
+    assert eye.begun["await_fix"] == 1 + HZ, "a second of blank screen between trials"
+    assert shown["fix"][0] == eye.begun["await_fix"]
+    assert eye.begun["hold_fix"] == eye.begun["await_fix"] + 1, "entered on await_fix's first frame"
+    assert eye.begun["go"] == eye.begun["hold_fix"] + round(_start(task, "fix_hold") * HZ), (
+        "the hold counts from hold_fix's first frame, not from before the point came on")
+    assert [entry for entry in log if entry[0] == "reward"] == [("reward", "reward_correct")]
 
 
 # --- Sessions -----------------------------------------------------------------------------------

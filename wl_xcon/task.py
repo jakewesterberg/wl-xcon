@@ -353,7 +353,8 @@ class After(Guard):
 
 @dataclass(frozen=True, slots=True)
 class Entered(Guard):
-    """Gaze entered a window and settled. Pairs with `Exited`."""
+    """Gaze entered a window and settled, or is inside it as its state begins (EYE-30: on the
+    state's first judged frame). Pairs with `Exited`."""
 
     window: str
 

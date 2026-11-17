@@ -1107,9 +1107,11 @@ def test_before_the_update_the_windows_are_where_the_array_was_shown():
 
 
 def test_the_windows_move_on_the_frame_the_display_first_carries_the_update():
-    """Not a frame before, while the objects are still drawn where they were, and not a frame
-    after: with gaze already where object 1 is going, `Entered` on it fires on the frame the loop
-    records the update as first shown (`Result.changed`)."""
+    """Not a frame after: with gaze already where object 1 is going, `Entered` on it fires on the
+    frame the loop records the update as first shown (`Result.changed`). That frame is `moved`'s
+    first, where since 2026-11-17 an eye already inside a window has entered it (EYE-30), so a
+    window switched a frame early would fire it there too: **not a frame before** is the next
+    test's, `Exited` being an edge against the frame before still."""
     shown, update, values = _MOVES["to another x-y position"]
     trial = Trial(
         start="shown",

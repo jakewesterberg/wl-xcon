@@ -368,8 +368,8 @@ class _Steering(Simulated):
     def _aim(self) -> tuple[float, float]:
         """The target's window while its object is on the screen (a window is listed whether or
         not what it belongs to is shown; an array's object `search.0` is drawn as an item of that
-        name), the fixation point while it is, else `REST`: an eye already on the fixation point
-        as it comes on never enters its window."""
+        name), the fixation point while it is, else `REST`, so each fixation is a move to the point
+        (an eye already on it as it comes on has entered it too, since 2026-11-17: EYE-30)."""
         drawn = self.drawn
         shown = set() if drawn is None or drawn.screen is None else {
             item.name for item in drawn.screen.items}
