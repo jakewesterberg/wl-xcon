@@ -496,7 +496,7 @@ def test_no_response_after_the_go_is_a_failure_with_no_timeout_and_no_reward(tas
 
 
 def test_an_eye_already_at_the_center_as_the_fixation_point_comes_on_has_entered_it(task):
-    """**The PI's try-out of demo mode, 2026-11-17**: "if i already have the "gaze" near the center
+    """**The PI's try-out of demo mode, 2026-11-16**: "if i already have the "gaze" near the center
     when the fixation dot appears, i have to leave the window and reenter to start the trial. If I
     am already at the center, i shouldn't have to leave and reenter". An eye resting at the center
     through `between`, the blank before the fixation point, has entered `fix` on `await_fix`'s

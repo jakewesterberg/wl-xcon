@@ -8,7 +8,7 @@ over its four sockets, not through `wlx serve`, which cannot carry a demo until 
 **What a scripted person does** is a `Person`: told each `Drawn` the rig publishes (`seen`), asked
 where the pointer is before each report (`aim`). It rests at `REST` until the fixation point is
 drawn, and again once the trial's screen goes blank, so each fixation is a move to the point. (Until
-2026-11-17 a pointer already on the point as it appeared never entered its window; it has entered
+2026-11-16 a pointer already on the point as it appeared never entered its window; it has entered
 it since, EYE-30, and `test_demo_popout.py`'s `Centered` plays that.) A subclass says what it does
 from the go on.
 

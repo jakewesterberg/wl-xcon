@@ -384,7 +384,7 @@ one state was invisible to a later state's `Entered` on it: in the pop-out searc
 center through the blank before the fixation point waited for it to leave and come back, or ran out
 as `NO_FIXATION`, and a slow simulated eye's one no response made each of the 532 trials after it
 `NO_FIXATION` with the eye on the point it was waiting for (EYE-30's census). The PI found it
-trying demo mode with the mouse (2026-11-17). Nothing in the suite had seen it: no test had an eye
+trying demo mode with the mouse (2026-11-16). Nothing in the suite had seen it: no test had an eye
 already inside a window as a later state asked `Entered` of it (the suite passed unchanged with the
 rule changed), and the two scripted pointers of demo mode's tests rested away from the fixation
 point until it was drawn, "since a pointer already on the point as it appears never enters its

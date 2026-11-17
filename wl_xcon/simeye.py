@@ -16,7 +16,7 @@ draws (`Seeing.display`, before the frame's sample is polled) and told each stat
 - **It fixates the fixation point when it is shown**: a state that asks for gaze in a window
   (`Entered`, `Hold`) whose stimulus is drawn, and the eye not in it, gets a saccade to it after a
   latency. An eye already in it makes none, and has entered it as the state begins (EYE-30; until
-  2026-11-17 it waited there, as a slow eye left at the center by a no response then did for every
+  2026-11-16 it waited there, as a slow eye left at the center by a no response then did for every
   trial after).
 - **It answers at the go**: a state that asks for the answer -- a saccade to a target
   (`SaccadeTo` on a window whose edge does not end the trial wrong), any saccade

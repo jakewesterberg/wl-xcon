@@ -241,7 +241,7 @@ class Centered(Person):
 
 def test_a_pointer_already_at_the_center_as_the_fixation_point_comes_on_has_entered_it(
         tmp_path, zmq_cleanup, began):
-    """**The PI's try-out, 2026-11-17**, through the path he found it on: "if i already have the
+    """**The PI's try-out, 2026-11-16**, through the path he found it on: "if i already have the
     "gaze" near the center when the fixation dot appears, i have to leave the window and reenter to
     start the trial. If I am already at the center, i shouldn't have to leave and reenter". A
     pointer resting at the center from before the trial began, across the boundary from `between`

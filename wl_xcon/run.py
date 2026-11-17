@@ -781,7 +781,7 @@ class _Loop:
 
         was_inside = self.was_inside
         # **An eye already inside a window as its state begins has entered it** (the PI, during
-        # demo mode's try-out, 2026-11-17: "If I am already at the center, i shouldn't have to
+        # demo mode's try-out, 2026-11-16: "If I am already at the center, i shouldn't have to
         # leave and reenter"; EYE-30): on the state's first judged frame `Entered` fires on being
         # inside, as on gaze coming in from outside on any later one. Membership is judged on
         # every frame whatever the state, so an edge against the frame before hid an eye resting

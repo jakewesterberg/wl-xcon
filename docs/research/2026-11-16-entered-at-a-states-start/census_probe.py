@@ -1,11 +1,11 @@
 """**What an `Entered` on a state's first judged frame moves** (decisions.md EYE-30; the PI's
-try-out of demo mode, 2026-11-17): every reference task in `tasks/` and the pop-out search from a
+try-out of demo mode, 2026-11-16): every reference task in `tasks/` and the pop-out search from a
 wl-xtasks checkout at the repository's root, by the hazard `simulate.Subject` (1,500 trials at each
 of two seeds) and by the simulated eye (`simeye.Eye`, 600 trials at each of three), their exact
 outcome counts, as JSON on stdout.
 
 Run from the repository's root, `PYTHONPATH=. python
-docs/research/2026-11-17-entered-at-a-states-start/census_probe.py`, once on `wl_xcon/run.py` as it
+docs/research/2026-11-16-entered-at-a-states-start/census_probe.py`, once on `wl_xcon/run.py` as it
 was at `04797cb` (`census-at-04797cb.json`) and once with the change (`census-with-the-fix.json`),
 and diff the two. Settings without a start take the reference tests' values
 (`tests/test_reference_tasks.py`) or their range's middle. Engine test material: the frames are the

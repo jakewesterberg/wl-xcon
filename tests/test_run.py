@@ -332,7 +332,7 @@ def test_a_hold_is_measured_from_state_entry_not_from_when_gaze_arrived():
 
 
 # --- An eye already inside a window as its state begins has entered it (the PI, during demo
-# mode's try-out, 2026-11-17: "If I am already at the center, i shouldn't have to leave and
+# mode's try-out, 2026-11-16: "If I am already at the center, i shouldn't have to leave and
 # reenter"; decisions.md EYE-30). `Entered` fires on a state's first judged frame on being inside,
 # as on gaze coming in from outside on any later frame; `Exited` and holds are unchanged. Until
 # then both were edges against the frame before, and membership is judged in every state.

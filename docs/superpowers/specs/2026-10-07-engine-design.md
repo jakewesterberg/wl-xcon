@@ -481,7 +481,7 @@ tests**, after which a bare contrast is refused at load. A convention defined ag
    keeping to a saccade that begins in its state; a state a timer or a completed hold begins whose
    `SaccadeOnset` edge goes on to another state gets a warning at load (XC-455, not built yet).
    The world is told each state's first frame and no longer the edge that entered it.
-   *Note, 2026-11-17 (the PI, trying demo mode: "If I am already at the center, i shouldn't have to
+   *Note, 2026-11-16 (the PI, trying demo mode: "If I am already at the center, i shouldn't have to
    leave and reenter"):* **an eye already inside a window as its state begins has entered it.**
    `Entered` fires on a state's first judged frame -- the first on which the loop derives gaze
    edges, not one frozen inside a blink or tracker-loss grace -- if gaze is inside the window then,
