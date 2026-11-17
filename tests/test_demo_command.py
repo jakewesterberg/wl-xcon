@@ -445,6 +445,87 @@ def test_a_keep_copy_that_fails_says_where_the_folder_is_keeps_it_and_lets_the_l
     os.close(free)
 
 
+class _CtrlCAsTaken:
+    """**A child's waitpid lock, and a Ctrl-C the moment it is taken**: `subprocess.Popen`'s own
+    lock, which `poll` takes before its `try` (CPython 3.13's `_internal_poll`), with SIGINT raised
+    in this process the first time it is had -- where a real one landed under CI's load."""
+
+    def __init__(self, real) -> None:
+        self.real, self.armed = real, True
+
+    def acquire(self, *args, **kwargs) -> bool:
+        got = self.real.acquire(*args, **kwargs)
+        if got and self.armed:
+            self.armed = False
+            signal.raise_signal(signal.SIGINT)
+        return got
+
+    def release(self) -> None:
+        self.real.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_) -> None:
+        self.release()
+
+
+class _Quiet:
+    """Frames that never come: each receive a short wait and a timeout, as `ZmqConsole`'s."""
+
+    def receive(self):
+        time.sleep(0.01)
+        raise TimeoutError
+
+
+def test_a_ctrl_c_as_a_childs_lock_is_taken_is_answered_with_it_let_go(monkeypatch, tmp_path):
+    """**The demo build's CI fix, 2026-11-17**: `wlx demo` took Ctrl-C as Python's
+    `KeyboardInterrupt`, raised wherever the signal landed, and one landing as `Popen.poll` took a
+    child's waitpid lock left it held: that child's stop then timed out twice and `wlx demo` ended
+    1, its folder left, as the Ctrl-C tests above ended on CI under load. **A Ctrl-C is counted, and
+    answered at the start of a wait's pass** (`_Demo.ctrl_c`, `_Demo.interrupted`): here one comes
+    as the watch loop polls a child, and the watch ends on it with the lock let go, the child then
+    stopped as Ctrl-C stops it, and the handler before it back once the demo lets Ctrl-C go."""
+    from wl_xcon import demo as demo_module
+    from wl_xcon.actor import Box
+
+    # A stand-in child: stopped as `wlx demo`'s children are, SIGTERM taken as Ctrl-C, 130.
+    monkeypatch.setattr(demo_module, "_CHILD", (
+        "import signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(130))\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(600)\n"))
+    folder = tmp_path / "wlx-demo-x"
+    folder.mkdir()
+    lock = os.open(tmp_path / "rig.lock", os.O_RDWR | os.O_CREAT)
+    try:
+        made = demo_module._Demo(folder, lock, Box("t"))
+        child = made._child("a child", [], dict(os.environ))
+        made.frames = _Quiet()
+        taken = _CtrlCAsTaken(child.process._waitpid_lock)
+        before = signal.getsignal(signal.SIGINT)
+        try:
+            with made.taking_ctrl_c():
+                child.line(re.compile("^ready$"), PATIENCE_S, made.interrupted)
+                child.process._waitpid_lock = taken
+                # A pass is a hundredth of a second here: ten seconds is a Ctrl-C never answered.
+                with pytest.raises(KeyboardInterrupt):
+                    made.frame(lambda frame: False, "frame", within_s=10.0)
+                assert not taken.armed, "no Ctrl-C came as the lock was taken"
+                assert not taken.real.locked(), "the Ctrl-C left the child's waitpid lock held"
+            assert signal.getsignal(signal.SIGINT) is before
+        finally:
+            # Disarmed, and let go if it was left held, so the stop below says how it ended.
+            child.process._waitpid_lock = taken.real
+            if taken.real.locked():
+                taken.real.release()
+            child.stop()
+        assert child.process.returncode == 130, child.how_it_ended()
+    finally:
+        os.close(lock)
+
+
 # --- Refused -------------------------------------------------------------------------------------
 
 

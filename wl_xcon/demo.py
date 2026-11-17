@@ -30,10 +30,20 @@ it; the children are given it too, so a rig service started meanwhile waits unti
 has gone. **A child outlives no `wlx demo`**: each reads its standard input to its end, which comes
 when this process goes however it goes, and then stops itself as Ctrl-C stops it. Killed outright,
 this command leaves its folder in the temporary folder, outside any rig's data (§7).
+
+**Ctrl-C is counted, and answered where this command chooses** (`_Demo.ctrl_c`, `_Demo.interrupted`;
+the demo build's CI fix, 2026-11-17), once it has a folder: never Python's `KeyboardInterrupt`
+raised wherever the signal lands. One landing as `subprocess.Popen.poll` takes its waitpid lock,
+which CPython takes before its `try` (`_internal_poll`, CPython 3.13's `subprocess.py`, read
+2026-11-17), left the lock held; a child's stop then timed out twice, and `wlx demo` ended 1 with
+its folder left, not 130: how CI's Ctrl-C tests ended under load. Each wait's pass begins by
+answering a Ctrl-C taken since the last, so one is answered within a pass, `LOOK_EVERY_S`, or once
+a command the rig is answering has its answer.
 """
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import os
 import queue
@@ -260,11 +270,12 @@ class _Child:
                 sys.stderr.write(line)
                 sys.stderr.flush()
 
-    def line(self, pattern: re.Pattern, within_s: float) -> re.Match:
+    def line(self, pattern: re.Pattern, within_s: float, interrupted) -> re.Match:
         """The first line it prints that `pattern` finds, within `within_s`; `_Ended` saying why if
-        it ends first or takes longer."""
+        it ends first or takes longer. `interrupted` begins each pass (`_Demo.interrupted`)."""
         deadline = time.monotonic() + within_s
         while True:
+            interrupted()
             try:
                 line = self._lines.get(timeout=LOOK_EVERY_S)
             except queue.Empty:
@@ -337,6 +348,35 @@ class _Demo:
         #: The session this command opened, and the demo service's sessions' folder.
         self.session_id: str | None = None
         self.root = folder / "demo" / "sessions"
+        #: **The Ctrl-Cs taken while `taking_ctrl_c` holds, and how many have been answered**
+        #: (`interrupted`; the module docstring).
+        self.ctrl_cs = 0
+        self._answered = 0
+
+    # --- Ctrl-C -----------------------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def taking_ctrl_c(self):
+        """**Ctrl-C counted while it holds** (`ctrl_c`, this command's SIGINT handler), and the
+        handler before it put back after; `_run` holds it from the folder's making to its end."""
+        previous = signal.signal(signal.SIGINT, self.ctrl_c)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def ctrl_c(self, signum, frame) -> None:
+        """**A Ctrl-C, counted, never raised where it lands**: whatever this process is doing as
+        it comes -- taking a lock in `subprocess` -- goes on undisturbed (the module docstring)."""
+        self.ctrl_cs += 1
+
+    def interrupted(self) -> None:
+        """**`KeyboardInterrupt`, here, for a Ctrl-C taken since the last was answered**, so it is
+        raised at a point this command chose: the start of a wait's pass (`frame`, `_Child.line`),
+        where no lock is held. Two in one pass are one."""
+        if self.ctrl_cs > self._answered:
+            self._answered = self.ctrl_cs
+            raise KeyboardInterrupt
 
     # --- Starting ---------------------------------------------------------------------------
 
@@ -355,10 +395,10 @@ class _Demo:
         self.taskd = self._child("wlx taskd --demo", [
             "taskd", "--demo", str(self.folder / "demo"), "--rig", str(rig), "--tasks",
             str(tasks), "--allocation", str(allocation), "--link", LINK], env)
-        link = self.taskd.line(_TASKD_LINE, STARTED_WITHIN_S).group(1)
+        link = self.taskd.line(_TASKD_LINE, STARTED_WITHIN_S, self.interrupted).group(1)
         serve = self._child("wlx serve", [
             "serve", "--link", link, "--http", HTTP, "--health-token-file", str(token)], env)
-        port = int(serve.line(_SERVE_LINE, STARTED_WITHIN_S).group(1))
+        port = int(serve.line(_SERVE_LINE, STARTED_WITHIN_S, self.interrupted).group(1))
         pub, rep, _, _ = link.split(",")
         self.frames = _link.ZmqConsole(pub, None, receive_timeout_s=LOOK_EVERY_S)
         self.commands = _link.ZmqCommands(rep)
@@ -380,9 +420,11 @@ class _Demo:
 
     def frame(self, wanted, what: str, within_s: float = ANSWERED_WITHIN_S, children=None):
         """The first frame `wanted` takes, a drawing never; `_Ended` if one of `children` (both, by
-        default) dies first or none comes within `within_s`, saying `what` was waited for."""
+        default) dies first or none comes within `within_s`, saying `what` was waited for. Each
+        pass begins by answering a Ctrl-C (`interrupted`)."""
         deadline = time.monotonic() + within_s
         while True:
+            self.interrupted()
             self._died(self.children if children is None else children)
             if time.monotonic() > deadline:
                 raise _Ended(f"wlx demo: no {what} within {within_s:g} s")
@@ -579,37 +621,40 @@ def _run(args) -> int:
             f"{_service.rig_lock()}), and a demo's drawing would share the processor its "
             f"session's frames run on. End the rig service first. Nothing was started")
     demo = _Demo(Path(tempfile.mkdtemp(prefix="wlx-demo-")), lock, Box(who))
-    print(f"wlx demo: its folder is {demo.folder}, deleted when it ends", flush=True)
-    status = 0
-    try:
+    # From here a Ctrl-C is counted, and answered where this command chooses (the module
+    # docstring).
+    with demo.taking_ctrl_c():
+        print(f"wlx demo: its folder is {demo.folder}, deleted when it ends", flush=True)
+        status = 0
         try:
-            port = demo.start(rig=rig, tasks=tasks, allocation=allocation)
-            demo.open(view=args.view, deployment=deployment, kind=args.session_kind)
-            demo.run(task=task_path.name, values=values, plan=args.plan,
-                     start_block=args.start_block, trials=args.trials)
-            address = ADDRESS.format(port=port)
-            print(f"wlx demo: the demo screen is at {address}", flush=True)
-            print("wlx demo: the run's first trial waits for the pointer: point at the demo "
-                  "screen to begin it; whenever nobody points (after Escape) the run waits again. "
-                  "Ctrl-C here ends the demo", flush=True)
-            if not args.no_browser:
-                webbrowser.open(address)
-            demo.watch()
-        except KeyboardInterrupt:
-            status = 130
-            print("wlx demo: ending: the run stopped, the session ended with its return now, the "
-                  "rig service and its page stopped", file=sys.stderr, flush=True)
-            _ending(demo)
-        except _Ended as ended:
-            status = ended.status
-            print(str(ended), file=sys.stderr, flush=True)
-            if demo.taskd is not None and not demo.taskd.ended():
+            try:
+                port = demo.start(rig=rig, tasks=tasks, allocation=allocation)
+                demo.open(view=args.view, deployment=deployment, kind=args.session_kind)
+                demo.run(task=task_path.name, values=values, plan=args.plan,
+                         start_block=args.start_block, trials=args.trials)
+                address = ADDRESS.format(port=port)
+                print(f"wlx demo: the demo screen is at {address}", flush=True)
+                print("wlx demo: the run's first trial waits for the pointer: point at the demo "
+                      "screen to begin it; whenever nobody points (after Escape) the run waits "
+                      "again. Ctrl-C here ends the demo", flush=True)
+                if not args.no_browser:
+                    webbrowser.open(address)
+                demo.watch()
+            except KeyboardInterrupt:
+                status = 130
+                print("wlx demo: ending: the run stopped, the session ended with its return now, "
+                      "the rig service and its page stopped", file=sys.stderr, flush=True)
                 _ending(demo)
-            for child in demo.children:
-                if not child.ended():
-                    print(f"wlx demo: stopping {child.name}", file=sys.stderr, flush=True)
-    finally:
-        demo.close(keep)
+            except _Ended as ended:
+                status = ended.status
+                print(str(ended), file=sys.stderr, flush=True)
+                if demo.taskd is not None and not demo.taskd.ended():
+                    _ending(demo)
+                for child in demo.children:
+                    if not child.ended():
+                        print(f"wlx demo: stopping {child.name}", file=sys.stderr, flush=True)
+        finally:
+            demo.close(keep)
     return status
 
 
