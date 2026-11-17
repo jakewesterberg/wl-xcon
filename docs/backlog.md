@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-513.**
+**Next free ID: XC-516.**
 
 ## Brainstorms queued for the PI
 
@@ -235,6 +235,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-501** `tests/test_fuzz_sessions.py::test_a_replay_control_is_found[pid-C1 -differing]` failed once on unchanged main (`dc30c0f`; nightly 43009700595, 2026-11-11, mutation-full shard 26's baseline: "replay control 'pid' injected and C1 found nothing on seed 0") and passed the nights before and after. Unlike `test_replay_agrees`, it never asserts that seed 0 ran, so a replay cut short by `WLX_FUZZ_CPU_S` (120 s) on a loaded runner reads as nothing found (not yet confirmed: the gate printed only the assertion's first line). A failed baseline stops that shard's whole sweep. — 2026-11-14, [tests/test_fuzz_sessions.py](../tests/test_fuzz_sessions.py) — waits on: nothing
 - **XC-506** Demo mode: a stall of the rig's thread just before a mouse move turns the move into a jump of a frame or two, which the detector scores as a look elsewhere, not a saccade: `pointer.Source` eases each report's move over the frames since the previous report, and a stall loses those frames (demo build Task 6, e297b07: one full-suite failure at 50 ms reports; its tests report every 100 ms with the collector held off during play). A demo's fidelity only, never an animal's data. — 2026-11-14, [`wl_xcon/pointer.py`](../wl_xcon/pointer.py) — waits on: nothing
 - **XC-509** Demo mode: the rig lock that keeps `wlx demo` from running beside a rig service (`service.RIG_LOCK`) is a file in the temporary folder, which macOS gives each user their own, so a `wlx demo` started by one user does not see a `wlx taskd` started by another there (on Linux `/tmp` is the computer's, and so is the lock): a rig PC whose service runs as another account than its people's needs the lock somewhere every account reaches (demo build Task 10, the plan's `<tempdir>/wlx-taskd.lock`). — 2026-11-14, [`wl_xcon/service.py`](../wl_xcon/service.py) — waits on: the rig PC's accounts
+- **XC-515** Ctrl-C and SIGTERM still reach `wlx taskd` (on a rig and as `--demo`) and `wlx serve` as Python's `KeyboardInterrupt`, raised wherever the signal lands, so any library lock taken before its `try` can be left held and a shutdown can hang or end badly: XC-512 was one such landing, and `wlx demo` was another (a `subprocess` waitpid lock, fixed in demo mode's CI fix by counting Ctrl-C in a handler and raising it only at the start of a wait's pass); give each long-running command the same counted handler, beside XC-199's deferral across the trial markers' emits. — 2026-11-17, [`wl_xcon/demo.py`'s module docstring](../wl_xcon/demo.py) (demo mode's CI fix, its report's concern 2) — waits on: nothing
 
 ## Debt
 
