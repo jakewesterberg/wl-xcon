@@ -26,6 +26,7 @@ from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import pointer, screen, viewport
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Bounds, Ceiling, Floor
+from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.link import (
     MARK_BYTES,
@@ -3703,25 +3704,74 @@ def _gazed_link(zmq_cleanup, **kwargs) -> ZmqLink:
                                "tcp://127.0.0.1:0", **kwargs))
 
 
-def _gazed(link, buffer, *, tries=400, pause=0.005) -> int:
-    """`link.gaze_into(buffer)` until a report is read, bounded as `_signalled` is and for its
-    reason: a report just sent is not visible to the very next statement."""
-    for _ in range(tries):
+#: **How long a gaze test waits for a report to arrive, or for a send to go**: a deadline in
+#: seconds, never a count of tries, so a loaded computer's slow loopback is waited out and a
+#: report that never comes fails the test (the demo build's CI fix, 2026-11-17). A patience, not a
+#: measurement.
+DELIVERED_WITHIN_S = 10.0
+#: How long such a wait sleeps between looks: housekeeping.
+_LOOK_S = 0.005
+
+
+def _gazed(link, buffer, *, within_s=DELIVERED_WITHIN_S) -> int:
+    """`link.gaze_into(buffer)` until a report is read, within `within_s`, else `-1`: a report
+    just sent is not visible to the very next statement."""
+    deadline = time.monotonic() + within_s
+    while True:
         size = link.gaze_into(buffer)
-        if size >= 0:
+        if size >= 0 or time.monotonic() > deadline:
             return size
-        time.sleep(pause)
-    return -1
+        time.sleep(_LOOK_S)
 
 
-def _sent(gaze, message, *, tries=400, pause=0.005) -> bool:
-    """`gaze.send(message)` until it goes: the PUSH connects in the background, and `IMMEDIATE`
-    refuses a send before it has."""
-    for _ in range(tries):
-        if gaze.send(message):
-            return True
-        time.sleep(pause)
-    return False
+def _sent(gaze, message, *, within_s=DELIVERED_WITHIN_S) -> bool:
+    """`gaze.send(message)` until it goes, within `within_s`: the PUSH connects in the background,
+    and `IMMEDIATE` refuses a send before it has."""
+    deadline = time.monotonic() + within_s
+    while not gaze.send(message):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(_LOOK_S)
+    return True
+
+
+def _caught_up(link, gaze, buffer, report, newest: int) -> tuple[list[int], int]:
+    """**The rig's reads until it has read the page's newest report, the page going on as a page
+    does**: each report read into `buffer` and its number kept, until the one in `buffer` is
+    `newest`, the last the page sent; and whenever none has come for `GAZE_EVERY_MS`, the page
+    sends its next, `report(newest + 1)`, as the page reports at least that often while it steers
+    (`web.py`'s `pump`). Returns the numbers read and the newest sent; past `DELIVERED_WITHIN_S`
+    the test fails, saying what was read.
+
+    **Why the page goes on** (the demo build's CI fix, 2026-11-17): **a conflating socket can hold
+    its newest message back until the next is sent.** libzmq keeps a `CONFLATE` socket's one
+    message in a double buffer whose writer gives up the swap that meets a read ("If it fails, due
+    to the consumer reading from the front buffer, it just gives up, which is ok since writes are
+    many and redundant": `src/dbuffer.hpp`, libzmq v4.3.5, read 2026-11-17), so a report written
+    while the other end is looking for one waits in the back buffer for the next write. Both gaze
+    ends conflate, so the last of a burst can wait at either: on CI the 2,001st of 2,001 was never
+    read in ten seconds, the 2,000th read alone, and the reads after the allocation measure, which
+    looks for a report 100,000 times, ended short of the 64th of 64. A page never stops at one
+    report, so its next carries the pointer on; a test that stopped at one waited for a report no
+    write would release."""
+    seen: list[int] = []
+    deadline = time.monotonic() + DELIVERED_WITHIN_S
+    quiet_since = time.monotonic()
+    while pointer.MESSAGE.unpack(buffer)[0] != newest:
+        now = time.monotonic()
+        if now > deadline:
+            pytest.fail(f"the rig never read the page's newest report, {newest}, within "
+                        f"{DELIVERED_WITHIN_S:g} s; it read {seen[-5:]}")
+        if link.gaze_into(buffer) >= 0:
+            seen.append(pointer.MESSAGE.unpack(buffer)[0])
+            quiet_since = now
+        elif now - quiet_since >= GAZE_EVERY_MS / 1000:
+            newest += 1
+            assert gaze.send(report(newest)), f"report {newest} to a connected rig was refused"
+            quiet_since = now
+        else:
+            time.sleep(_LOOK_S)
+    return seen, newest
 
 
 _REPORT = pointer.pack(7, 1.5, -2.0, over=True, b=False, button=True, held=0b101,
@@ -3761,8 +3811,9 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     one call it does not see, `ZmqLink.gaze_into` says how much). **The window holds a live read**:
     a report is seen waiting (`POLLIN`) before the first snapshot, unread, and at least one read is
     counted inside it (the build's re-review, N6: with `CONFLATE` a read before the window could
-    take the only one). Of `DRAIN` reports sent at once, the socket keeps the newest (M1): the last
-    read is the last sent."""
+    take the only one). Of `DRAIN` reports sent at once, the socket keeps the newest (M1): read in
+    order, each once, the last read the page's newest, once the page goes on reporting as it does
+    (`_caught_up`: a conflating socket can hold the newest back until the next is sent)."""
     import tracemalloc
 
     import zmq
@@ -3779,18 +3830,20 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
     assert _gazed(link, buffer) == 50 and bytes(buffer) == b"y" * pointer.MESSAGE.size
     assert builds_of(ZmqLink.gaze_into) == []
 
-    sent = [pointer.pack(seq, 1.5, -2.0, over=True, b=False, button=False, held=0,
-                         presses=(0,) * pointer.KEYS) for seq in range(1, pointer.DRAIN + 1)]
-    for report in sent:
-        assert _sent(gaze, report)
+    def report(seq: int) -> bytes:
+        return pointer.pack(seq, 1.5, -2.0, over=True, b=False, button=False, held=0,
+                            presses=(0,) * pointer.KEYS)
+
+    for seq in range(1, pointer.DRAIN + 1):
+        assert _sent(gaze, report(seq))
     take = link.gaze_into
     # The reads above warmed the path; now one waits, unread, before the window opens.
+    deadline = time.monotonic() + DELIVERED_WITHIN_S
     waiting = False
-    for _ in range(400):
+    while not waiting and time.monotonic() < deadline:
         waiting = bool(link._gaze.getsockopt(zmq.EVENTS) & zmq.POLLIN)
-        if waiting:
-            break
-        time.sleep(0.005)
+        if not waiting:
+            time.sleep(_LOOK_S)
     assert waiting, "no report was waiting to be read inside the measure"
     inside = 0
     tracemalloc.start()
@@ -3804,9 +3857,8 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
         after = tracemalloc.take_snapshot()
     finally:
         tracemalloc.stop()
-    read = inside
-    while _gazed(link, buffer, tries=40) >= 0:
-        read += 1
+    later, newest = _caught_up(link, gaze, buffer, report, pointer.DRAIN)
+    read = inside + len(later)
 
     import wl_xcon.link as link_module
 
@@ -3814,15 +3866,19 @@ def test_gaze_into_reads_one_message_allocating_nothing(zmq_cleanup):
             if stat.size_diff > 0 and stat.traceback[0].filename == link_module.__file__]
     assert held == []
     assert inside >= 1, "the measure held no read"
-    assert read <= pointer.DRAIN and bytes(buffer) == sent[-1], read
+    assert later == sorted(set(later)) and read <= newest, (read, newest, later[-5:])
+    assert bytes(buffer) == report(newest), "the last read is the page's newest"
 
 
 def test_after_a_pause_the_rig_reads_the_newest_report_and_no_send_is_refused(zmq_cleanup):
     """**The whole-build review's M1**: while the rig reads nothing -- between runs, paused -- the
     page's reports go on. Both ends keep only the newest waiting (`CONFLATE`), so not one send to
     the connected rig is refused (the page is never told *not delivered* for it), and the first
-    report the rig reads after the pause is the newest, never the oldest of a queue: before it the
-    rig's queue held the first 64 and replayed them, and every send past both queues was refused."""
+    report the rig reads after the pause is from the end of what was sent, never the oldest of a
+    queue: before it the rig's queue held the first 64 and replayed them, and every send past both
+    queues was refused. Read in order, each once, the last read the page's newest, once the page
+    goes on reporting as it does (`_caught_up`: a conflating socket can hold the newest back until
+    the next is sent)."""
     link = _gazed_link(zmq_cleanup)
     gaze = zmq_cleanup(ZmqGaze(link.gaze_endpoint))
     buffer = bytearray(pointer.MESSAGE.size)
@@ -3835,15 +3891,8 @@ def test_after_a_pause_the_rig_reads_the_newest_report_and_no_send_is_refused(zm
     refused = [seq for seq in range(2, 2002) if not gaze.send(numbered(seq))]
     assert refused == []
     time.sleep(0.5)  # the pause: the rig reads nothing
-    seen: list = []
-    deadline = time.monotonic() + 10.0
-    while (not seen or seen[-1] != 2001) and time.monotonic() < deadline:
-        if link.gaze_into(buffer) >= 0:
-            seen.append(pointer.MESSAGE.unpack(buffer)[0])
-        else:
-            time.sleep(0.005)
-    assert seen and seen[-1] == 2001, seen[:5]
-    assert seen[0] > 1000 and seen == sorted(seen), seen[:5]
+    seen, newest = _caught_up(link, gaze, buffer, numbered, 2001)
+    assert seen and seen[0] > 1000 and seen == sorted(set(seen)), (seen[:5], newest)
     assert link.gaze_into(buffer) == -1, "nothing older waits behind it"
 
 

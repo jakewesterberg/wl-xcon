@@ -3876,10 +3876,12 @@ class ZmqLink:
                 # inbound/outbound queue, this message being the last message received/the last
                 # message to be sent" (zmq_setsockopt(3), libzmq.readthedocs.io, read 2026-11-16).
                 # On this venv's pyzmq 27.1.0 with libzmq 4.3.5 a probe sent 2,000 unread reports
-                # and read the 2,000th alone. The page's note that an unread socket's memory grows:
-                # the same probe, 2,000,000 unread, more than eight hours of a page's reports, grew
-                # the process 3.1 MB (counts, not a measurement of this system's timing). A frame
-                # still reads at most `DRAIN` (`pointer.Source`).
+                # and read the 2,000th alone -- though not every time: the newest can wait for the
+                # next report's write (`ZmqGaze`'s docstring, since 2026-11-17). The page's note
+                # that an unread socket's memory grows: the same probe, 2,000,000 unread, more
+                # than eight hours of a page's reports, grew the process 3.1 MB (counts, not a
+                # measurement of this system's timing). A frame still reads at most `DRAIN`
+                # (`pointer.Source`).
                 self._gaze.setsockopt(zmq.CONFLATE, 1)
                 self._gaze.bind(gaze_endpoint)
                 self.gaze_endpoint = self._gaze.getsockopt_string(zmq.LAST_ENDPOINT)
@@ -4517,6 +4519,18 @@ class ZmqGaze:
     replayed the oldest; with both ends conflating, 2,000 unread reports sent, none refused, and the
     2,000th the one read (pyzmq 27.1.0, libzmq 4.3.5, loopback; counts, not a measurement of this
     system's timing).
+
+    **The newest can wait for the next** (the demo build's CI fix, 2026-11-17): libzmq keeps a
+    conflating socket's one message in a double buffer whose writer gives up the swap that meets a
+    read ("it just gives up, which is ok since writes are many and redundant": `src/dbuffer.hpp`,
+    libzmq v4.3.5, read 2026-11-17), so a report written as the other end looks for one waits, at
+    either end, until the next report is written; on CI, under load, the last of 2,001 never
+    arrived. A page reports at least every `demoscreen.GAZE_EVERY_MS` while it steers, so the rig
+    is then one report behind until the next, well inside `pointer.LIVE_S`; and the last report
+    before a page stops (Escape, a tab closed or hidden) can be the one that waits, with any press
+    counted only in it, the rig keeping the report before it and going stale from there. A test
+    that waits for the last report of a burst sends the next, as a page would
+    (`tests/test_link.py`'s `_caught_up`).
 
     Released the way `ZmqLink` and `ZmqMarks` are: `_release`, from `close()` or from its
     finalizer, with its one socket in the list the finalizer holds.

@@ -264,7 +264,10 @@ page's sequence number, the pointer's x and y in degrees, whether it is over the
 keys held, and each key's press count. One the wrong size, or not finite, is counted and dropped, as a malformed
 mark is. *(2026-11-16, the build's review, M1: the rig's PULL and `wlx serve`'s PUSH keep only the newest report
 waiting, ZeroMQ's `CONFLATE`, so after a pause or between runs the pointer is where it is now, never a replay of a
-queue's oldest, and a page is no longer told *not delivered* between runs. `DRAIN` still bounds a frame's reads.)*
+queue's oldest, and a page is no longer told *not delivered* between runs. `DRAIN` still bounds a frame's reads.
+2026-11-17, the build's CI fix: where it is now to within one report, since libzmq's conflating buffer can hold the
+newest back until the next is written, which a page reporting at least every `GAZE_EVERY_MS` does; see
+`link.ZmqGaze`.)*
 
 ### 3.9 The screen, from the rig
 

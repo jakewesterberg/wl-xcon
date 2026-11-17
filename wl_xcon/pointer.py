@@ -23,7 +23,8 @@ release between two frames is seen once.
   is counted `malformed` and dropped, as a malformed mark is. **The rig's gaze socket keeps only
   the newest report waiting** (`link.ZmqLink`, ZeroMQ's conflation; the whole-build review's M1),
   so a drain reads one, or the few that arrived while it read; those the socket dropped for a
-  newer are never read, so never counted. What `stale` counts is a report out of order: one read
+  newer are never read, so never counted. (The newest can wait for the page's next report:
+  `link.ZmqGaze`.) What `stale` counts is a report out of order: one read
   beside a newer, or numbered below the one in hand, as after `wlx serve` restarted, counting from
   1 again.
 - **A report is current for `LIVE_S`**: through a page's stall the last position is held, with
