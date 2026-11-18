@@ -1186,7 +1186,8 @@ def test_the_drawn_windows_are_those_tracked_scores_with_the_target_flagged():
     (target,) = [window for window in drawn.windows if window.target]
     placed = array.looks.positions(values, (0.0, 0.0))
     assert target.name == "search.0" and (target.x_deg, target.y_deg) == placed[0]
-    assert target.radius_deg == values["object_window"]
+    # A multiple of the disc's radius since the console settings plan's Task 11: 3.0 about 1°.
+    assert target.radius_deg == values["object_window"] * values["disc_size"] / 2
     # On the ring's true circle, the ring turned 33° (`task.Array.positions`).
     assert polar_of_deg(*placed[0]) == pytest.approx((values["ring_radius"], 33.0))
     odd_disc = next(item for item in drawn.screen.items if item.name == "search.0")

@@ -266,16 +266,18 @@ def _start(task, name: str):
 def test_popout_loads_clean_but_the_expected_warnings(task):
     """Against this repository's allocation, in direct view, head-fixed: nothing refused in any
     session kind. On the default calibration, its colors and lights are nominal (`color-on-default`,
-    `contrast-on-default`), and the sRGB standard cannot show the four as written at the top of the
-    range `color_luminance` allows (`color-set-desaturated`, a warning saying which part of the
-    range); on the measured test calibration, which carries its primaries' spectra, it shows them
-    over the whole range. In both, its plan has no end of its own (`endless-plan`): the trainer ends
-    a run; the windows can overlap at the settings' extremes, twelve discs on the smallest ring
-    (`crowded-array`, XC-156's check over the ranges), which the trainer keeps apart; and the
-    fixation window, whose exit starts the answer, can reach the discs' windows on the smallest
-    ring (`answer-window-reaches-objects`; the re-review, I-2); and the suggestions' margin, up to
-    20 answers, can reach a bar's count on the smallest windows (`margin-reaches-bar`; the
-    re-review 2, M-7)."""
+    `contrast-on-default`). In both, its plan has no end of its own (`endless-plan`): the trainer
+    ends a run; and the suggestions' margin, up to 20 answers, can reach a bar's count on the
+    smallest windows (`margin-reaches-bar`; the re-review 2, M-7), the training plan's settings
+    being read over their ranges. **Since the console settings plan's Task 11 nothing else**: its
+    caps gone and its open sides judged at their starts (the controller's ruling 5), the layout
+    warns of nothing there (`test_the_popout_loads_with_no_layout_warning_at_its_starts`) -- the
+    windows that could overlap over the old ranges (`crowded-array`), the fixation window reaching
+    the discs' (`answer-window-reaches-objects`), windows inside their discs
+    (`window-inside-object`) and discs touching (`objects-touch`) are each said where a value set
+    makes it so -- every limit has its reason (`unexplained-limit`), and the colors, judged at
+    their start, 15 cd/m², are shown as written on the sRGB standard (`color-set-desaturated`, said
+    over the old range above about 26 cd/m²; a live value is not judged for it, XC-518)."""
     allocation = _load_allocation(Path(ALLOCATION))
 
     on_default = check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
@@ -286,24 +288,9 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     for found in (on_default, on_measured):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
-    # **And the console settings plan's Task 4's three** (the controller's ruling: the expectation
-    # changes only to the new warnings, and the plan's Task 11 makes the load clean of them
-    # again): every bound the task declares without a reason (`unexplained-limit`), and over its
-    # builder's ranges its 0.5° windows inside its discs up to 3° across (`window-inside-object`)
-    # and twelve of those discs touching on the smallest ring (`objects-touch`).
-    new = {"unexplained-limit", "window-inside-object", "objects-touch"}
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
-                                             "color-set-desaturated", "crowded-array",
-                                             "answer-window-reaches-objects", "margin-reaches-bar",
-                                             "endless-plan"} | new
-    assert {f.code for f in on_measured} == {"crowded-array", "answer-window-reaches-objects",
-                                             "margin-reaches-bar", "endless-plan"} | new
-    (pale,) = [f for f in on_default if f.code == "color-set-desaturated"]
-    assert "above about 26 cd/m², of the 1 to 30 cd/m² setting 'color_luminance' allows" in (
-        pale.detail)
-    (crowded,) = [f for f in on_measured if f.code == "crowded-array"]
-    # Each setting named beside its value since the console settings plan's Task 4.
-    assert "12 objects ('set_size') on a 4° ring ('ring_radius'), 2.07° apart" in crowded.detail
+                                             "margin-reaches-bar", "endless-plan"}
+    assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan"}
 
 
 def test_it_holds_the_pis_values(task):
@@ -321,7 +308,7 @@ def test_it_holds_the_pis_values(task):
         "inter_trial", "fix_acquisition", "fix_hold", "response_deadline", "target_hold",
         "timeout", "fix_window", "object_window")} == {
         "inter_trial": 1.0, "fix_acquisition": 2.0, "fix_hold": 0.5, "response_deadline": 1.0,
-        "target_hold": 0.3, "timeout": 2.0, "fix_window": 2.0, "object_window": 1.5}
+        "target_hold": 0.3, "timeout": 2.0, "fix_window": 2.0, "object_window": 3.0}
     assert {name: starts.get(name) for name in (
         "disc_size", "ring_radius", "fix_size", "color_luminance", "move_up_bar",
         "move_up_window", "move_back_bar", "move_back_window", "staircase_down", "staircase_up",
@@ -349,8 +336,12 @@ def test_it_holds_the_pis_values(task):
     ring = shows["search"].looks
     assert isinstance(ring, Array) and ring.radius == P("ring_radius") and ring.n == P("set_size")
     assert (ring.looks, ring.among) == (P("odd_color"), P("distractor_color"))
-    windows = {window.name if isinstance(window, Window) else window.of: window.radius
-               for window in trial.windows}
+    # The discs' windows a multiple of each disc's radius since the console settings plan's Task
+    # 11: 3.0, the PI's 1.5° about a 1° disc
+    # (`test_the_popouts_object_window_is_three_times_a_discs_radius`).
+    windows = {window.name if isinstance(window, Window) else window.of: (
+        window.radius if isinstance(window, Window) else window.scale)
+        for window in trial.windows}
     assert windows == {"fix": P("fix_window"), "center": P("fix_window"),
                        "search": P("object_window")}
     assert any(isinstance(window, ObjectWindows) for window in trial.windows)
@@ -745,7 +736,7 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     assert start["color_sets"] == {"isohue": {
         "name": "isohue", "colors": {color: list(xy) for color, xy in theirs.colors.items()},
         "apex": list(theirs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
-        "source": theirs.source, "design": None,
+        "source": theirs.source, "design": theirs.design,
         "realized": [{"luminance_cd_m2": 15.0, "desaturation": shown.desaturation,
                       "xy": {color: list(xy) for color, xy in shown.xy.items()},
                       "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
@@ -1233,29 +1224,28 @@ def test_the_prompt_names_the_hardest_step_in_plain_words_and_a_pool_stays_whole
 
 
 #: **A panel a tenth as bright as the test one** (XC-494): white about 20 cd/m², so it shows the
-#: four colors only up to about 18.85 cd/m² of macaque luminance, below the top of
-#: `color_luminance`'s range, 30 (computed 2026-11-08 with `check.reachable_top`).
+#: four colors only up to about 18.85 cd/m² of macaque luminance, below what `color_luminance`
+#: may be set to (computed 2026-11-08 with `check.reachable_top`).
 DIM = measured(**{name: xyY(x, y, Y * 0.1) for name, (x, y, Y) in PRIMARIES.items()},
                id="dim@2027-01-20")
 
 
 def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_value(tmp_path):
     """XC-494, by the PI's "warnings over refusals" (2026-10-11): on a panel that cannot show the
-    colors at all at the top of `color_luminance`'s range, not even the set's apex, **the task
-    loads with a warning** naming the reachable top (`color-set-unreachable`), its start, 15, being
-    shown; **a trainer's live value above that top is refused**, the previous value standing, with
-    a sentence naming it, while one below it is taken; **and a run starting above it is refused**
-    -- by the pre-flight and by `Session.run` -- naming it too."""
+    colors at all above about 18.9 cd/m², not even the set's apex, **the task loads**, its start,
+    15, being shown -- since the console settings plan's Task 11 `color_luminance`'s lowest is
+    open, so the load judges it at its start, and no reachable top is warned of there
+    (`color-set-unreachable`), as it was over the old range of 1 to 30 -- **a trainer's live value
+    above that top is refused**, the previous value standing, with a sentence naming it, while one
+    below it is taken; **and a run starting above it is refused** -- by the pre-flight and by
+    `Session.run` -- naming it too."""
     from wl_xcon.preflight import FAIL, values as starting_values
 
     found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
                        calibration=DIM, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
     assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
-    (unreachable,) = [f for f in found if f.code == "color-set-unreachable"]
-    assert unreachable.accepted_in == SESSION_KINDS
-    assert ("cannot show color set 'isohue' at all above about 18.9 cd/m² of macaque luminance, "
-            "of the 1 to 30 cd/m² setting 'color_luminance' allows") in unreachable.detail
-    assert "color-set-desaturated" in {f.code for f in found}
+    assert "color-set-unreachable" not in {f.code for f in found}
+    assert "color-set-desaturated" in {f.code for f in found}, "at 15, as written it is not shown"
 
     refused = _Locks("color_luminance", 25.0, stop_at=5)
     session = _opened(replace(_spec(tmp_path / "live", seed=5, start_block="Fade-in"),
@@ -1289,18 +1279,19 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
 
 
 #: A panel a twenty-fifth as bright as `DIM`: the four colors' reachable top on it, under 1 cd/m²,
-#: is below the least `color_luminance` allows.
+#: is below `color_luminance`'s start, 15.
 DARK = measured(**{name: xyY(x, y, Y * 0.004) for name, (x, y, Y) in PRIMARIES.items()},
                 id="dark@2027-01-20")
 
 
 def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_refuses_the_task():
-    """XC-494's other side: where a panel cannot show the four colors at even the least of
-    `color_luminance`'s range, 1 cd/m², not even the set's apex, no value of the setting can be
-    drawn, so **the task is refused at load**, as a fixed luminance it cannot show is
-    (`unrealizable-color`): every color the task can draw, at both ends of the range, the lights
-    handed on as given (`check._within_reach`; CI's sweep of run 42496196528, where it survived
-    neutering, nothing else refusing them)."""
+    """XC-494's other side: where a panel cannot show the four colors at `color_luminance`'s start,
+    15 cd/m², not even the set's apex, a run could not draw its first trial, so **the task is
+    refused at load**, as a fixed luminance it cannot show is (`unrealizable-color`): every color
+    the task can draw, at the start -- since the console settings plan's Task 11 its lowest is
+    open, so the load judges it there, where it judged both ends of the old range of 1 to 30 --
+    the lights handed on as given (`check._within_reach`; CI's sweep of run 42496196528, where it
+    survived neutering, nothing else refusing them)."""
     found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
                        calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
     # The color set's own: the fixation point's gray at its range's top, 80 cd/m², is the
@@ -1309,9 +1300,205 @@ def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_r
 
     assert unshown and all(f.blocking for f in unshown)
     for color in ("blue", "purple", "red", "green"):
-        for end in ("luminance=1.0", "luminance=30.0"):
+        for end in ("luminance=15.0",):
             assert any(f"'isohue', '{color}'" in f.detail and end in f.detail for f in unshown), (
                 color, end)
+
+# --- The console settings plan's Task 11: its sections, its limits, its window as a ratio ----------
+
+#: **The companion design's sections** (`docs/superpowers/specs/2026-11-16-popout-revision-design.md`
+#: §5, the console settings plan's Task 11, the training ones split): each setting's section as
+#: `task.section_of` gives it, the six times by their unit, so naming none.
+SECTIONS = {
+    **dict.fromkeys(("inter_trial", "fix_acquisition", "fix_hold", "response_deadline",
+                     "target_hold", "timeout"), "Timing"),
+    **dict.fromkeys(("fix_window", "object_window"), "Gaze windows"),
+    **dict.fromkeys(("fix_size", "fix_luminance"), "Stimuli/fixation point"),
+    **dict.fromkeys(("disc_size", "ring_radius", "set_size", "array_rotation"), "Stimuli/array"),
+    **dict.fromkeys(("odd_color", "distractor_color", "color_luminance", "distractor_fraction"),
+                    "Colors"),
+    "pairings": "Pairings",
+    **dict.fromkeys(("move_up_bar", "move_up_window", "move_back_bar", "move_back_window"),
+                    "Training/bars"),
+    **dict.fromkeys(("staircase_down", "staircase_up", "fade_in_step", "crowd_step",
+                     "fade_in_floor", "crowd_floor"), "Training/staircases"),
+    "suggestion_margin": "Training/suggestions",
+}
+
+
+def test_the_popout_declares_the_companion_designs_sections(task):
+    """§7 of the console settings design ("The task file names it") and the companion design's §5:
+    Timing; Gaze windows; Stimuli, as fixation point and array; Colors; Pairings; and the Training
+    tab's bars, staircases and suggestions. **Every setting has its section**, none falling to
+    Other; the six times name none and go to Timing by their unit; the training ones sit under
+    `TRAINING_SECTION`, which the Training tab gathers (Task 10)."""
+    from wl_xcon.task import OTHER, TRAINING_SECTION, section_of
+
+    assert {param.name: section_of(param) for param in task.params} == SECTIONS
+    assert OTHER not in {section_of(param) for param in task.params}
+    times = {name for name, section in SECTIONS.items() if section == "Timing"}
+    assert {param.name: (param.unit, param.section) for param in task.params
+            if param.name in times} == dict.fromkeys(times, ("s", ""))
+    assert {param.name for param in task.params
+            if param.section.split("/")[0] == TRAINING_SECTION} == {
+        name for name, section in SECTIONS.items() if section.startswith("Training/")}
+
+
+#: **Each limit the pop-out keeps** (the console settings design's §4; the PI, 2026-11-16, "Hard
+#: limits only where impossible"): (lowest, highest), `None` for an open side. A time, a distance,
+#: a luminance and a margin below 0, a count below 1 and a fraction above 1 cannot be; a size's
+#: lowest stays open (the controller's ruling: a size of 0 is refused at the value), and so does
+#: the colors' luminance, which at 0 gives a color no chromaticity, refused at the value too; it
+#: keeps COL-29's highest, as the fixation point's luminance does. **The training
+#: plan's settings keep both ends** (`PLANNED_WHY`): this engine's load checks refuse a staircase's
+#: or a bar's setting with an open side (`bad-staircase`, `bad-plan`), as `unbounded-set-size`
+#: refuses a set size with no highest, so each side no standard reason covers keeps its number.
+BOUNDS = {
+    **dict.fromkeys(("inter_trial", "fix_acquisition", "fix_hold", "response_deadline",
+                     "target_hold", "timeout"), (0.0, None)),
+    **dict.fromkeys(("fix_window", "disc_size", "fix_size"), (None, None)),
+    "object_window": (0.0, None),
+    "ring_radius": (0.0, None),
+    "fix_luminance": (0.0, 80.0),
+    "color_luminance": (None, 80.0),
+    "set_size": (1, 12),
+    "array_rotation": (0.0, 360.0),
+    "distractor_fraction": (0.0, 1.0),
+    "pairings": (1, None),
+    "move_up_bar": (0.5, 1.0),
+    "move_back_bar": (0.05, 1.0),
+    **dict.fromkeys(("move_up_window", "move_back_window"), (1, 200)),
+    "suggestion_margin": (0, 20),
+    **dict.fromkeys(("staircase_down", "staircase_up"), (1, 10)),
+    "fade_in_step": (0.05, 1.0),
+    "crowd_step": (1, 8),
+    "fade_in_floor": (0.0, 1.0),
+    "crowd_floor": (1, 11),
+}
+#: Why the training plan's settings keep both ends, as the task file says it.
+PLANNED_WHY = ("the training plan's load checks read its whole range, so it keeps both ends; "
+               "the builder's")
+#: The settings that say it.
+PLANNED = ("move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
+           "suggestion_margin", "staircase_down", "staircase_up", "fade_in_step", "crowd_step",
+           "crowd_floor")
+
+
+def test_the_popouts_bounds_are_impossible_ones_with_reasons(task):
+    """The console settings plan's Task 11: **each bound stands only where a value cannot be, or
+    where this engine's checks need one**, every one with its reason (`task.limit_reason`), so the
+    load warns of none (`unexplained-limit`): the standard ones need no line; the ring's direction
+    is written from 0 to 360 (the PI, 2026-10-30); the fixation point's and the colors' 80 cd/m²
+    are COL-29's; a set size keeps its highest, since a run builds every disc before its first
+    frame (`unbounded-set-size` refuses one without); the training plan's settings keep both ends
+    (`PLANNED_WHY`), and one with an open side is refused at load; and the pool, with no highest of
+    its own, refuses a value past its twelve pairings itself (`check.unpooled`). **An open lowest
+    is no hole**: a disc of 0°, or colors at 0 cd/m², is refused where it is set
+    (`check.laid_out`)."""
+    from wl_xcon.check import UNEXPLAINED_LIMIT, unpooled
+    from wl_xcon.task import BELOW_ONE, BELOW_ZERO, FRACTION_TOP, limit_reason
+
+    numbers = {param.name: param for param in task.params if not param.choices}
+    assert {name: (param.low, param.high) for name, param in numbers.items()} == BOUNDS
+    for name, param in numbers.items():
+        for side, bound in (("low", param.low), ("high", param.high)):
+            assert (limit_reason(param, side) is None) == (bound is None), (name, side)
+    whys = {name: param.why for name, param in numbers.items() if param.why}
+    assert whys == {
+        "array_rotation": "a direction, written from 0 to 360 (the PI, 2026-10-30)",
+        **dict.fromkeys(("fix_luminance", "color_luminance"),
+                        "white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
+        "set_size": "a run builds every disc before its first frame, so a set size needs a "
+                    "highest: 12, Crowd's hardest",
+        **dict.fromkeys(PLANNED, PLANNED_WHY),
+    }
+    assert limit_reason(numbers["ring_radius"], "low") == BELOW_ZERO
+    assert limit_reason(numbers["pairings"], "low") == BELOW_ONE
+    assert limit_reason(numbers["distractor_fraction"], "high") == FRACTION_TOP
+    assert UNEXPLAINED_LIMIT not in {
+        f.code for f in check_task(task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                                   calibration=measured(), deployment=Deployment.RIG_FIXED,
+                                   source=TASK_FILE)}
+    from wl_xcon.check import laid_out
+
+    allocation = _load_allocation(Path(ALLOCATION))
+    for name in ("disc_size", "color_luminance"):
+        assert [f for f in laid_out(task, {name: 0.0}, allocation=allocation, geometry=DIRECT,
+                                    calibration=measured(), deployment=Deployment.RIG_FIXED)
+                if f.blocking], name
+    ((_, past),) = unpooled(task, {"pairings": 4096})
+    assert "it holds a pairing beyond the 12 the pool declares" in past
+    assert unpooled(task, {"pairings": 4095}) == []
+    for name, code in (("staircase_down", "bad-staircase"), ("move_up_window", "bad-plan")):
+        opened = replace(task, structures={"search": replace(task.trial, params=[
+            replace(param, high=None) if param.name == name else param
+            for param in task.trial.params])})
+        assert code in {f.code for f in check_task(opened, _load_allocation(Path(ALLOCATION)),
+                                                   geometry=DIRECT, calibration=measured(),
+                                                   deployment=Deployment.RIG_FIXED)
+                        if f.blocking}, name
+
+
+def test_the_popouts_object_window_is_three_times_a_discs_radius(task):
+    """§5 of the console settings design ("Grows in proportion"): **the discs' windows are a
+    multiple of each disc's own radius**, `object_window` 3.0 to start -- the 1.5° window about a
+    1° disc it was, as before -- the window following its disc: a 2° disc gets a 3° window, and a
+    window set below its disc's radius is warned (`window-inside-object`). The setting's lowest is
+    0, a multiple below 0 cannot be."""
+    from wl_xcon.check import laid_out
+
+    (objects,) = [window for window in task.trial.windows if isinstance(window, ObjectWindows)]
+    assert (objects.of, objects.radius, objects.scale) == ("search", None, P("object_window"))
+    (param,) = [param for param in task.params if param.name == "object_window"]
+    assert (param.unit, param.low, param.high, param.start, param.section) == (
+        "× disc radius", 0.0, None, 3.0, "Gaze windows")
+    ring = [action.stimulus for _, action in actions_of(task.trial) if isinstance(action, Show)
+            and action.stimulus.name == "search"][0].looks
+    for size, radius in ((1.0, 1.5), (2.0, 3.0)):
+        values = {**_values(task, set_size=12), "disc_size": size}
+        windows = objects.expand(ring, values)
+        assert {round(w.radius, 12) for w in windows if w.name.split(".")[1].isdigit()} == {
+            radius}, size
+    inside = laid_out(task, {"object_window": 0.8}, allocation=_load_allocation(Path(ALLOCATION)),
+                      geometry=DIRECT, calibration=measured(), deployment=Deployment.RIG_FIXED)
+    assert "window-inside-object" in {f.code for f in inside}
+
+
+def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
+    """The console settings plan's Task 11 (the controller's ruling 5): with its caps gone and its
+    open sides judged at their starts, **the pop-out loads with no layout warning** (`check.LAYOUT`)
+    on either calibration -- twelve 1° discs on the 8° ring, 4.13° apart, their 1.5° windows and
+    the 2° fixation window clear of each other -- and none at its starts set (`check.laid_out`),
+    nor any limit without its reason."""
+    from wl_xcon.check import LAYOUT, UNEXPLAINED_LIMIT, laid_out
+
+    allocation = _load_allocation(Path(ALLOCATION))
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    for calibration in (SRGB, measured()):
+        found = check_task(task, allocation, geometry=DIRECT, calibration=calibration,
+                           deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+        assert {f.code for f in found} & {*LAYOUT, UNEXPLAINED_LIMIT} == set(), [
+            f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}]
+        at_starts = laid_out(task, {**starts, "set_size": 12}, allocation=allocation,
+                             geometry=DIRECT, calibration=calibration,
+                             deployment=Deployment.RIG_FIXED)
+        assert [f.detail for f in at_starts if f.code in LAYOUT] == []
+
+
+def test_isohue_carries_its_design_frame(task):
+    """§6 of the console settings design: **wl-xtasks' isohue says how its hues were made**, the
+    frame the hue-angle method defines a new color in (Task 8): CAM16-UCS, about a gray of
+    lightness J' 65 -- wl-style's generator's reference gray, `isohue.py`'s `J_REF` and its
+    METHODS.md -- at chroma 29.49, its source sentence's own; the source says where both came
+    from, and the task reads the set as the file gives it."""
+    theirs = photometry.ColorSet.load(STIMULI)
+    frame = {"space": "CAM16-UCS", "gray_lightness": 65.0, "chroma": 29.49}
+    assert theirs.design == frame
+    assert json.loads(STIMULI.read_text())["design"] == frame
+    assert "chroma 29.49" in theirs.source and "J' 65" in theirs.source
+    (light,) = {look.color.colorset for pairing in task.pool.choices for look in pairing}
+    assert light.design == frame
+
 
 def _scheduler(task, values: dict, start: int = 0):
     """The pop-out plan's scheduler, as a run makes it, reading `values` live."""
@@ -1373,9 +1560,11 @@ def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(ta
     over refusals"): the answer begins as the eye leaves the fixation window, `center`; where that
     window reaches a disc's window -- a ring of 4° and a fixation window of 4.5°, both inside their
     ranges -- a look straight to the odd one, held, never leaves it, and ends as no response, a
-    staircase's failure, with no reward. So **the load warns** over the ranges
-    (`answer-window-reaches-objects`, about the smallest ring), and **a value set live that makes
-    it reach is warned on the changes feed** as it applies; at the starts nothing reaches."""
+    staircase's failure, with no reward. So **a value set live that makes it reach is warned on the
+    changes feed** as it applies; at the starts nothing reaches, so the load warns of nothing
+    (`answer-window-reaches-objects`): since the console settings plan's Task 11 the pop-out
+    declares no range for the ring or the windows that could reach, so the load judges them at
+    their starts, where it warned over the old ranges about their smallest ring."""
     from wl_xcon.check import answer_reaches
 
     right = [LOOK, ("go", 48, on_circle_deg(0.0, 0.0, 4.0, 0.0))]
@@ -1389,10 +1578,7 @@ def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(ta
                                    calibration=SRGB, deployment=Deployment.RIG_FIXED,
                                    source=TASK_FILE)
              if f.code == "answer-window-reaches-objects"]
-    assert len(found) == 1 and found[0].is_warning and found[0].accepted_in == SESSION_KINDS
-    assert ("window 'center', whose exit starts the answer (state 'go'), can reach array "
-            "'search''s object windows: its radius up to 5° and theirs up to 2° overlap on a ring "
-            "as small as 4° about it") in found[0].detail
+    assert found == []
     starts = {param.name: param for param in task.params}
     assert answer_reaches(task.trial, {
         name: (param if param.choices or param.start is None
@@ -1543,7 +1729,8 @@ def test_a_margin_that_can_reach_a_bars_count_is_warned_at_load_and_live(task, t
     """The re-review 2, M-7 (the controller's ruling: a warning, never a refusal): a margin as large
     as a bar's count makes a suggestion its bar can never withdraw -- up at 4 of 5 with a margin of
     5 holds with none right. **At load**, over the ranges, the pop-out's margin of up to 20 can
-    reach every stage's bar on a 5-answer window (`margin-reaches-bar`); **live**, the changes feed
+    reach every stage's bar on a 1-answer window, its lowest since the console settings plan's
+    Task 11 (`margin-reaches-bar`); **live**, the changes feed
     warns once as values set make it reach -- a 5-answer window with a margin of 5 -- and nothing at
     the starts."""
     from wl_xcon.check import margin_reaches
@@ -1553,7 +1740,7 @@ def test_a_margin_that_can_reach_a_bars_count_is_warned_at_load_and_live(task, t
                                    source=TASK_FILE)
              if f.code == "margin-reaches-bar"]
     assert len(found) == 2 and all(f.is_warning for f in found)
-    assert ("can reach stages 'Alone', 'Fade-in' and 'Crowd''s bars to move up, as few as 2.5 "
+    assert ("can reach stages 'Alone', 'Fade-in' and 'Crowd''s bars to move up, as few as 0.5 "
             "right answers") in found[0].detail
     starts = {name: (param if param.choices or param.start is None
                      else replace(param, low=param.start, high=param.start))
