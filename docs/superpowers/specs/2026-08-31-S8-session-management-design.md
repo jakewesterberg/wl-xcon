@@ -71,6 +71,14 @@ Owns condition selection, block progression and the counters.
 
 ## 3. Parameters
 
+> **Amended 2026-11-18 (the console settings build,
+> [design](2026-11-16-console-settings-design.md)).** A setting's declared bounds are hard only where a value is
+> impossible, each with its reason (`Param.why`); everything else is a warning from the layout judged at the
+> values. A setting may be set as a form (`SetForm`: a ramp, a scaling by eccentricity), a sizes' lowest may be
+> open, a color is picked by set, hue and two levels with each light's own saturation, a card lays out in the
+> sections the task file names, and training has one switch (on, frozen or the full task). Section 3.1 below
+> is read with that design.
+
 ### 3.1 Declaration
 
 Each task declares its parameter space: name, type, unit, valid range, live-editable or not.

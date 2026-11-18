@@ -1,6 +1,6 @@
 # Where this build is
 
-**Last updated 2026-11-17**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
+**Last updated 2026-11-18**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
 is the current state only, and stays one page** (the PI, 2026-11-07, after a whole-project audit). Every earlier
 entry, 2026-08-31 to 2026-11-07, is in `docs/CHECKPOINT-history-2026-08-31-to-2026-11-07.md`, unchanged: read one
 there only when this page or a backlog line sends you to it. A session ends by updating this page (CLAUDE.md).
@@ -31,11 +31,19 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   state begins has entered it, EYE-30) and a clean CI (push 44086214727; full sweep by hand 44086213776, 1608 caught,
   none survived, shards 34 and 35 cut at 6 h, XC-500). wl-preproc was told the commit (XC-502's marking, on its own
   order). Before it: the pop-out search and the XC-491 answers; wl-preproc's pop-out reader is on its main, `d8fe06b`.
-- **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the PI's
-  try-out asks, designed with him and approved ("Approve both", 2026-11-16), each with its plan and his answers:
-  the console settings (`docs/superpowers/specs/2026-11-16-console-settings-design.md`, plan
-  `docs/superpowers/plans/2026-11-16-console-settings.md`, 12 tasks, its wl-preproc ask XC-513) and the pop-out's
-  revision (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks, ask XC-514, codes from 4139).
+- **`console-build-2026-11-17`** (worktree `.claude/worktrees/console-build-2026-11-17`, **not pushed**): the console
+  settings build, Tasks 1 to 12 (design `docs/superpowers/specs/2026-11-16-console-settings-design.md`, plan
+  `docs/superpowers/plans/2026-11-16-console-settings.md`), built on `main` `89f7b94`; **6379 passed**, none skipped.
+  Its wl-xtasks half is the branch **`console-settings-2026-11-16`** (`da695de`, from wl-xtasks `64929fe`, not merged,
+  not pushed), which the PI reviews. Filed by the build: XC-516 to XC-519. Open for the PI at review: the DKL default
+  contrast (some directions give no possible light), and the whole-build review's list (the plan's ledger, git-ignored,
+  in the worktree's `.superpowers/sdd/2026-11-16-console-settings/progress.md`).
+- **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the pop-out's
+  revision, designed with the PI and approved (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks,
+  ask XC-514, codes from 4139). Its counter text must say XC-520 (the next free) when it is built.
+- **wl-preproc** has XC-513 (the console settings' record shapes) and its 2026-11-18 addendum (block end `shaping`, a
+  revert of the switch writing a `shaping` row), both sent by message, and **has not answered**. Acceptance is the PI's
+  call in that session; we build to our names meanwhile.
 
 ## What exists
 - **Tasks**: the task object and its load check (`task.py`, `check.py`), engine builds A1 to C3; five reference
@@ -58,9 +66,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07, 2026-11-14 and 2026-11-16)
-1. **The console settings build, then the pop-out's revision** (the branch above; "Fresh builder per task", console
-   first): each plan's wl-preproc ask first, one whole-build review, his Safari try-out, his merge. The pop-out's
-   wl-xtasks branch is reviewed with him before it merges.
+1. **The console settings build to merge**, in this order: one whole-build review (the most capable model); the PI's
+   review of the wl-xtasks branch `console-settings-2026-11-16`; his Safari try-out; CI (a sweep by hand on the
+   branch); the merge on his yes by name. **Then the pop-out revision**, from `tryout-design-2026-11-17`.
 2. **The XC-505 warning**, a side build after demo mode (the PI, 2026-11-14: "Warn when settings allow it").
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
 4. **Side work on the January path**: the sync-box client (XC-460), the operator's guide (XC-014, with a rig's demo
@@ -75,7 +83,7 @@ is settled from his stated principles and told to him in one line; every merge w
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, at `d8fe06b` or later, and a `wl-xtasks`
   one, git-ignored at `/wl-xtasks`; wl-sync at the commit `wl-preproc/pyproject.toml` pins). **6200 passed on
-  `main`** (`89f7b94`), none skipped.
+  `main`** (`89f7b94`); 6379 on `console-build-2026-11-17`; none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`), the nightly all, in 36 shards;
   a big branch runs that sweep by hand before its merge (`gh workflow run ci.yml --ref <branch>`). Read every shard's
   log to its closing line; the run's summary can be wrong.

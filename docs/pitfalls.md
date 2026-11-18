@@ -29,6 +29,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P22** | **A browser page that can write is a page any site can try to make write** | **High** | Spec §2's four checks on every write, the `Host` check on every request, the rig's own validation behind them — see expanded note |
 | **P23** | **A coordinate read as a distance** | Medium | The angles the engine measures between positions are true visual angle, measured where they are, and what is still per axis is named (STE-27); a mean pixels per degree is used by no drawing, window or check by name — see expanded note |
 | **P24** | **A condition true as a state begins, read as an edge** | Medium | A guard derived from a signal judged in every state says what holds as its state begins, not only what changed on its frame; a test setup that steers round a behavior asks whether it is meant — see expanded note |
+| **P25** | **A range proof that fails closed once its cap goes** | Medium | A check that proved a setting safe from its declared cap is judged at the values the setting can take, not at the cap: remove the cap and the proof refuses (or silently passes) everything; test at the values — see expanded note |
 
 ## Expanded notes
 
@@ -391,3 +392,12 @@ point until it was drawn, "since a pointer already on the point as it appears ne
 window" -- the defect written down in a harness as a fact about the world, and steered round.
 Mitigation: `Entered` fires on a state's first judged frame on being inside (EYE-30), and a test
 whose setup avoids a behavior says why, so a reader can ask whether the behavior is meant.
+
+**P25 — A range proof that fails closed once its cap goes.** Several load checks proved a task safe by
+reading a setting's declared bounds, as if the highest a value could be were its cap. The console settings
+build removed the caps the PI never set (hard only where impossible), and each such check then either refused
+every task, or, written to pass on no bound, passed quietly: the pop-out search and the reference tasks loaded
+with `unexplained-limit` warnings, `bad-plan` and `bad-staircase` refused a bar or a window whose setting had an
+open side (XC-519), and a live color_luminance past the panel's saturation went unwarned (XC-518). Mitigation:
+judge a layout at the values a setting can take (`laid_out`, `check.LAYOUT`), where an open side is held at its
+start, and test it at the values with the cap removed, not with the cap in place.

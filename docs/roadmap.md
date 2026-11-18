@@ -61,7 +61,8 @@ reconstructs with zero unexplained events.
 Preflight, one-action launch, pause and emergency stop, manual reward, generated parameter
 panel with per-trial snapshots, per-condition counters, abort-reason readout, live plots,
 test screens including the per-eye alignment target, remote console. Protocol **V7** (audio
-onset). Gate: a naive operator runs a full training session start to finish without a
+onset). *(2026-11-18: the parameter panel's settings build, on branch `console-build-2026-11-17`, adds
+forms, sections, color sets and the training switch, unmerged; see CHECKPOINT.)* Gate: a naive operator runs a full training session start to finish without a
 terminal — **attempted early and repeatedly from M1 onward**, not first tried here.
 
 ## M6 — First real task, first animal

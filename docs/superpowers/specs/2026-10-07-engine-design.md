@@ -916,6 +916,12 @@ carried.
 
 ## 14. Variation (N§11, N§R1, N§R2)
 
+> **Amended 2026-11-18 (the console settings build,
+> [design](2026-11-16-console-settings-design.md)).** A person may also give a setting a form (`SetForm`) and, with
+> the training switch at `full`, the full task's values sit where a condition's own value would (below a
+> person's value and a person's draw); a draw of a setting with no declared range gives its own low and high.
+> A setting's range is judged at its values, not at its declared bounds alone.
+
 1. **Named conditions plus drawn values.** [@asaad2008flexible] A parameter is set by a condition or
    drawn, never both (refused at load).
 2. **Factorial designs**: factors and levels, combinations minus exclusions, named from their levels.

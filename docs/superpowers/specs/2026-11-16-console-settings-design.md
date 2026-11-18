@@ -5,6 +5,11 @@ his Safari try-out of demo mode; its plan is
 [`2026-11-16-console-settings.md`](../plans/2026-11-16-console-settings.md). A companion design, [the pop-out's
 revision](2026-11-16-popout-revision-design.md), uses what this one builds.
 
+> **Built 2026-11-18** on branch `console-build-2026-11-17` (Tasks 1 to 12 of the plan, not merged; wl-xtasks'
+> half on `console-settings-2026-11-16`). Where the build differs from this design, the plan's ledger and the
+> code are the record: a size's lowest is left open rather than given an invented number; `frozen` also holds a
+> stage's time limit; the DKL default contrast is open with the PI (some directions give no possible light).
+
 ## 1. Why
 
 The PI played the pop-out search with the mouse as the eye (demo mode). He liked it, and asked for four changes to
