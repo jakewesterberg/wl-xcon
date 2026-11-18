@@ -1872,6 +1872,45 @@ class NonAging(Distribution):
     maximum: float
     repeat: "str | None" = None
 
+    @classmethod
+    def between(cls, shortest: float, longest: float, *,
+                repeat: "str | None" = None) -> "NonAging":
+        """**A non-aging wait from its shortest and longest alone, its decay derived** (TSK-15's
+        revision; the PI, 2026-11-16, "Derived from min and max"): its mean `shortest + (longest
+        - shortest) / NONAGING_DECAY`, so its time constant is a third of its range. What a
+        person's draw on a timing card is (`taskd.Session._form`), and what a live change of
+        either end derives again (`variation.with_numbers`). Whether it can be drawn is
+        `check.undrawable`'s to judge, as for any wait."""
+        return cls(shortest, shortest + (longest - shortest) / NONAGING_DECAY, longest, repeat)
+
+
+#: **The non-aging wait's decay, from its range** (TSK-15's revision; the PI, 2026-11-16: "Derived
+#: from min and max", and "Keep drawing again"): its time constant is (longest - shortest) / 3.
+#: **An engineering default, recorded as one**: the literature gives no criterion for choosing it
+#: from a range (`.superpowers/side-2026-11-17/nonaging-decay-report.md`, §0 and §3). Its grounds:
+#: the longest wait then sits at the uncut wait's 95th percentile, one draw in twenty drawn again;
+#: the hazard has one profile at every range; and a range thrice the scale is inside published
+#: practice, the ratio of the one study stating both, 0.33 s over 0.4-1.4 s
+#: [@grabenhorst2019anticipation].
+NONAGING_DECAY = 3
+
+#: **The shapes a person may draw a timing setting from on its card** (the console settings
+#: design's §3; the PI, 2026-11-16): a non-aging wait by its shortest and longest, a uniform by its
+#: ends, a normal cut to a range by its mean, spread and cut, a list played in shuffled passes, and
+#: a list with a weight each. Each is drawn as the task's own distributions are (`variation.draw`).
+SHAPES = ("non_aging", "uniform", "normal", "list", "weights")
+
+
+@dataclass(frozen=True, slots=True)
+class Scaled:
+    """**A size scaled by eccentricity**: `factor` times each object's own eccentricity, its true
+    angle from straight ahead (the console settings design's §5; the PI's 0.3 dva per dva,
+    [@westerberg2020priming]). A person's form for a size setting, as a draw is a timing
+    setting's; drawn by nothing. Offered from the console settings plan's Task 6, which binds it
+    where a fixed size is bound; until then `taskd.Session._form` refuses it with a sentence."""
+
+    factor: float
+
 
 # --- Plans and blocks (engine spec §13.1, §13.3, §13.5, §13.8; engine build C2b) --------------
 #

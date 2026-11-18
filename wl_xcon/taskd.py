@@ -97,7 +97,8 @@ from wl_xcon.task import (
     Task, Trial, at_hardest, staircase_verdict,
 )
 from wl_xcon.task import (
-    EASIER, EXPECTED, HARDER, NOT_DIFFICULTY, SAME, Background, Distribution, Factorial, Listed,
+    EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
+    Factorial, Listed,
 )
 from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
@@ -678,7 +679,11 @@ class Pending:
       one declared.
     - `act`, a revert's (`Session._revert`): the act it belongs to, so that it and the revert's
       other changes take one change id and are written as `revert` rows naming the moment
-      (`Session._apply_staged`); `None` for a hand-back or a range offered on its own."""
+      (`Session._apply_staged`); `None` for a hand-back or a range offered on its own.
+    - **`form`, a person's draw** (kind `"form"`; the console settings build, its design §3):
+      the distribution a setting is drawn from once it applies (`Session._form`, `_forms`), its
+      row's `now` that draw every field; and on a hand-back of a setting a person's draw gives,
+      the draw it ends, its row's `was`."""
 
     kind: str
     name: str
@@ -690,6 +695,7 @@ class Pending:
     key: tuple | None = None
     draw: Distribution | None = None
     act: int | None = None
+    form: object = None
 
 
 @dataclass(frozen=True)
@@ -705,7 +711,9 @@ class Moment:
     - `at` is when it was kept, on the session's anchored clock; `said`, the act in the changes
       feed's words, or "the run's start".
     - `held` is each task setting a person held then, by name, with its value; `ranges`, each draw
-      changed live then, by its key (`variation.in_force`'s), with the distribution in force.
+      changed live then, by its key (`variation.in_force`'s), with the distribution in force;
+      `forms`, each setting a person's draw gave then, by name, with the draw (`Session._forms`;
+      the console settings build).
       **Never a bounded setting**: a reward size is no task setting a person holds
       (`Session._edited`) and no draw, so no moment holds one, and no revert reaches one."""
 
@@ -714,6 +722,7 @@ class Moment:
     said: str
     held: dict
     ranges: dict
+    forms: dict = field(default_factory=dict)
 
 
 #: **The source a trial's line names for a value its block's staircase gave** (`drawn`; wl-preproc's
@@ -2142,15 +2151,30 @@ class Session:
         each, and one the session's own values already hold names none. Before a run has a plan,
         the session's own alone."""
         declared = self._declared
-        _, ahead, ranges = self._ahead()
-        held = {name, *ahead}
+        _, ahead, ranges, formed = self._ahead()
+        # **A person's draw beats the conditions and the draws, as a held value does**, and is
+        # judged at its extremes (the console settings design's §3): its setting takes its first
+        # extreme in every set, and each set again at its other.
+        formed = {n: form for n, form in formed.items() if n != name}
+        held = {name, *ahead, *formed}
+        ends = {n: variation.extremes(form, declared.get(n)) for n, form in formed.items()}
+        values = {**values, **{n: at[0] for n, at in ends.items() if at}}
 
         def outside(these: dict) -> frozenset:
             return frozenset((n, v) for n, v in these.items()
                              if n in declared and _outside(declared[n], v))
 
+        def person_drawn(these: dict, where: str) -> list[tuple[dict, str]]:
+            prefix = f"{where}, " if where else ""
+            return [({**these, n: end}, f"{prefix}a person's draw of {n!r} at {end:g}")
+                    for n, at in ends.items() for end in at[1:]]
+
         own = outside(values)
         sets: dict[frozenset, tuple[dict, list[str]]] = {own: (values, [])}
+        for these, place in person_drawn(values, ""):
+            which = outside(these)
+            if which != own:
+                sets.setdefault(which, (these, []))[1].append(place)
         if self._played is None:
             return list(sets.values())
         turned = variation.directions(self._task)
@@ -2168,6 +2192,7 @@ class Session:
                     met += [({**given, n: end}, f"{where}, {_draw_said(key)} at {end:g}")
                             for end in variation.extremes(drawn, declared.get(n),
                                                           direction=n in turned)]
+                met += [extra for these, place in list(met) for extra in person_drawn(these, place)]
                 for these, place in met:
                     which = outside(these)
                     if which != own:
@@ -2175,7 +2200,7 @@ class Session:
         return list(sets.values())
 
     def _possible(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
-                  ranges: dict | None = None) -> str | None:
+                  ranges: dict | None = None, forms: dict | None = None) -> str | None:
         """**Whether the run would still hold only trials an animal can get right after a change**
         (engine build C3's spec §9: live, "each change as offered (a value, range, hand-back or
         revert) against every condition of the run's blocks and the draws in force, refused at
@@ -2188,7 +2213,11 @@ class Session:
         - `handed`, names handed back, each to the run's own value (`_run_values`; absent where
           the run has none) and no longer held;
         - `ranges`, draws changed, keyed as `variation.in_force` keys them, a `Distribution`
-          replacing the one in force and `None` restoring the one declared.
+          replacing the one in force and `None` restoring the one declared;
+        - `forms`, a person's draws given, by name (`_form`; the console settings build), each no
+          longer held as a value, judged by what it can give over the conditions and the draws
+          as a held value beats them (`check.impossible`'s `forms`). A value a person gives, or a
+          hand-back, ends a setting's draw.
 
         **And the trials that keep a `same` value** (the controller's ruling of 2026-10-30 on the
         engine C3 plan's fuzz, seed 810, under the PI's Q10): a repeat takes the value its original
@@ -2209,9 +2238,10 @@ class Session:
         plan to judge, is the reason, saying the check could not run, so the change is refused,
         never the session. Run between trials, never in a frame."""
         try:
-            values, held, drawn = self._ahead()
+            values, held, drawn, formed = self._ahead()
             for name in handed:
                 held.discard(name)
+                formed.pop(name, None)
                 if name in self._run_values:
                     values[name] = self._run_values[name]
                 else:
@@ -2219,12 +2249,17 @@ class Session:
             for name, value in (changed or {}).items():
                 values[name] = value
                 held.add(name)
+                formed.pop(name, None)
+            for name, form in (forms or {}).items():
+                formed[name] = form
+                held.discard(name)
             drawn.update(ranges or {})
             kept = self._kept_trials()
             blocks = [*self._played.blocks, *kept]
             found = impossible(self._task, self._played.blocks, values, held=frozenset(held),
-                               ranges=drawn)
-            waiting = impossible(self._task, kept, values, held=frozenset(held), ranges=drawn)
+                               ranges=drawn, forms=formed)
+            waiting = impossible(self._task, kept, values, held=frozenset(held), ranges=drawn,
+                                 forms=formed)
             if self.paused_at is None:
                 # The next trial is drawn before what is offered applies, from the draws applied
                 # now, and a repeat of it keeps its `same` values under the change: judged so too.
@@ -2234,7 +2269,7 @@ class Session:
                           and (draw if draw is not None else applied[key]).repeat == SAME}
                 if before:
                     waiting += impossible(self._task, blocks, values, held=frozenset(held),
-                                          ranges={**drawn, **before})
+                                          ranges={**drawn, **before}, forms=formed)
             waiting = [finding for at, finding in enumerate(waiting)
                        if finding not in found and finding not in waiting[:at]]
             if not found and not waiting:
@@ -2328,7 +2363,7 @@ class Session:
             offered.append((row, self._acts.get(at)))
         return offered + [(pending, pending.act) for pending in waiting]
 
-    def _ahead(self) -> tuple[dict, set, dict]:
+    def _ahead(self) -> tuple[dict, set, dict, dict]:
         """**What the run will hold once every change offered applies** (`_offered`, in its
         order), which a change offered now is judged over (`_possible`, `_beyond_range`,
         `_outside_sets`), so one offered after another in the same drain meets it: its values
@@ -2337,25 +2372,37 @@ class Session:
         none); the names a person will hold (`_edited` and those staged, less those handed back);
         and the draws changed live, by key (`variation.in_force`'s), each to its distribution, or
         to `None` where a pending range restores the one declared (`_ranges`, their change ids
-        left out). Between trials, never in a frame."""
+        left out); and **the settings a person's draw will give**, by name, each to its draw
+        (`_forms`; the console settings build): a form offered gives it and ends its hold, a value
+        or a hand-back ends its draw. Between trials, never in a frame."""
         values = dict(self.spec.values)
         held = set(self._edited)
         ranges: dict = {key: draw for key, (draw, _) in self._ranges.items()}
+        forms: dict = dict(self._forms)
         for act in self._offered():
             if not isinstance(act, Pending):
                 name, _, now, _, bounded = act
                 if not bounded:
                     values[name] = now
                     held.add(name)
+                    forms.pop(name, None)
             elif act.kind == "hand_back":
                 held.discard(act.name)
+                forms.pop(act.name, None)
+                if act.name in self._run_values:
+                    values[act.name] = self._run_values[act.name]
+                else:
+                    values.pop(act.name, None)
+            elif act.kind == "form":
+                held.discard(act.name)
+                forms[act.name] = act.form
                 if act.name in self._run_values:
                     values[act.name] = self._run_values[act.name]
                 else:
                     values.pop(act.name, None)
             else:
                 ranges[act.key] = act.draw
-        return values, held, ranges
+        return values, held, ranges, forms
 
     def _kept_trials(self) -> list[Block]:
         """**Each trial waiting to be shown again, with the `same` values it keeps**
@@ -2432,6 +2479,12 @@ class Session:
           (`variation.words`), a range offered ahead of it on the same draw counted; `kind`
           `range`, or `revert`. No direction's range is ever offered (XC-445), so none is said
           from 0 to 360 here.
+        - **A person's draw offered** (`_pending`, kind `form`; the console settings build): what
+          gave the setting before it -- a draw of a person's offered or applied ahead of it, else
+          the value a person holds or the run's, else none where a draw or the conditions gave it
+          -- and the new draw, each a draw in the rig's words; `kind` `form`, or `revert`. It
+          overrides the conditions a value would. A hand-back of a setting a person's draw gives
+          says that draw as its `was`.
         - **`overrides`**, what a value will override from the next trial, named **before it
           applies** (TSK-19; the C3 spec §6: "today only the applied line on the feed does"):
           every condition of the run's plan that sets or draws the setting (`_overrides`); none
@@ -2454,17 +2507,31 @@ class Session:
         rather than merely stated.
         """
         ranges = {key: draw for key, (draw, _) in self._ranges.items()}
+        forms = dict(self._forms)
         rows = []
         for offer, act in self._offered_acts():
             if not isinstance(offer, Pending):
                 name, was, now, by, bounded = offer
+                forms.pop(name, None)
                 rows.append((name, was, now, by, bounded, "set" if act is None else "revert",
                              () if bounded else self._overrides(name), False, ""))
                 continue
             kind = offer.kind if act is None else "revert"
+            unit = self._declared[offer.name].unit if offer.name in self._declared else ""
             if offer.kind == "hand_back":
-                rows.append((offer.name, offer.was, offer.now, offer.by, False, kind, (), True,
+                ended = forms.pop(offer.name, None)
+                was = offer.was if ended is None else variation.words(ended, unit)
+                rows.append((offer.name, was, offer.now, offer.by, False, kind, (), True,
                              offer.to))
+                continue
+            if offer.kind == "form":
+                before = forms.get(offer.name)
+                forms[offer.name] = offer.form
+                was = (variation.words(before, unit) if before is not None
+                       else None if isinstance(offer.was, dict) else offer.was)
+                rows.append((offer.name, was, variation.words(offer.form, unit), offer.by, False,
+                             kind, () if act is not None else self._overrides(offer.name), False,
+                             ""))
                 continue
             declared, unit = self._declared_draw(offer.key), self._declared[offer.name].unit
             before = ranges.get(offer.key)
@@ -2496,10 +2563,10 @@ class Session:
     @property
     def parameters(self) -> tuple:
         """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
-        choices, source, conditions, draw, numbers)` -- the shape `link.Telemetry.of` builds its
-        `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it"). `choices` is
-        the setting's own, empty for a ceiling: they say whether a pair it holds is a position
-        (schema 18, XC-401's fix round, M2; `review.declares_position`).
+        choices, source, conditions, draw, numbers, switch, shape)` -- the shape `link.Telemetry.of`
+        builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it").
+        `choices` is the setting's own, empty for a ceiling: they say whether a pair it holds is a
+        position (schema 18, XC-401's fix round, M2; `review.declares_position`).
 
         **Where each value comes from** (telemetry schema 19; engine build C3's spec §6: "each
         setting's card says where its value comes from (task, run, conditions, a draw and its
@@ -2511,9 +2578,15 @@ class Session:
         the rig's words (`variation.words`, a direction's from 0 to 360), said while a person holds
         it too, since a hand-back gives it back to that draw; and `numbers`, that draw's numbers a
         person may change live (`variation.numbers`), `None` for a setting declared not live and for
-        one placing a direction (`variation.directions`), whose ranges `_range` refuses. Between
-        runs, and before the first, none of them, as for a ceiling: `None`, `()`, `None`, `None`.
-        Read between trials, never in a frame.
+        one placing a direction (`variation.directions`), whose ranges `_range` refuses. **The
+        timing switch** (telemetry schema 22; the console settings design's §3): `switch`,
+        `"drawn"` on a live setting in seconds, whose card is fixed or drawn (`_form`), else
+        `None`; and `shape`, the shape in force for its drawn side (`variation.shaped`) -- a
+        person's draw (`_forms`, `by` `"person"`), else the open block's draw of it as `draw` is
+        read, a range changed live included (`by` its key's scope, `"block"` or `"task"`) -- `None`
+        where neither gives it, and for a direction. Between runs, and before the first, none of
+        them, as for a ceiling: `None`, `()`, `None`, `None`, `None`, `None`. Read between trials,
+        never in a frame.
 
         The task's own `Param` declarations first, in declaration order, each with
         its value in `spec.values` (`None` when nobody set it); then every welfare
@@ -2533,24 +2606,38 @@ class Session:
             turned = variation.directions(self._task)
         declared = []
         for p in self._params().values():
-            source, conditions, draw, numbers = None, (), None, None
+            source, conditions, draw, numbers, switch, shape = None, (), None, None, None, None
             if running:
                 source, conditions = self._source(p.name, in_force), self._overrides(p.name)
+                switch = "drawn" if self._drawable(p) else None
                 if p.name in in_force and not self._own_range(p.name):
                     drawn, key = in_force[p.name]
                     drawn = self._ranges.get(key, (drawn,))[0]
                     draw = variation.words(drawn, p.unit, direction=p.name in turned)
                     if p.live and p.name not in turned:
                         numbers = variation.numbers(drawn)
+                        shape = variation.shaped(drawn, p)
+                        shape = None if shape is None else {**shape, "by": key[0]}
+                if p.name in self._forms:
+                    shape = variation.shaped(self._forms[p.name], p)
+                    shape = None if shape is None else {**shape, "by": "person"}
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
-                             p.choices, source, conditions, draw, numbers))
+                             p.choices, source, conditions, draw, numbers, switch, shape))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None)
+             None, None, None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
         return tuple(declared) + ceilings
+
+    def _drawable(self, declared: Param) -> bool:
+        """**Whether a person may draw `declared` from its card** (the console settings design's
+        §3; the PI, 2026-11-16: "every timing setting", whatever the task file declares): a live
+        setting in seconds, of numbers, never a ceiling's name -- the switch its card offers
+        (`parameters`), and what `_form` asks first."""
+        return (declared.live and declared.unit == "s" and not declared.choices
+                and declared.name not in self.spec.bounds.ceilings)
 
     def _source(self, name: str, in_force: dict) -> str | None:
         """**Where `name`'s value comes from in the open block** (telemetry schema 19; engine build
@@ -2567,9 +2654,13 @@ class Session:
         hand-back's `to` reads the open block the same way (`_to`). **`"staircase"` where the open
         block's staircase steps it** (`STAIRCASE`; `task.Staircase`; the pop-out search build,
         2026-11-07), under a person's value and over every other source, as the trial loop takes
+        it. **`"form"` where a person's draw gives it** (`_forms`; the console settings build),
+        under a person's value, which ends it, and over every other source, as `_draw` takes
         it."""
         if name in self._edited:
             return "person"
+        if name in self._forms:
+            return "form"
         if self._steps(name):
             return STAIRCASE
         if self._pools(name):
@@ -2631,36 +2722,44 @@ class Session:
             block.name for block in self._played.blocks
             if variation.in_force(self._task, block).get(name, (None, None))[1] == key))
 
-    def _undone(self, then: Moment, values: dict, held: set,
-                ranges: dict) -> tuple[dict, list, dict]:
+    def _undone(self, then: Moment, values: dict, held: set, ranges: dict,
+                forms: dict) -> tuple[dict, list, dict, dict]:
         """**What going back to the moment `then` changes**, from what the run will hold once all
-        offered applies (`_ahead`'s `values`, `held` and `ranges`): each setting a person held
-        then, at another value now or not held now, with its value then; each setting held now
-        and not then, sorted, handed back; and each draw changed live then or since, by key,
-        sorted, to its range then (`None`, the declared one). `_revert` applies it, and each
-        moment previews it (`_preview`), so the two cannot disagree (the C3 plan's science
-        review, M-1)."""
+        offered applies (`_ahead`'s `values`, `held`, `ranges` and `forms`): each setting a person
+        held then, at another value now or not held now, with its value then; each setting held
+        now, or drawn by a person now, and neither then, sorted, handed back; each draw changed
+        live then or since, by key, sorted, to its range then (`None`, the declared one); and each
+        setting a person's draw gave then and another or none gives now, by name, sorted, to that
+        draw (the console settings build). `_revert` applies it, and each moment previews it
+        (`_preview`), so the two cannot disagree (the C3 plan's science review, M-1)."""
         restored = {name: value for name, value in then.held.items()
                     if name not in held or values.get(name) != value}
-        handed = sorted(held - then.held.keys())
+        handed = sorted((held | forms.keys()) - then.held.keys() - then.forms.keys())
         drawn = {key: then.ranges.get(key) for key in sorted({*ranges, *then.ranges})
                  if ranges.get(key) != then.ranges.get(key)}
-        return restored, handed, drawn
+        formed = {name: then.forms[name] for name in sorted(then.forms)
+                  if forms.get(name) != then.forms[name]}
+        return restored, handed, drawn, formed
 
-    def _preview(self, then: Moment, values: dict, held: set, ranges: dict) -> tuple[str, ...]:
+    def _preview(self, then: Moment, values: dict, held: set, ranges: dict,
+                 forms: dict) -> tuple[str, ...]:
         """**What a revert to `then` would change, in the changes feed's words** (`MomentRow`'s
         `changes`; the C3 plan's science review, M-1: "a one-step preview listing each setting and
         the value it will take"), in the order the revert offers them (`_revert`): each setting
         handed back, each draw put back to its range then (`_draw_said`, "as declared" for the
         written one), then each value set back, by name. Empty where it would change nothing,
         which a revert refuses."""
-        restored, handed, drawn = self._undone(then, values, held, ranges)
+        restored, handed, drawn, formed = self._undone(then, values, held, ranges, forms)
         said = [f"{name} handed back" for name in handed]
         for key, draw in drawn.items():
             declared = self._declared.get(key[-1])
             unit = "" if declared is None else declared.unit
             said.append(f"{_draw_said(key)} → "
                         f"{'as declared' if draw is None else variation.words(draw, unit)}")
+        for name, form in formed.items():
+            declared = self._declared.get(name)
+            said.append(f"{name} → drawn: "
+                        f"{variation.words(form, '' if declared is None else declared.unit)}")
         for name in sorted(restored):
             choices = self._declared[name].choices if name in self._declared else ()
             said.append(f"{name} → {_shown(restored[name], choices)}")
@@ -2712,9 +2811,10 @@ class Session:
             # A hand-back waiting for the next trial (`_climbing`) shows where it resumes.
             nearest = staircase.nearest(self._handed[staircase.setting])
             level = level if nearest is None else nearest
+        # A person's draw holds it as a value does (the console settings build).
         return (staircase.setting, tuple(staircase.levels), level,
-                staircase.setting in self._edited, staircase.down, staircase.up,
-                staircase.hardest)
+                staircase.setting in self._edited or staircase.setting in self._forms,
+                staircase.down, staircase.up, staircase.hardest)
 
     @property
     def bars(self) -> tuple | None:
@@ -3579,9 +3679,12 @@ class Session:
         its next trial plays (the C3 plan's engineering review, M-1). Typing the old value back
         still does not hand it back; this does. `index`, the trial about to run, is every branch's.
 
+        **A setting a person's draw gives is handed back the same way** (`_forms`; the console
+        settings build): its draw ends, and its row's `was` is that draw, every field.
+
         **Refused, with the sentence and nothing changed**: a ceiling's name -- a reward size is
         never held as a task setting, so a hand-back never reaches one -- a name the task does not
-        declare, one no person holds nor will once what is offered applies (`_ahead`), and one
+        declare, one no person holds nor draws once what is offered applies (`_ahead`), and one
         whose hand-back would leave trials no animal can get right (`_possible`; the C3 spec §9),
         or whose run value, outside its declared range, the load-time checks refuse widened with
         the ranges and values in force now, as a typed value's (`_beyond_range`; the C3 plan's
@@ -3599,8 +3702,8 @@ class Session:
                 raise Exceeded("it is a welfare ceiling, never a task setting a person holds")
             if name not in self._declared:
                 raise Exceeded("it is not a setting this task declares")
-            values, held, _ = self._ahead()
-            if name not in held:
+            values, held, _, formed = self._ahead()
+            if name not in held and name not in formed:
                 raise Exceeded("no person holds it in this run, so there is nothing to hand back")
             to = self._to(name)
             why = self._possible(handed=frozenset({name}))
@@ -3612,10 +3715,13 @@ class Session:
                 # and the values held now, as a typed value would (the C3 plan's engineering
                 # review, I-3): it was checked widened only as the run started.
                 self._beyond_range(name, restored, command.by)
+            ended = formed.get(name)
             self._pending.append(Pending(
-                "hand_back", name, was=values.get(name),
+                "hand_back", name,
+                was=values.get(name) if ended is None else variation.recorded(
+                    ended, self._declared[name]),
                 now=self._run_values.get(name) if to == "run" else None, by=command.by,
-                after=len(self._staged), to=to,
+                after=len(self._staged), to=to, form=ended,
             ))
         except Exceeded as refused:
             why = f"{name!r} is not handed back: {refused}"
@@ -3690,7 +3796,7 @@ class Session:
                     "(XC-445): the task declares it in its own terms, and the console shows it "
                     "from 0 to 360")
             drawn, key = in_force[name]
-            _, _, ranges = self._ahead()
+            _, _, ranges, _ = self._ahead()
             if ranges.get(key) is not None:
                 drawn = ranges[key]
             kind = type(drawn).__name__
@@ -3726,6 +3832,105 @@ class Session:
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             self._refuse(name, command.by, (
                 f"the range of {name!r} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused and the session runs on"))
+
+    def _form(self, command, index: int) -> None:
+        """**A person switches a timing setting to drawn on its card** (`link.SetForm`; the console
+        settings design's §3; the PI, 2026-11-16: every timing setting "fixed or drawn", "staged
+        until the next trial, like any change"), offered between trials or while paused and applied
+        at the next boundary among the values staged (`Pending`, `_apply_staged`): from then on
+        each trial draws the setting from the person's draw (`_forms`, `_draw`), over the block's
+        conditions, its draw and its staircase, as a held value is, until a value typed on the
+        card, a hand-back or a revert ends it. **It is drawn fresh on a repeat** (`FRESH`; the
+        controller's call on the PI's "Follow same/fresh": "the wait is new"), and **a non-aging
+        draw derives its decay from its two ends** (`NonAging.between`; TSK-15's revision).
+        `index`, the trial about to run, is every branch's.
+
+        **Refused, with the sentence and nothing staged**, in this order:
+        - a ceiling's name (a reward size is never drawn), a name the task does not declare, and a
+          setting declared not live-editable;
+        - a scaling, a size's, which the console settings plan's Task 6 takes, and a shape that is
+          none of `task.SHAPES`;
+        - a setting that is no timing setting (`_drawable`: in seconds, of numbers);
+        - numbers its shape does not take, and a shortest not below its longest
+          (`variation.formed`);
+        - a draw that cannot be drawn (`check.undrawable`), or that gives one value only, which is
+          the card's fixed side;
+        - a draw that would leave trials no animal can get right, judged at what it can give
+          (`_possible`'s `forms`; the C3 spec §9);
+        - a draw whose extreme outside the setting's declared range the load-time checks refuse
+          widened to it, as a typed value's (`_beyond_range`, at each extreme, its warnings
+          otherwise accepted by who sent it; the console settings plan's Task 4 makes a hard limit
+          refuse there). §9 is asked first, so a draw it refuses writes no warning.
+
+        **It never raises** (the C3 plan's call 20): it runs beside the pause, outside `_command`'s
+        listed `try`, so a check that raises refuses the draw, saying it could not be checked, and
+        the session runs on. **It does not pass through `set`**: a draw is no value, and each of
+        its numbers was decoded by `link._setting` on the wire, as a range's are. Run between
+        trials, never in a frame. Not welfare-critical: the branch handing to it is `_command`'s,
+        and no reward size is ever drawn."""
+        name = command.name
+        try:
+            if name in self.spec.bounds.ceilings:
+                raise Exceeded("it is a welfare ceiling, which is never drawn")
+            declared = self._declared.get(name)
+            if declared is None:
+                raise Exceeded("it is not a setting this task declares")
+            if not declared.live:
+                raise Exceeded("it is declared not live-editable by this task")
+            if command.shape == "scaled":
+                # Waiting on the console settings plan's Task 6 (scaled sizes), which takes it.
+                raise Exceeded(
+                    "a scaling by eccentricity is a size's, which this rig does not draw yet (the "
+                    "console settings plan's Task 6); a timing setting is drawn in one of "
+                    + ", ".join(SHAPES))
+            if command.shape not in SHAPES:
+                raise Exceeded(f"{command.shape!r} is not a shape a setting is drawn in: one of "
+                               f"{', '.join(SHAPES)}")
+            if not self._drawable(declared):
+                unit = declared.unit or "no unit"
+                raise Exceeded(f"it is in {unit}, and only a timing setting, in s, is drawn from "
+                               f"its card")
+            try:
+                form = variation.formed(command.shape, dict(command.numbers),
+                                        tuple(command.values), tuple(command.weights),
+                                        repeat=FRESH)
+            except ValueError as wrong:
+                raise Exceeded(str(wrong)) from wrong
+            said = variation.words(form, declared.unit)
+            cannot = undrawable(form, declared)
+            if cannot is not None:
+                raise Exceeded(f"{said} cannot be drawn: {cannot}")
+            ends = variation.extremes(form, declared)
+            if len(ends) < 2:
+                raise Exceeded(f"{said} gives one value only; make the card fixed at that value "
+                               f"instead")
+            why = self._possible(forms={name: form})
+            if why is not None:
+                raise Exceeded(why)
+            for end in ends:
+                if _outside(declared, end):
+                    self._beyond_range(name, end, command.by)
+            # The console settings plan's Task 4 adds the layout's judgment here (`_laid_out`).
+            values, held, _, formed = self._ahead()
+            before = formed.get(name)
+            if before is not None:
+                was = variation.recorded(before, declared)
+            elif name in held:
+                was = values.get(name)
+            else:
+                was = None if self._given_by(name, self._scheduler.block) else values.get(name)
+            self._pending.append(Pending(
+                "form", name, was=was, now=variation.recorded(form, declared), by=command.by,
+                after=len(self._staged), form=form,
+            ))
+        except Exceeded as refused:
+            why = f"{name!r} is not drawn as asked: {refused}"
+            self._ceiling_refused(name, dict(command.numbers), command.by, why, index)
+            self._refuse(name, command.by, why)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse(name, command.by, (
+                f"the draw of {name!r} could not be checked ({type(broken).__name__}: "
                 f"{broken}), so it is refused and the session runs on"))
 
     def _to(self, name: str) -> str:
@@ -3796,9 +4001,12 @@ class Session:
         row's trial plays (`_playing`); for a `set` row by the state before the pass, when its
         `was` was read. **`"staircase"` first where the block's staircase steps it**
         (`task.Staircase`; the pop-out search build, 2026-11-07), which gives each trial its own
-        level and wins over a draw and the conditions."""
+        level and wins over a draw and the conditions. **`"form"` where a person's draw gives it**
+        (`_forms`; the console settings build), a draw a person gave, no single value held."""
         if name in self._edited:
             return None
+        if name in self._forms:
+            return "form"
         if self._steps(name, block):
             return STAIRCASE
         if self._pools(name):
@@ -3871,24 +4079,37 @@ class Session:
             if change > self._change:
                 raise Exceeded(f"no change {change} has been made yet")
             then = next(moment for moment in reversed(self._moments) if moment.change <= change)
-            values, held, ranges = self._ahead()
-            restored, handed, drawn = self._undone(then, values, held, ranges)
-            if not (restored or handed or drawn):
+            values, held, ranges, forms = self._ahead()
+            restored, handed, drawn, formed = self._undone(then, values, held, ranges, forms)
+            if not (restored or handed or drawn or formed):
                 raise Exceeded(
                     "the run holds now what it held then, so there is nothing to revert")
-            why = self._possible(restored, handed=frozenset(handed), ranges=drawn)
+            why = self._possible(restored, handed=frozenset(handed), ranges=drawn, forms=formed)
             if why is not None:
                 raise Exceeded(why)
             self._act += 1
             act = self._act
             for name in handed:
                 to = self._to(name)
+                ended = forms.get(name)
                 self._pending.append(Pending(
-                    "hand_back", name, was=values.get(name),
+                    "hand_back", name,
+                    was=values.get(name) if ended is None else variation.recorded(
+                        ended, self._declared.get(name)),
                     # `now` is read as it applies today (`_apply_pending`); `Session.staged`
                     # reads this one, for the console's list of what is staged.
                     now=self._run_values.get(name) if to == "run" else None, by=command.by,
-                    after=staged, to=to, act=act,
+                    after=staged, to=to, act=act, form=ended,
+                ))
+            for name, form in formed.items():
+                # A person's draw then, put back as one is offered (`_form`), judged above with
+                # the rest of the revert.
+                declared, before = self._declared.get(name), forms.get(name)
+                self._pending.append(Pending(
+                    "form", name, by=command.by, after=staged, act=act, form=form,
+                    was=(variation.recorded(before, declared) if before is not None
+                         else values.get(name) if name in held else None),
+                    now=variation.recorded(form, declared),
                 ))
             for key, draw in drawn.items():
                 declared, before = self._declared.get(key[-1]), ranges.get(key)
@@ -4304,6 +4525,9 @@ class Session:
         if isinstance(command, _link.SetRange):
             self._range(command, index)
             return
+        if isinstance(command, _link.SetForm):
+            self._form(command, index)
+            return
         if isinstance(command, _link.Revert):
             self._revert(command, index)
             return
@@ -4420,11 +4644,13 @@ class Session:
         draw", "its conditions"), else what `set` read.
         A bounded row still goes through `bounds.set`, in the same pass as its strobe and row.
 
-        **A hand-back and a live range offered are applied here too** (`_pending`; engine build
-        C3's spec §6; the engine C3 plan's call 19), each in its place among the values staged, in
-        the order offered (`_offered`), each an act of its own with a change id, a strobe and a
-        row, of kind `hand_back` or `range` (`_apply_pending`). **Neither passes through `set` or
-        `bounds`**: a hand-back carries no new value, and a range is no value.
+        **A hand-back, a live range and a person's draw offered are applied here too** (`_pending`;
+        engine build C3's spec §6; the engine C3 plan's call 19; the console settings build), each
+        in its place among the values staged, in the order offered (`_offered`), each an act of its
+        own with a change id, a strobe and a row, of kind `hand_back`, `range` or `form`
+        (`_apply_pending`). **None passes through `set` or `bounds`**: a hand-back carries no new
+        value, and a range and a draw are no value. A value applied ends a person's draw of its
+        setting.
 
         **A revert is one act** (`_revert`; engine build C3's spec §8; the engine C3 plan's call
         19, the applier's third step): every change it offered -- values staged through `set`,
@@ -4496,8 +4722,11 @@ class Session:
                 now = self._whole(name, now)
                 self.spec.values[name] = now
                 # A live edit, which wins over a value a condition sets for the rest of the run
-                # (engine spec §14.7).
+                # (engine spec §14.7), and ends a person's draw of it (the console settings
+                # build: the card's fixed side).
                 self._edited |= {name}
+                self._forms.pop(name, None)
+                self._form_ids.pop(name, None)
             # Strobed before its row is written, as every other writer does: a card that
             # faults here leaves no row naming a code that never went out (XC-321 ask 1).
             self.card.emit(code)
@@ -4600,19 +4829,36 @@ class Session:
             to = self._to(name)
             act = dataclasses.replace(act, to=to,
                                       now=self._run_values.get(name) if to == "run" else None)
-            self._edited -= {name}
             # **A staircase on it resumes at the level nearest the value held** (the pop-out
             # search plan's Review Focus 1), read before the run's own value replaces it -- **the
             # staircase of the stage the next trial plays in** (`_climbing`; the re-review 2,
             # I-3): applied as that trial is drawn, so a hand-back between a move and the new
             # stage's first trial resumes the same level whether or not the run paused, and its
-            # replay after a crash does too, whatever the clock.
-            self._handed[name] = self.spec.values.get(name)
+            # replay after a crash does too, whatever the clock. A person's draw held no value,
+            # and the staircase resumes where it waited (the console settings build).
+            if name in self._edited:
+                self._handed[name] = self.spec.values.get(name)
+            self._edited -= {name}
+            self._forms.pop(name, None)
+            self._form_ids.pop(name, None)
             if name in self._run_values:
                 self.spec.values[name] = self._run_values[name]
             else:
                 self.spec.values.pop(name, None)
             detail = {"to": act.to}
+        elif act.kind == "form":
+            # **A person's draw put in force** (the console settings build): the person's value
+            # released, the run's own back under it, and each trial from the next drawn from it,
+            # naming this change (`_draw`); a list's passes start afresh.
+            self._edited -= {name}
+            self._forms[name] = act.form
+            self._form_ids[name] = self._change
+            self._listed.pop(("person", name), None)
+            if name in self._run_values:
+                self.spec.values[name] = self._run_values[name]
+            else:
+                self.spec.values.pop(name, None)
+            detail = {"shape": variation.shaped(act.form)["shape"]}
         else:
             if act.draw is None:
                 self._ranges.pop(act.key, None)
@@ -4622,14 +4868,19 @@ class Session:
         kind, now = act.kind, act.now
         if moment is not None:
             # One of a revert's rows (the C3 spec §8): naming the moment it goes back to, a
-            # range's `from` and `block` kept, a setting handed back with `now` null, no `to`.
+            # range's `from` and `block` kept, a form's `shape`, a setting handed back with `now`
+            # null, no `to`.
             kind = "revert"
             detail = {"moment": moment, **({} if act.kind == "hand_back" else detail)}
             now = None if act.kind == "hand_back" else now
         if repools:
             # The widening the value this hand-back put back confirms (XC-491; `_confirms`).
             detail = {**detail, **self._confirms()}
-        meaning = self._meaning(name, act.was, now)
+        # A draw is no single value, so a change to or from one says no way it went and no step
+        # (the console settings build: a form's row, a hand-back of one, a revert's of either).
+        drew = act.kind == "form" or isinstance(act.was, dict) or isinstance(now, dict)
+        meaning = (self._meaning(name, None, None) if drew and act.kind != "range"
+                   else self._meaning(name, act.was, now))
         if act.kind == "range" and meaning is not None:
             # Which way the new range went, judged as a whole against the range the task writes
             # (the PI, 2026-10-31, on the engine C3 plan's Appendix B, item 18).
@@ -4654,29 +4905,39 @@ class Session:
         takes it back in the open block; or which draw takes which numbers, in the rig's words
         (`variation.words`), or "as declared" where it goes back to the declared one."""
         declared = self._declared.get(act.name)
+        unit = "" if declared is None else declared.unit
+        choices = () if declared is None else declared.choices
         if act.kind == "hand_back":
-            choices = () if declared is None else declared.choices
             if act.to != "run":
                 to = f"its {act.to}"
             elif act.now is None:
                 to = "the run, which gives it no value"
             else:
                 to = f"the run's {_shown(act.now, choices)}"
-            return f"{act.name} {_shown(act.was, choices)} handed back to {to}"
-        unit = "" if declared is None else declared.unit
+            was = (_shown(act.was, choices) if act.form is None
+                   else f"drawn {variation.words(act.form, unit)}")
+            return f"{act.name} {was} handed back to {to}"
+        if act.kind == "form":
+            # A person's draw (the console settings build): what gave the setting, then the draw.
+            was = ("its draw or its conditions" if act.was is None
+                   else "a person's draw" if isinstance(act.was, dict)
+                   else _shown(act.was, choices))
+            return f"{act.name} {was} → drawn: {variation.words(act.form, unit)}"
         drawn = "as declared" if act.draw is None else variation.words(act.draw, unit)
         return f"{_draw_said(act.key)} → {drawn}"
 
     def _keep_moment(self, said: str) -> None:
         """**A moment a revert can go back to, kept as an act applies** (`Moment`; engine build C3's
         spec §8; `_apply_staged`): the act's change id, now, `said`, and what the live layer holds
-        once it applied -- each setting a person holds, with its value (`_edited`), and each draw
-        changed live (`_ranges`, its change id left out) -- each in sorted order, so a revert's
+        once it applied -- each setting a person holds, with its value (`_edited`), each draw
+        changed live (`_ranges`, its change id left out), and each setting a person's draw gives,
+        with the draw (`_forms`) -- each in sorted order, so a revert's
         rows come out in one order in every process. Between trials, never in a frame."""
         self._moments.append(Moment(
             self._change, self.wall_now(), said,
             {name: self.spec.values.get(name) for name in sorted(self._edited)},
             {key: self._ranges[key][0] for key in sorted(self._ranges)},
+            {name: self._forms[name] for name in sorted(self._forms)},
         ))
 
     def _meaning(self, name: str, was: object, now: object) -> dict | None:
@@ -4772,6 +5033,14 @@ class Session:
     #: (`Session._range` offers it, `_apply_pending` applies it).
     _ranges: dict[tuple, tuple[Distribution, int]] = field(
         init=False, default_factory=dict, repr=False)
+    #: **The settings a person's draw gives in the run in progress** (the console settings
+    #: design's §3; the PI, 2026-11-16, "fixed or drawn"): each setting's name to the draw a
+    #: person put in force from its card (`Session._form` offers it, `_apply_pending` applies it),
+    #: and the id of the `form` row that put it there, which each trial drawn from it names
+    #: (`_draw`). A value a person gives, a hand-back or a revert ends one. Empty as each run
+    #: starts. A size's scaling (`task.Scaled`) joins it with the console settings plan's Task 6.
+    _forms: dict = field(init=False, default_factory=dict, repr=False)
+    _form_ids: dict[str, int] = field(init=False, default_factory=dict, repr=False)
     #: **What each trial of the run in progress drew, kept for a repeat of it** (engine build C3's
     #: call 13; the PI, 2026-10-30, Q3 and "Follow same/fresh"): by the trial's number in the run
     #: (`Draw.number`), each setting it drew as `(value, source, original)` -- the value in the
@@ -5136,7 +5405,14 @@ class Session:
         meaning relative to another setting reads that setting as the trial has it. A name that
         is no setting of the run's task (a value staged before the run under the task the session
         last named) nothing of the trial reads, and it keeps nothing out. A hand-back ends a
-        hold, so from the next trial its setting is judged no more."""
+        hold, so from the next trial its setting is judged no more.
+
+        **A person's draw** (`_forms`; the console settings build) reaches its trials too, and is
+        judged as a whole, as a range is, never by the value the trial drew: against the block's
+        draw of the setting where one gives it (`variation.easier_range`, a draw of another kind
+        unreadable, so kept out), else at each of its extremes against the value the trial would
+        otherwise have had, read as a held value's is; an expected setting's trial is kept out
+        whatever the draw, and a setting that is not a difficulty setting keeps none out."""
         task, scheduler = self._task, self._scheduler
         draws = {**variation.in_force(task, scheduler.block), **variation.own_ranges(condition)}
         # `_draw` keeps under a repeat's own number the entry of the trial it repeats for each
@@ -5151,6 +5427,11 @@ class Session:
         for name in sorted(name for name in reached if name in meanings):
             meaning = meanings[name][0]
             source = drawn.get(name)
+            form = self._forms.get(name)
+            if form is not None and source == self._form_ids.get(name):
+                if self._form_eases(meaning, name, form, condition, values, draws, number):
+                    eased.append(name)
+                continue
             if source is not None and not isinstance(source, str) and name in draws:
                 # **Drawn from a range changed live: the range judged as a whole** against the
                 # range as written, never the value it drew (the PI, 2026-10-31, on the engine C3
@@ -5199,6 +5480,38 @@ class Session:
                       choices=bool(self._declared[name].choices)) is not False:
                 eased.append(name)
         return tuple(eased)
+
+    def _form_eases(self, meaning, name: str, form: Distribution, condition: Condition,
+                    values: dict, draws: dict, number: int) -> bool:
+        """**Whether a trial drawn from a person's draw is kept out of moving up** (`_eased`; the
+        console settings build), the draw judged as a whole: never for a setting that is not a
+        difficulty setting, always for an expected one ("No, after any change"); against the
+        block's draw where one gives the setting (`variation.easier_range`, which reads a draw of
+        another kind as doubt); else at each of its extremes against what the trial would
+        otherwise have had -- the staircase's level, the condition's value, the run's own -- kept
+        out where any extreme is easier or which way cannot be read (never moved up on doubt, the
+        C3 plan's Appendix B item 2). Between trials, never in a frame."""
+        if meaning.kind == NOT_DIFFICULTY:
+            return False
+        if meaning.kind == EXPECTED:
+            return True
+        relative = meaning.relative_to
+        reference = values.get(relative) if isinstance(relative, str) else None
+        declared = self._declared.get(name)
+        climb = self._climb
+        if name in draws and not (climb is not None and climb.staircase.setting == name):
+            declaration, key = draws[name]
+            written = self._ranges.get(key, (declaration,))[0]
+            return variation.easier_range(meaning, form, written, declared,
+                                          reference) is not False
+        if climb is not None and climb.staircase.setting == name:
+            otherwise = climb.value
+        elif name in condition.values:
+            otherwise = condition.values[name]
+        else:
+            otherwise = self._run_values.get(name)
+        return any(easier(meaning, end, otherwise, reference) is not False
+                   for end in variation.extremes(form, declared))
 
     def _range_eases(self, meaning, name: str, declaration: Distribution, key: tuple,
                      change: int, values: dict) -> bool:
@@ -5284,7 +5597,15 @@ class Session:
         range changed live meanwhile does not move it, and a prepared list's place does not
         advance; one declared `FRESH`, or one that trial did not draw (a person held it then), is
         drawn on the repeat's own number. What this trial drew is kept under its number, with the
-        number whose key drew each value, for a repeat of it to find."""
+        number whose key drew each value, for a repeat of it to find.
+
+        **A person's draw comes first, after a person's value** (`_forms`; the console settings
+        build, its design §3): each setting it gives is drawn from it, keyed `("person", name)`,
+        its source the id of the `form` row that put it in force (`_form_ids`), over the block's
+        draw and the condition's own range, which it is not drawn from, and **fresh on a repeat**,
+        as its `FRESH` says. The order: a person's value, a person's draw, then the staircase, the
+        pool (the run loop's), a condition's own range, the block's or the task's draw, the
+        conditions, the run."""
         kept = {} if draw.repeat_of is None else self._kept.get(draw.repeat_of, {})
         if draw.repeat_of is not None and draw.repeat_of not in self._kept:
             # `Scheduler.waiting` and the pruning have drifted apart: say so on the feed, since
@@ -5293,8 +5614,22 @@ class Session:
         taken: dict = {}
         sources: dict = {}
         mine: dict = {}
+        for name, form in self._forms.items():
+            if name in self._edited:
+                continue
+            key = ("person", name)
+            ordinal = 0
+            if isinstance(form, Listed):
+                ordinal = self._listed.get(key, 0)
+                self._listed[key] = ordinal + 1
+            value = variation.draw(form, self._run.seed, draw.number, key,
+                                   declared=self._declared.get(name), ordinal=ordinal)
+            taken[name], sources[name] = value, self._form_ids[name]
+            mine[name] = (value, sources[name], draw.number)
         for name, (drawn, key) in {**variation.in_force(task, block),
                                    **variation.own_ranges(condition)}.items():
+            if name in self._forms:
+                continue
             if name in self._edited:
                 # Held on this try: not drawn, but what the trial it repeats drew is carried on,
                 # so a later try, once the person hands the setting back, still finds it (the
@@ -5329,10 +5664,10 @@ class Session:
           gives it something;
         - **each setting the trial drew** (`_draw`, its `_kept` entry), `{"by": "draw", "from":
           source, "distribution": draw}`: `source` as the trial's line names it (`drawn`), and the
-          draw it was drawn from, the declaration or the range a person put in force
-          (`_ranges`), every field (`variation.recorded`; the engine C3 plan's call 12). One way
-          for each the block's trials name, so one for each different range of their own its
-          conditions draw from. **A value a repeat keeps from the trial it shows again adds
+          draw it was drawn from, the declaration, the range a person put in force (`_ranges`) or
+          a person's draw (`_forms`, its source the `form` row's id), every field
+          (`variation.recorded`; the engine C3 plan's call 12). One way for each the block's
+          trials name, so one for each different range of their own its conditions draw from. **A value a repeat keeps from the trial it shows again adds
           nothing** (a `SAME` setting; call 13): that trial, in the same block, since no repeat
           outlives its block, named its draw already, so a range changed since never stands for
           it;
@@ -5355,10 +5690,15 @@ class Session:
         for name, (_, source, original) in self._kept[number].items():
             if original != number:
                 continue
-            declaration, key = draws[name]
-            way = {"by": "draw", "from": source, "distribution": variation.recorded(
-                self._ranges.get(key, (declaration,))[0], self._declared.get(name),
-                direction=name in turned)}
+            if name in self._forms and source == self._form_ids.get(name):
+                # A person's draw (the console settings build), named by its `form` row's id.
+                way = {"by": "draw", "from": source, "distribution": variation.recorded(
+                    self._forms[name], self._declared.get(name))}
+            else:
+                declaration, key = draws[name]
+                way = {"by": "draw", "from": source, "distribution": variation.recorded(
+                    self._ranges.get(key, (declaration,))[0], self._declared.get(name),
+                    direction=name in turned)}
             ways = varied.setdefault(name, [])
             if way not in ways:
                 ways.append(way)
@@ -5769,6 +6109,8 @@ class Session:
         self._given = frozenset(given)
         self._eased_now = ()
         self._ranges = {}
+        # No person's draw (the console settings build).
+        self._forms, self._form_ids = {}, {}
         # No trial's draws kept for a repeat, and every prepared list at its first place (engine
         # build C3).
         self._kept = {}
@@ -6159,7 +6501,8 @@ class Session:
                 # whose value then plays and leaves the staircase where it is, however the trial
                 # ends; a hand-back resumes it (`_apply_pending`).
                 climb = self._climbing()
-                stepping = climb is not None and climb.staircase.setting not in self._edited
+                stepping = (climb is not None and climb.staircase.setting not in self._edited
+                            and climb.staircase.setting not in self._forms)
                 if stepping:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
@@ -6171,7 +6514,7 @@ class Session:
                 paired = self._pairing(task, drawn)
                 if paired is not None:
                     for name, look in zip((task.pool.odd, task.pool.distractor), paired):
-                        if name not in self._edited:
+                        if name not in self._edited and name not in self._forms:
                             taken[name], sources[name] = look, POOL
                 # **What varied in its block** (engine build C3's spec §10; XC-344): what its
                 # conditions set apart, as the block's first trial is drawn, and this trial's
@@ -6181,7 +6524,10 @@ class Session:
                 # order: the task's start, the run's value, the condition's or a drawn value, a
                 # live edit), and the trial still counts toward its condition; its row names each
                 # value overridden, a condition's own range among them (engine build C3's §6).
-                overridden = sorted(name for name in condition.values if name in self._edited)
+                # A person's draw overrides a condition's value as a held one does (the console
+                # settings build).
+                overridden = sorted(name for name in condition.values
+                                    if name in self._edited or name in self._forms)
                 values = {
                     **self.spec.values,
                     **{name: value for name, value in condition.values.items()

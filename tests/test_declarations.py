@@ -306,6 +306,8 @@ DEFAULTS = {
         "color": None,
     },
     "NonAging": {"minimum": REQUIRED, "mean": REQUIRED, "maximum": REQUIRED, "repeat": None},
+    # A size's scaling (the console settings build): a person's form, held by no task file yet.
+    "Scaled": {"factor": REQUIRED},
     "On": {"guard": REQUIRED, "to": REQUIRED, "do": []},
     "Onscreen": {"patch": "task"},
     "Order": {},

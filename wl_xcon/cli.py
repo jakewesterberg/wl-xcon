@@ -1563,7 +1563,7 @@ def main(argv: list[str] | None = None) -> int:
         "them), `stop`, `pause`, `resume`, `reward` (a manual reward, "
         "while paused), `schedule` and `cancel` (a scheduled stop), `mark` (a mark's "
         "note), `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, and `revert` (the run's counts, blocks, settings and draws), and the "
+        "`range`, `form`, and `revert` (the run's counts, blocks, settings and draws), and the "
         "five only `wlx taskd` acts on, which a `wlx run` session refuses: `open` (open "
         "a session, recording the departure time and the fluid the animal has already "
         "had today, and accepting warnings), `check`, `start` (start a run, "
@@ -1768,7 +1768,7 @@ def main(argv: list[str] | None = None) -> int:
         "settings), `stop` and `pause` (of the run), `resume`, `reward` (a manual "
         "reward, also while the animal's return is awaited), `schedule`, `cancel`, "
         "`mark`, `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, and `revert`; see `wlx run "
+        "`range`, `form`, and `revert`; see `wlx run "
         "--link-allow-remote` for the rest of what it exposes",
     )
 

@@ -57,6 +57,7 @@ from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.geometry import Housing
 from wl_xcon.scheduler import DRUM_SCOPES, TRAINING
+from wl_xcon.task import SHAPES
 from wl_xcon.viewport import Viewport
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
@@ -245,7 +246,17 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: demo's open, never a real animal's, so a page keeps *new session* live beside it. And an `open`
 #: command's `demo` on the wire (a command, not a frame: no schema of its own). Nothing else changed
 #: meaning. A reader of 20 refuses 21 and 21 refuses 20, by name, for all three shapes.
-SCHEMA = 21
+#:
+#: 22 (the console settings build, 2026-11-17; its design §3, the PI, 2026-11-16: every timing
+#: setting "fixed or drawn"): `ParamRow.switch`, `"drawn"` on a card whose setting a person may
+#: draw -- a live setting in seconds -- else `None`; and `ParamRow.shape`, the shape in force, a
+#: person's draw or the open block's, as `{"shape", "numbers", "values", "weights", "by"}`, `by`
+#: one of `"person"`, `"block"` or `"task"`, `None` where the setting is fixed; and
+#: `ParamRow.source` `"form"`, a person's draw. A staged row may be of kind `form`, its `was` and
+#: `now` in the rig's words. And a `form` command on the wire (`SetForm`). The build's later
+#: tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
+#: by name, for all three shapes.
+SCHEMA = 22
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -448,11 +459,24 @@ class ParamRow:
     #: **How many more conditions set or draw it** than `conditions` names (schema 19; the engine
     #: C3 plan's engineering review, M-5): 0 where it names them all.
     more: int = 0
+    #: **Whether the card offers the drawn side** (schema 22; the console settings design's §3, the
+    #: PI, 2026-11-16: "every timing setting gets the switch on its card"): `"drawn"` on a live
+    #: setting in seconds while a run goes, whose card is *fixed* or *drawn* (`SetForm`); `None` on
+    #: every other card, a ceiling's, and between runs.
+    switch: str | None = None
+    #: **The shape in force, for the card's drawn side** (schema 22): a person's draw (`by`
+    #: `"person"`, `source` `"form"`) or the open block's own or the task's (`"block"`, `"task"`),
+    #: a range changed live included, as `{"shape", "numbers", "values", "weights", "by"}` -- one
+    #: of `task.SHAPES`, its numbers by the names a card sends back, a list's values and weights
+    #: as lists (`variation.shaped`). `None` where the setting is fixed, where every condition of
+    #: the block draws it from its own range, and for a direction.
+    shape: dict | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
            bounded: bool, choices=(), source: str | None = None, conditions=(),
-           draw: str | None = None, numbers: dict | None = None) -> "ParamRow":
+           draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
+           shape: dict | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -472,9 +496,9 @@ class ParamRow:
         words = position_words(value, choices)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more)
+                       numbers, more, switch, shape)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more)
+                   more, switch, shape)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1779,6 +1803,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "draw": p.draw,
                 "numbers": p.numbers,
                 "more": p.more,
+                "switch": p.switch,
+                "shape": p.shape,
             }
             for p in telemetry.params
         ],
@@ -2601,6 +2627,42 @@ class SetRange:
 
 
 @dataclass(frozen=True, slots=True)
+class SetForm:
+    """**A person asks that a timing setting be drawn each trial, from a shape they give** (the
+    console settings design's §3; the PI, 2026-11-16: every timing setting "fixed or drawn",
+    staged until the next trial like any change): setting `name` drawn from `shape`, one of
+    `task.SHAPES` -- or `"scaled"`, a size's (the console settings plan's Task 6) -- from the next
+    trial, recorded as a change, over what the block gives it until a typed value, a hand-back or
+    a revert ends it. **Its own command, never a `SetParameter` or a `SetRange`**: `numbers` are
+    the shape's by name (a non-aging wait's `shortest` and `longest`, a uniform's `low` and `high`,
+    a normal's `mean`, `sd`, `low` and `high`, a scaling's `factor`; none for a list), and
+    `values` and `weights` a list's, at most `LISTED_LIMIT` each; every one decoded by `_setting`,
+    M8's rule, welfare-listed and called unchanged, so each is a finite `float`, a word refused
+    (`_numbers`, `_listed`). Which shapes the setting takes and whether the draw can be drawn are
+    the session's to judge (`taskd.Session._form`), since only the task knows its settings."""
+
+    KIND: ClassVar[str] = "form"
+
+    name: str
+    shape: str
+    numbers: dict[str, float]
+    by: Actor
+    values: tuple = ()
+    weights: tuple = ()
+
+
+#: **The shapes a `form` command may name on the wire**: the five a timing card draws
+#: (`task.SHAPES`) and a size's scaling (`task.Scaled`), which the session refuses until the
+#: console settings plan's Task 6 takes it.
+FORM_SHAPES = (*SHAPES, "scaled")
+
+#: **The most values, and the most weights, one `SetForm` may carry**: a bound on one packet's reach
+#: into a refusal row, the record and every frame, as `VALUES_LIMIT` is, not a rule about draws --
+#: a list on a card is typed by hand (the console settings plan's Global Constraints, TSK-75).
+LISTED_LIMIT = 64
+
+
+@dataclass(frozen=True, slots=True)
 class Revert:
     """**A person asks that the run go back to an earlier moment** (engine build C3; TSK-43, the
     PI, 2026-10-07, "Yes, with revert": "any earlier state restored in one action, itself
@@ -2637,6 +2699,7 @@ Command = (
     | BackBlock
     | HandBack
     | SetRange
+    | SetForm
     | Revert
     | Decline
 )
@@ -2802,6 +2865,10 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, SetRange):
         payload = {"kind": "range", "by": actors.to_map(command.by), "name": command.name,
                    "numbers": dict(command.numbers)}
+    elif isinstance(command, SetForm):
+        payload = {"kind": "form", "by": actors.to_map(command.by), "name": command.name,
+                   "shape": command.shape, "numbers": dict(command.numbers),
+                   "values": list(command.values), "weights": list(command.weights)}
     elif isinstance(command, Revert):
         payload = {"kind": "revert", "by": actors.to_map(command.by), "change": command.change}
     else:
@@ -2982,26 +3049,29 @@ def _values(data: dict, kind: str, by: Actor) -> dict:
     return checked
 
 
-def _numbers(data: dict, name: str, by: Actor) -> dict[str, float]:
-    """A live range's numbers (engine build C3, the C3 spec §6): 1 to `NUMBERS_LIMIT` of them, each
-    named by text of 1 to `TEXT_LIMIT` characters, each value decoded by `_setting`, M8's rule,
-    called unchanged and filed under the setting `name` as a value is. `_setting` lets a word
-    through for a categorical setting; a range's numbers are numbers, so a word is refused here."""
+def _numbers(data: dict, name: str, by: Actor, *, kind: str = "range") -> dict[str, float]:
+    """A live range's numbers (engine build C3, the C3 spec §6), or a person's draw's (`kind`
+    `"form"`; the console settings build): 1 to `NUMBERS_LIMIT` of them, each named by text of 1
+    to `TEXT_LIMIT` characters, each value decoded by `_setting`, M8's rule, called unchanged and
+    filed under the setting `name` as a value is. `_setting` lets a word through for a categorical
+    setting; a range's numbers are numbers, so a word is refused here. Each sentence names `kind`'s
+    command."""
     numbers = data.get("numbers")
     if not isinstance(numbers, dict) or not 1 <= len(numbers) <= NUMBERS_LIMIT:
         raise CommandRefused(
-            "range",
+            kind,
             by,
-            f"a 'range' command's numbers are 1 to {NUMBERS_LIMIT} named numbers, and "
+            f"a {kind!r} command's numbers are 1 to {NUMBERS_LIMIT} named numbers, and "
             f"{_quoted(numbers)} is not that, so it is refused",
         )
+    drawn = "drawn range" if kind == "range" else f"drawn {kind}"
     checked = {}
     for key, value in numbers.items():
         if not isinstance(key, str) or not key or len(key) > TEXT_LIMIT:
             raise CommandRefused(
-                "range",
+                kind,
                 by,
-                f"a range's number is named by text of 1 to {TEXT_LIMIT} characters, and "
+                f"a {kind}'s number is named by text of 1 to {TEXT_LIMIT} characters, and "
                 f"{_quoted(key)} is not, so it is refused",
             )
         number = _setting(value, name, by)
@@ -3009,12 +3079,42 @@ def _numbers(data: dict, name: str, by: Actor) -> dict[str, float]:
             raise CommandRefused(
                 name,
                 by,
-                f"{name!r} was sent the word {_quoted(number)} as its {key!r}: a drawn range's "
+                f"{name!r} was sent the word {_quoted(number)} as its {key!r}: a {drawn}'s "
                 f"numbers are finite numbers, never a word, so it is refused and the session "
                 f"runs on",
             )
         checked[key] = number
     return checked
+
+
+def _listed(data: dict, key: str, name: str, by: Actor) -> tuple[float, ...]:
+    """**A person's draw's `values` or `weights`** (`SetForm`; the console settings build): absent
+    or a list of at most `LISTED_LIMIT`, each decoded by `_setting`, M8's rule, called unchanged
+    and filed under the setting `name` as a value is; a word among them refused, as a range's
+    numbers refuse one (`_numbers`)."""
+    items = data.get(key)
+    if items is None:
+        return ()
+    if not isinstance(items, (list, tuple)) or len(items) > LISTED_LIMIT:
+        raise CommandRefused(
+            "form",
+            by,
+            f"a 'form' command's {key} are at most {LISTED_LIMIT} numbers in a list, and "
+            f"{_quoted(items)} is not that, so it is refused",
+        )
+    checked = []
+    for item in items:
+        number = _setting(item, name, by)
+        if isinstance(number, str):
+            raise CommandRefused(
+                name,
+                by,
+                f"{name!r} was sent the word {_quoted(number)} among its {key}: a drawn form's "
+                f"{key} are finite numbers, never a word, so it is refused and the session runs "
+                f"on",
+            )
+        checked.append(number)
+    return tuple(checked)
 
 
 def _decode_command(payload: bytes) -> Command:
@@ -3263,6 +3363,23 @@ def _command_from(data: dict) -> Command:
         by = _actor(data.get("by"), kind)
         name = _word(data, "name", kind, by)
         return SetRange(name=name, numbers=_numbers(data, name, by), by=by)
+    if kind == "form":
+        by = _actor(data.get("by"), kind)
+        name = _word(data, "name", kind, by)
+        shape = data.get("shape")
+        if not isinstance(shape, str) or shape not in FORM_SHAPES:
+            raise CommandRefused(
+                kind, by,
+                f"a 'form' command's shape is one of {', '.join(FORM_SHAPES)}, and "
+                f"{_quoted(shape)} is not one, so it is refused",
+            )
+        # A list's draw carries no numbers; any it does carry are decoded as a range's are, and
+        # the session says which its shape takes (`taskd.Session._form`).
+        numbers = ({} if data.get("numbers") in (None, {})
+                   else _numbers(data, name, by, kind=kind))
+        return SetForm(name=name, shape=shape, numbers=numbers, by=by,
+                       values=_listed(data, "values", name, by),
+                       weights=_listed(data, "weights", name, by))
     if kind == "revert":
         by = _actor(data.get("by"), kind)
         change = data.get("change")
@@ -3519,6 +3636,7 @@ _COMMAND_EXPOSURE = {
     "decline": ("both", "hold a stage move or a widening the rig suggests"),
     "hand_back": ("both", "hand a held setting back"),
     "range": ("both", "change a drawn range"),
+    "form": ("both", "draw a timing setting each trial from a shape a person gives"),
     "revert": ("both", "take the run's settings and ranges back to an earlier change"),
     "open": ("taskd", "open a session, recording the animal's departure time and the fluid it has already had today, and accepting warnings"),
     "check": ("taskd", "take a run's pre-flight"),

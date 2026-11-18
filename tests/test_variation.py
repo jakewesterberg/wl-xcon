@@ -23,6 +23,7 @@ from wl_xcon import variation
 from wl_xcon.cli import _load_task
 from wl_xcon.declarations import COMMON
 from wl_xcon.task import (
+    NONAGING_DECAY,
     BY_CONDITIONS,
     CLEAR_CUT,
     CRITERION,
@@ -538,7 +539,12 @@ def test_a_draw_is_said_in_the_rigs_words():
     assert words(Listed((2, 4, 6), in_order=True), "") == "in order: 2, 4, 6, over and over"
     assert words(Listed(("red", "green")), "appearance") == (
         "each of red, green once a pass, shuffled")
-    assert words(NonAging(0.75, 1.0, 1.25), "s") == "non-aging from 0.75 s to 1.25 s, mean 1.0 s"
+    assert words(NonAging(0.75, 1.0, 1.25), "s") == (
+        "non-aging from 0.75 s to 1.25 s (τ 0.25 s, 1 in 7 drawn again, mean 0.9217 s)")
+    assert words(NonAging.between(0.75, 1.25), "s") == (
+        "non-aging from 0.75 s to 1.25 s (τ 0.1667 s, 1 in 20 drawn again, mean 0.8905 s)")
+    # One that cannot be drawn is said with its numbers as written, never raising.
+    assert words(NonAging(1.0, 1.0, 2.0), "s") == "non-aging from 1.0 s to 2.0 s, mean 1.0 s"
     assert words(Distribution(), "s") == "Distribution()"
 
 
@@ -550,12 +556,12 @@ def test_only_a_uniform_a_normal_and_a_waits_numbers_change_live():
     refused, saying which are."""
     assert LIVE_NUMBERS == {Uniform: ("low", "high"),
                             TruncatedNormal: ("mean", "sd", "low", "high"),
-                            NonAging: ("minimum", "mean", "maximum")}
+                            NonAging: ("minimum", "maximum")}
     assert numbers(Uniform(0.2, 0.4, repeat=FRESH)) == {"low": 0.2, "high": 0.4}
     assert numbers(TruncatedNormal(1.0, 0.1)) == {"mean": 1.0, "sd": 0.1}
     assert numbers(TruncatedNormal(1.0, 0.1, low=0.9, high=1.1)) == {
         "mean": 1.0, "sd": 0.1, "low": 0.9, "high": 1.1}
-    assert numbers(NonAging(0.75, 1.0, 1.25)) == {"minimum": 0.75, "mean": 1.0, "maximum": 1.25}
+    assert numbers(NonAging(0.75, 1.0, 1.25)) == {"minimum": 0.75, "maximum": 1.25}
     assert [numbers(Weighted((1, 2), (1, 1))), numbers(Listed((1, 2)))] == [None, None]
 
     assert with_numbers(Uniform(0.2, 0.4, repeat=FRESH), {"high": 0.6}) == Uniform(
@@ -566,6 +572,9 @@ def test_only_a_uniform_a_normal_and_a_waits_numbers_change_live():
     with pytest.raises(ValueError, match=r"'mean' is not a number of a Uniform changed live; "
                                          r"its live numbers are low, high"):
         with_numbers(Uniform(0.2, 0.4), {"mean": 0.3})
+    with pytest.raises(ValueError, match="'mean' is not a number of a NonAging changed live; "
+                                         "its live numbers are minimum, maximum"):
+        with_numbers(NonAging(0.75, 1.0, 1.25), {"mean": 0.9})
     with pytest.raises(ValueError, match="'repeat' is not a number of a NonAging"):
         with_numbers(NonAging(0.75, 1.0, 1.25, repeat=SAME), {"repeat": FRESH})
     with pytest.raises(ValueError, match="a Weighted's numbers are not changed live"):
@@ -659,3 +668,49 @@ def test_a_closing_tuple_of_one_name_at_any_depth_holds_depth_minus_one_names():
     for depth in (1, 2, 3, 4):
         played = balanced_sequence(["a"], depth, 1, random.Random(0))
         assert played == ("a",) * depth
+
+
+# --- The non-aging decay derived from its two ends (TSK-15's revision, 2026-11-16) ------------
+
+
+def test_nonaging_between_derives_tau_a_third_of_the_range():
+    """The PI, 2026-11-16, "Derived from min and max": τ = (longest - shortest) / 3, an
+    engineering default (`task.NONAGING_DECAY`; the decay report's §5). For 750 to 1250 ms: τ
+    167 ms, 1 draw in 20 drawn again (e^-3), a realized mean of 890 ms, and a hazard 1.06, 1.22,
+    1.50 and 3.67 times its start a quarter, a half, two thirds and nine tenths of the way in.
+    Arithmetic of the declared distribution, not a measurement of the rig."""
+    wait = NonAging.between(0.75, 1.25, repeat=FRESH)
+    assert NONAGING_DECAY == 3
+    assert (wait.minimum, wait.maximum, wait.repeat) == (0.75, 1.25, FRESH)
+    assert wait.mean == 0.75 + 0.5 / 3
+    assert variation.realized_mean(wait) == pytest.approx(0.8905, abs=5e-4)
+    tau = wait.mean - wait.minimum
+    assert math.exp(-(wait.maximum - wait.minimum) / tau) == pytest.approx(0.0498, abs=5e-5)
+    start = variation.hazard_ratio(wait, 0.75)
+    assert [variation.hazard_ratio(wait, at) / start for at in (0.875, 1.0, 1.0833, 1.2)] == (
+        pytest.approx([1.06, 1.22, 1.50, 3.67], abs=0.01))
+    assert NonAging.between(0.75, 1.25).repeat is None
+
+
+def test_the_decay_has_one_hazard_profile_at_every_range():
+    """τ = R/3 makes the hazard's rise depend on the share of the range alone (the decay report's
+    §3.1: h(x)/h(0) depends on x/R and R/τ only), so 0.4-1.4 s and 0.75-1.25 s rise alike."""
+    one, other = NonAging.between(0.4, 1.4), NonAging.between(0.75, 1.25)
+    for share in (0.0, 0.1, 0.25, 0.5, 2 / 3, 0.9, 0.99):
+        def rise(wait):
+            at = wait.minimum + share * (wait.maximum - wait.minimum)
+            return variation.hazard_ratio(wait, at) / variation.hazard_ratio(wait, wait.minimum)
+        assert rise(one) == pytest.approx(rise(other), abs=1e-12)
+
+
+def test_a_live_nonaging_range_derives_its_decay_again():
+    """A wait's live numbers are its shortest and longest (`LIVE_NUMBERS`): a person who moves
+    either end moves its decay with it, the mean a third of the new range past the shortest (the
+    planner's call: "Derived from min and max" supersedes C3's live average). A declared mean
+    stands until an end moves."""
+    declared = NonAging(0.75, 1.0, 1.25, repeat=SAME)
+    moved = with_numbers(declared, {"maximum": 1.5})
+    assert moved == NonAging(0.75, 0.75 + 0.75 / 3, 1.5, repeat=SAME)
+    assert with_numbers(declared, {"minimum": 0.5}) == NonAging(0.5, 0.5 + 0.75 / 3, 1.25,
+                                                                 repeat=SAME)
+    assert with_numbers(declared, {}) == declared

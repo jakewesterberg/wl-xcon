@@ -635,14 +635,15 @@ def test_decline_and_a_confirmation_travel_the_wire_with_the_suggestion_they_ans
 def test_a_reader_of_19_refuses_a_later_frame_and_a_later_reader_refuses_19_by_name(monkeypatch):
     """Telemetry schema 20 carries the rig's suggestion: §3's schema rule, both ways round, so a
     console built for 19 refuses a frame whose suggestion it would not show, and a reader of this
-    build's schema (21 since demo mode, `tests/test_link.py`'s schema 21 test) refuses a 19 frame."""
+    build's schema (22 since the console settings build, `tests/test_link.py`'s schema 22
+    test) refuses a 19 frame."""
     sent = frame()
 
-    assert SCHEMA == sent.schema == 21
-    with pytest.raises(SchemaMismatch, match="carried schema 19 and this console reads schema 21"):
+    assert SCHEMA == sent.schema == 22
+    with pytest.raises(SchemaMismatch, match="carried schema 19 and this console reads schema 22"):
         decode(encode(replace(sent, schema=19)))
     monkeypatch.setattr(wire, "SCHEMA", 19)
-    with pytest.raises(SchemaMismatch, match="carried schema 21 and this console reads schema 19"):
+    with pytest.raises(SchemaMismatch, match="carried schema 22 and this console reads schema 19"):
         decode(encode(sent))
 
 
@@ -685,10 +686,11 @@ def test_wl_preprocs_reader_takes_the_suggested_and_declined_rows(tmp_path):
 
 
 def test_the_two_kinds_are_appended_and_a_resume_reads_them(tmp_path):
-    """`record.KINDS` grows only after `training` (`STROBED = KINDS[:4]` is positional), and
-    neither new kind strobes; a session whose log holds a suggestion and a hold is read back by a
-    resume, its next change numbered after them."""
-    assert KINDS[7:] == ("suggested", "declined") and STROBED == KINDS[:4]
+    """`record.KINDS` grows only after `training`, and neither new kind strobes (`STROBED` names
+    its kinds since the console settings build's `form`); a session whose log holds a suggestion
+    and a hold is read back by a resume, its next change numbered after them."""
+    assert KINDS[7:9] == ("suggested", "declined")
+    assert not {"suggested", "declined"} & set(STROBED)
     session = _two_stages(tmp_path, ["right"] * 7, {7: [Decline(suggestion=1, by=JAKE)]})
     session.run()
 

@@ -231,3 +231,24 @@ def test_a_ranges_numbers_pass_through_setting_unchanged_and_a_word_is_refused(m
         parse_command({"kind": "range", "by": "jake", "name": "foreperiod",
                        "numbers": {"minimum": "wide"}})
     assert str(page.value) == word.value.why
+
+
+def test_a_page_sends_a_form_as_the_wire_builds_it():
+    """The timing switch (the console settings build's Task 2): a page's `form` body is built by
+    the wire's own function (`link._command_from`), so the page hears the wire's sentence, and a
+    field the kind does not take is refused."""
+    jake = Box("jake")
+    body = {"kind": "form", "by": "jake", "name": "fix_hold", "shape": "non_aging",
+            "numbers": {"shortest": 0.75, "longest": 1.25}}
+    listed = {"kind": "form", "by": "jake", "name": "fix_hold", "shape": "list",
+              "values": [0.3, 0.5]}
+
+    assert parse_command(body) == link.SetForm(
+        name="fix_hold", shape="non_aging", numbers={"shortest": 0.75, "longest": 1.25},
+        by=jake)
+    assert parse_command(listed) == link.SetForm(
+        name="fix_hold", shape="list", numbers={}, by=jake, values=(0.3, 0.5))
+    with pytest.raises(BadCommand, match="^a form command takes no value$"):
+        parse_command({**body, "value": 1.0})
+    with pytest.raises(BadCommand, match="a 'form' command's shape is one of"):
+        parse_command({**body, "shape": "spiky"})

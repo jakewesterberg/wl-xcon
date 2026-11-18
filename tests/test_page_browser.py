@@ -3237,3 +3237,33 @@ def test_holding_b_is_tracker_lost(live, began):
     finally:
         live.page.keyboard.up("b")
     assert _states(began) == FIXATED_STATES
+
+
+def test_switching_fix_hold_to_nonaging_sends_its_shortest_and_longest(rig):
+    """The timing switch (the console settings design's §3; the PI, 2026-11-16): on the card of a
+    timing setting held fixed, *drawn* opens its shapes; non-aging, its shortest and longest typed,
+    and *apply* sends a `form` of those two numbers, reaching the rig as the signed-in member's.
+    A frame arriving meanwhile leaves the card on its drawn side. Through the wire, in a real
+    browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import ParamRow, SetForm, decode, encode
+
+    rows = (ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "task", (), None, None,
+                        "drawn"),)
+    rig.hub.offer(decode(encode(frame(params=rows))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.click('[data-switch="drawn"][data-name="fix_hold"]')
+    rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
+    page.select_option('select[data-shape="fix_hold"]', "non_aging")
+    fields = '#params [data-fields="non_aging"]'
+    page.fill(f'{fields} input[data-form="shortest"]', "0.75")
+    page.fill(f'{fields} input[data-form="longest"]', "1.25")
+    page.click('[data-cmd="form"][data-name="fix_hold"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.shape, sent.numbers, sent.values, sent.weights,
+            sent.by.name) == (SetForm, "fix_hold", "non_aging",
+                              {"shortest": 0.75, "longest": 1.25}, (), (), "Jake Westerberg")

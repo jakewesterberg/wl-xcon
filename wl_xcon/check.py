@@ -2263,6 +2263,7 @@ def impossible(
     held: frozenset = frozenset(),
     ranges: dict | None = None,
     cued: bool = False,
+    forms: dict | None = None,
 ) -> list[Finding]:
     """**The trials no animal can get right among `blocks`**, refused, `IMPOSSIBLE` (engine build
     C3's spec §9; the PI, 2026-10-30, Q10: "the check judges each concrete combination (per
@@ -2275,6 +2276,9 @@ def impossible(
     - **`ranges`** changes the draws in force, keyed as the C3 plan's call 7 keys a draw
       (`("task", name)`, `("block", block, name)`, `("condition", condition, name)`): a
       `Distribution` there replaces the declared draw, `None` restores it.
+    - **`forms`** are the draws a person gives settings (`taskd.Session._forms`; the console
+      settings design's §3), by name: each beats a condition's value, any draw and a staircase,
+      as a held value does, and is judged by what it can give, at its extremes (`_drawable`).
     - **Each condition of each block**, its factorial expanded (`variation.expanded`), is judged
       on what its trials can hold (`_sources`): **a draw that can give an impossible trial is
       refused**, since some trials would take that value (the spec's §9).
@@ -2300,16 +2304,18 @@ def impossible(
     class declares (`_plan_faults` refuses it); nothing in a task's declarations raises here."""
     declared = {param.name: param for param in task.params}
     changed = ranges if isinstance(ranges, dict) else {}
+    formed = forms if isinstance(forms, dict) else {}
     findings: list[Finding] = []
     for block in blocks:
         if isinstance(block, Block):
             findings += _impossible_in(task, expanded(block), values, held, changed, declared,
-                                       cued)
+                                       cued, formed)
     return findings
 
 
 def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, ranges: dict,
-                   declared: dict[str, Param], cued: bool = False) -> list[Finding]:
+                   declared: dict[str, Param], cued: bool = False,
+                   forms: dict | None = None) -> list[Finding]:
     """`impossible` for one block, its factorial expanded: a look check's finding in an array a
     cue names the target of (`_cued`) a `CUED` warning, said only with `cued`."""
     conditions = [
@@ -2325,7 +2331,7 @@ def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, rang
         structure = task.structures.get(condition.structure or task.default)
         if not isinstance(structure, Trial):
             continue
-        sources = _sources(task, block, condition, values, held, ranges, declared)
+        sources = _sources(task, block, condition, values, held, ranges, declared, forms)
         arrays = _arrays(structure, sources)
         key = repr([(name, [part for part in form.parts if part[0] in _LOOKED])
                     for name, _, form in arrays])
@@ -2394,12 +2400,14 @@ def _cued(array: object) -> bool:
 
 
 def _sources(task: Task, block: Block, condition: Condition, values: dict, held: frozenset,
-             ranges: dict, declared: dict[str, Param]) -> dict[str, tuple]:
+             ranges: dict, declared: dict[str, Param],
+             forms: dict | None = None) -> dict[str, tuple]:
     """**What each setting can hold on a trial of `condition` in `block`**, in the order the C3
     plan's call 10 builds a trial's values: the run's value (`values`), under the condition's value
     or a draw -- its own range, else the block's or the task's draw in force (`variation.in_force`,
     `own_ranges`), each as `ranges` changes it -- or the block's staircase, each of its levels
-    (`Block.staircase`), and a value a person holds (`held`) over all of them.
+    (`Block.staircase`), then a person's draw (`forms`; the console settings build), what it can
+    give, and a value a person holds (`held`) over all of them.
     Each is a tuple: one value, or what its draw can give (`_drawable`). A setting nothing gives,
     or a draw that cannot be drawn, is absent, and so not judged."""
     found: dict[str, tuple | None] = {name: (value,) for name, value in values.items()}
@@ -2415,6 +2423,8 @@ def _sources(task: Task, block: Block, condition: Condition, values: dict, held:
         # **Each level of the block's staircase** (the pop-out search build, 2026-11-07), which
         # gives its setting each trial over the rest, a person's value aside.
         found[staircase.setting] = _staircase_levels(staircase, declared)
+    for name, form in (forms or {}).items():
+        found[name] = _drawable(form, declared.get(name))
     for name in held:
         if name in values:
             found[name] = (values[name],)

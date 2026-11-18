@@ -4261,3 +4261,97 @@ def test_an_open_carries_demo_and_a_non_boolean_is_refused():
             parse_command({**_OPEN, "demo": bad})
         with pytest.raises(link.CommandRefused, match="an open's demo is true or false"):
             link._command_from({**_OPEN, "by": {"kind": "box", "name": "jake"}, "demo": bad})
+
+
+def test_a_timing_card_offers_fixed_and_drawn_with_each_shapes_fields():
+    """The timing switch (the console settings design's §3; the PI, 2026-11-16): a card whose
+    `switch` is `drawn` -- a live setting in seconds -- offers *fixed* and *drawn*. Fixed is today's
+    number field, `set`; drawn is a shape select of the five shapes (no scaling: a size's) and each
+    shape's fields, with *apply*, which sends `form`. The side open is drawn where a draw is in
+    force (`shape`), its shape selected and its numbers filled; fixed otherwise. A card the
+    person's draw gives says so, names what it overrides -- its draw, its conditions or its
+    staircase -- and offers *hand back*. A card with no switch shows neither. Greyed away from the
+    box."""
+    person = {"shape": "non_aging", "numbers": {"shortest": 0.75, "longest": 1.25},
+              "values": [], "weights": [], "by": "person"}
+    block = {"shape": "uniform", "numbers": {"low": 0.2, "high": 0.4}, "values": [],
+             "weights": [], "by": "block"}
+    listed = {"shape": "weights", "numbers": {}, "values": [0.3, 0.5], "weights": [3.0, 1.0],
+              "by": "task"}
+    rows = (
+        ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "task", (), None, None, "drawn"),
+        ParamRow.of("wait", "s", 0.05, 2.0, 0.3, False, (), "form", (),
+                    "uniform from 0.2 s to 0.4 s", None, "drawn", person),
+        ParamRow.of("gap", "s", 0.05, 2.0, 0.3, False, (), "draw", (),
+                    "uniform from 0.2 s to 0.4 s", {"low": 0.2, "high": 0.4}, "drawn", block),
+        ParamRow.of("hold", "s", 0.05, 2.0, 0.3, False, (), "draw", (),
+                    "one of 0.3 s, 0.5 s, weighted 3.0:1.0", None, "drawn", listed),
+        ParamRow.of("fix_window", "deg", 0.5, 5.0, 2.0, False),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+    lan = fragments(frame(params=rows), view(can_write=False))["params"]
+    cards = _cards(params)
+
+    fixed = cards["fix_hold"]
+    assert ('<div class="sw" role="group" aria-label="fix_hold: fixed or drawn">'
+            '<button type="button" class="btn small seg on" data-switch="fixed" '
+            'data-name="fix_hold" aria-pressed="true">fixed</button>'
+            '<button type="button" class="btn small seg" data-switch="drawn" data-name="fix_hold" '
+            'aria-pressed="false">drawn</button></div>') in fixed
+    assert '<div class="side fixed" data-side="fixed">' in fixed
+    assert '<div class="side drawn" data-side="drawn" hidden>' in fixed
+    assert 'data-param="fix_hold"' in fixed.split('data-side="fixed"')[1].split("data-side")[0]
+    assert ('<select class="field" data-shape="fix_hold" aria-label="fix_hold: shape">'
+            '<option value="non_aging" selected>non-aging</option>'
+            '<option value="uniform">uniform</option>'
+            '<option value="normal">normal, cut</option>'
+            '<option value="list">a list, in shuffled passes</option>'
+            '<option value="weights">a list, weighted</option></select>') in fixed
+    assert "scaled" not in fixed
+    for shape, numbers in (("non_aging", ("shortest", "longest")), ("uniform", ("low", "high")),
+                           ("normal", ("mean", "sd", "low", "high")), ("list", ("values",)),
+                           ("weights", ("values", "weights"))):
+        fields = fixed.split(f'data-fields="{shape}"')[1].split("</div>")[0]
+        for number in numbers:
+            assert (f'<label class="rn">{number}<input class="field mono" data-form="{number}" '
+                    f'inputmode="decimal" value=""') in fields, (shape, number)
+    assert fixed.count('data-fields="non_aging">') == 1
+    assert 'data-fields="uniform" hidden>' in fixed
+    assert ('<button type="button" class="btn small" data-cmd="form" data-name="fix_hold">'
+            "apply</button>") in fixed
+
+    drawn = cards["wait"]
+    assert '<div class="side drawn" data-side="drawn">' in drawn
+    assert '<div class="side fixed" data-side="fixed" hidden>' in drawn
+    assert 'data-switch="drawn" data-name="wait" aria-pressed="true"' in drawn
+    assert 'data-form="shortest" inputmode="decimal" value="0.75"' in drawn
+    assert 'data-form="longest" inputmode="decimal" value="1.25"' in drawn
+    assert "drawn each trial, from a person&#x27;s draw" in drawn
+    assert "a person&#x27;s draw, over its draw" in drawn
+    assert 'data-cmd="hand_back" data-name="wait"' in drawn
+    assert '<option value="uniform" selected>uniform</option>' in cards["gap"]
+    assert 'data-form="low" inputmode="decimal" value="0.2"' in cards["gap"]
+    assert 'data-cmd="range" data-name="gap"' in cards["gap"], "the block's range still changes"
+    assert 'data-form="values" inputmode="decimal" value="0.3, 0.5"' in cards["hold"]
+    assert 'data-form="weights" inputmode="decimal" value="3.0, 1.0"' in cards["hold"]
+    assert "data-switch" not in cards["fix_window"] and 'data-cmd="form"' not in cards["fix_window"]
+    assert lan.count(f'data-cmd="form" data-name="fix_hold" disabled title="{CONTROLS_AT_THE_BOX}"'
+                     ) == 1
+
+
+def test_a_form_card_names_the_staircase_it_holds_and_a_staged_form_says_drawn():
+    """A person's draw over the open block's staircase says so on its card (`Telemetry.staircase`
+    names the setting), and a staged form is led *drawn* with its draw in the rig's words."""
+    person = {"shape": "uniform", "numbers": {"low": 0.2, "high": 0.4}, "values": [],
+              "weights": [], "by": "person"}
+    rows = (ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "form", (), None, None,
+                        "drawn", person),)
+    stair = link.StaircaseRow("fix_hold", (0.2, 0.3, 0.4), 0, True, 3, 1)
+    staged = (Staged("fix_hold", None, "uniform from 0.2 s to 0.4 s", Box("jake"), False,
+                     kind="form", overrides=("c",)),)
+    shown = fragments(frame(params=rows, staircase=stair, staged=staged), view())
+
+    card = _cards(shown["params"])["fix_hold"]
+    assert "a person&#x27;s draw, over its staircase" in card
+    assert "staged drawn → uniform from 0.2 s to 0.4 s" in card
+    assert "drawn: fix_hold unset → uniform from 0.2 s to 0.4 s" in shown["rt-changes"]

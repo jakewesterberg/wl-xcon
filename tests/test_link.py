@@ -69,6 +69,7 @@ from wl_xcon.link import (
     SchemaMismatch,
     ShortfallRow,
     Simulated,
+    SetForm,
     SetParameter,
     Staged,
     NextBlock,
@@ -2505,7 +2506,7 @@ def test_schema_8_reads_the_pause_the_schedule_and_the_feed_from_the_session():
 
     telemetry = Telemetry.of(session, Tally(), _scheduler(), index=40)
 
-    assert telemetry.schema == SCHEMA == 21
+    assert telemetry.schema == SCHEMA == 22
     assert telemetry.paused_at == 1_700_000_100.0
     assert telemetry.scheduled_stop == ScheduledStop(
         kind="trials", target=48.0, by=Box("jake"), said="after trial 48"
@@ -2568,15 +2569,15 @@ def test_a_frame_carries_the_setup_the_session_runs_in():
     assert decode(encode(stereo)).view == "stereoscope"
     assert decode(encode(stereo)).half_ipd_cm == 1.6
     assert decode(encode(_telemetry())).half_ipd_cm is None
-    assert SCHEMA == 21
+    assert SCHEMA == 22
 
 
-def test_a_schema_7_frame_is_refused_by_a_schema_21_reader():
-    """§3's schema rule: a reader built for 21 refuses 7 by name, before touching a
+def test_a_schema_7_frame_is_refused_by_a_schema_22_reader():
+    """§3's schema rule: a reader built for 22 refuses 7 by name, before touching a
     field (`SchemaMismatch`), and says which it reads."""
     old = encode(replace(_telemetry(), schema=7))
 
-    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 7 and this console reads schema 22"):
         decode(old)
 
 
@@ -2750,7 +2751,7 @@ def test_schema_10_survives_the_wire_with_its_absences_intact():
         assert decode(encode(original)) == original
     assert type(decode(encode(populated)).preflight.items[0]) is PreflightItem
     assert type(decode(encode(populated)).question) is Question
-    assert SCHEMA == 21
+    assert SCHEMA == 22
 
 
 def test_a_session_before_its_first_run_has_no_block_task_or_counts():
@@ -2806,7 +2807,7 @@ def test_an_idle_frame_carries_the_last_closed_sessions_summary_across_the_wire(
     assert type(restored.closed) is Telemetry and restored.closed.phase == "closed"
     assert (restored.closed.fluid_today_ml, restored.closed.shortfall_ml) == (None, None)
     assert decode(encode(replace(idle, closed=None))).closed is None
-    assert SCHEMA == 21
+    assert SCHEMA == 22
 
 
 def test_idle_of_carries_what_it_is_given_as_the_closed_summary():
@@ -2828,7 +2829,7 @@ def test_an_idle_frame_of_another_schema_is_refused_by_name():
         )
     )
 
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 22"):
         decode(old)
 
 
@@ -2972,7 +2973,7 @@ def test_the_strips_levels_and_the_return_survive_the_wire():
     assert decode(encode(original)) == original
     # 12 added `performance` (the strip's session, task, run and block counts) and
     # `returned_at` (the recorded return).
-    assert SCHEMA == 21
+    assert SCHEMA == 22
 
 
 def test_a_frame_between_runs_carries_the_session_alone():
@@ -3050,7 +3051,7 @@ def test_the_instant_a_session_was_resumed_survives_the_wire_and_none_stays_none
     assert decode(encode(resumed)).resumed_at == 1_700_000_050.0
     assert decode(encode(_telemetry())).resumed_at is None
     # 13 added `Stranded.resumable` and `why`, and `Telemetry.resumed_at`.
-    assert SCHEMA == 21
+    assert SCHEMA == 22
 
 
 def test_the_frame_reads_the_resume_from_the_session():
@@ -3067,7 +3068,7 @@ def test_the_frame_reads_the_resume_from_the_session():
 def test_a_schema_13_frame_is_refused_by_name():
     """b2b (schema 14): a frame whose `by`s are strings is refused by its schema, by
     name, before any `by` is read."""
-    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 13 and this console reads schema 22"):
         decode(encode(replace(_telemetry(), schema=13)))
 
 
@@ -3104,7 +3105,7 @@ def test_schema_15_carries_the_kind_the_calibration_and_the_warnings_both_ways()
         warnings=(WarningRow("default calibration", "the standard's", SESSION_KINDS, None, None),),
     )
 
-    assert (sent.schema, decode(encode(sent))) == (21, sent)
+    assert (sent.schema, decode(encode(sent))) == (22, sent)
     assert type(decode(encode(sent)).warnings[0]) is WarningRow
     assert decode(encode(unloaded)).calibration is None
     assert decode(encode(idle)) == idle
@@ -3143,7 +3144,7 @@ def test_schema_16_carries_each_shortfall_drumming_the_training_aids_and_each_co
         only = replace(sent, rule="streak", **flags)
         assert decode(encode(only)) == only
     assert decode(encode(replace(sent, rule=None))).rule is None
-    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 15 and this console reads schema 22"):
         decode(encode(replace(sent, schema=15)))
 
 
@@ -3231,7 +3232,7 @@ def test_a_schema_14_frame_of_either_shape_is_refused_by_name():
 
     for old in (replace(_telemetry(), schema=14), idle):
         with pytest.raises(
-                SchemaMismatch, match="carried schema 14 and this console reads schema 21"):
+                SchemaMismatch, match="carried schema 14 and this console reads schema 22"):
             decode(encode(old))
 
 
@@ -3287,7 +3288,7 @@ def test_schema_17_carries_the_plan_the_next_block_the_time_left_and_the_plans_o
     assert decode(encode(replace(sent, plan=None, next_block=None, block_left_s=None,
                                  run_left_s=None, preflight=replace(preflight, plan=None,
                                                                     plans=())))).plan is None
-    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 16 and this console reads schema 22"):
         decode(encode(replace(sent, schema=16)))
 
 
@@ -3449,9 +3450,9 @@ def test_schema_18_carries_a_settings_position_and_refuses_17_by_name():
         ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
     ))
 
-    assert (sent.schema, decode(encode(sent))) == (21, sent)
+    assert (sent.schema, decode(encode(sent))) == (22, sent)
     assert decode(encode(sent)).params[1].position is None
-    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 17 and this console reads schema 22"):
         decode(encode(replace(sent, schema=17)))
 
 
@@ -3598,7 +3599,7 @@ def test_schema_21_carries_demo_on_every_frame_idle_or_running():
     read as a real session's; and a frame of schema 20 is refused by name, each shape."""
     from _frames import idle as idle_frame
 
-    assert SCHEMA == 21
+    assert SCHEMA == 22
     running = _telemetry()
     assert running.demo is False, "a real session's frame unless it says otherwise"
     for demo in (True, False):
@@ -3624,7 +3625,7 @@ def test_schema_21_carries_demo_on_every_frame_idle_or_running():
         decode(_repacked(idle_frame(closed=running), lambda data: data["closed"].pop("demo")))
 
     for frame in (running, idle_frame(), _drawn()):
-        with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 21"):
+        with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 22"):
             decode(encode(replace(frame, schema=20)))
 
 
@@ -3654,7 +3655,7 @@ def test_drawn_round_trips_whole_under_the_schema_check():
     assert decode(encode(blank)).mask_deg == 12.0
     assert decode(encode(blank)).vergence_half_deg == STEREOSCOPE.vergence_half_deg > 1.0
 
-    with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 21"):
+    with pytest.raises(SchemaMismatch, match="carried schema 20 and this console reads schema 22"):
         decode(encode(replace(sent, schema=20)))
 
 
@@ -3960,3 +3961,91 @@ def test_close_releases_the_gaze_sockets_and_an_unclosed_one_is_released_by_the_
     assert returned, "collecting an unclosed link or gaze sender in a reference cycle hung for 10 s"
     assert ctx.closed and sender_ctx.closed
     assert socket() is None and push() is None
+
+
+# --- The timing switch's command (the console settings build's Task 2) --------------------------
+
+#: One `SetForm` of each shape a card sends, and how many values `_setting` decodes in it.
+FORMS = [
+    (SetForm(name="fix_hold", shape="non_aging", numbers={"shortest": 0.75, "longest": 1.25},
+             by=Box("jake")), 2),
+    (SetForm(name="fix_hold", shape="uniform", numbers={"low": 0.2, "high": 0.4}, by=Box("jake")),
+     2),
+    (SetForm(name="fix_hold", shape="normal",
+             numbers={"mean": 0.5, "sd": 0.1, "low": 0.3, "high": 0.7}, by=Box("jake")), 4),
+    (SetForm(name="fix_hold", shape="list", numbers={}, by=Box("jake"),
+             values=(0.3, 0.5, 0.7)), 3),
+    (SetForm(name="fix_hold", shape="weights", numbers={}, by=Box("jake"), values=(0.3, 0.5),
+             weights=(3.0, 1.0)), 4),
+    (SetForm(name="fix_size", shape="scaled", numbers={"factor": 0.3}, by=Box("jake")), 1),
+]
+
+
+@pytest.mark.parametrize("form, decoded", FORMS)
+def test_set_form_round_trips_and_its_numbers_pass_through_setting(monkeypatch, form, decoded):
+    """`SetForm` over the wire and back, each shape (the design's §3; the planner's call: a new
+    command beside `SetRange`, `KIND` `"form"`), every number, value and weight decoded by
+    `_setting`, M8's rule, welfare-listed and called unchanged: counted here, so a decoder that
+    skipped it would show. A word among them is refused, and so are more than `LISTED_LIMIT`
+    values, and a shape that is none of the six."""
+    import wl_xcon.link as link
+
+    calls = []
+    real = link._setting
+
+    def counted(value, name, by):
+        calls.append(value)
+        return real(value, name, by)
+
+    monkeypatch.setattr(link, "_setting", counted)
+    assert SetForm.KIND == "form"
+    assert _decode_command(_encode_command(form)) == form
+    assert len(calls) == decoded
+
+
+def test_a_form_with_a_word_too_many_values_or_no_shape_is_refused_where_it_is_decoded():
+    from wl_xcon.link import LISTED_LIMIT
+
+    assert LISTED_LIMIT == 64
+    cases = [
+        (dict(shape="uniform", numbers={"low": "short", "high": 0.4}),
+         "'fix_hold' was sent the word 'short' as its 'low': a drawn form's numbers are finite "
+         "numbers, never a word"),
+        (dict(shape="list", values=[0.3, "long"]),
+         "'fix_hold' was sent the word 'long' among its values"),
+        (dict(shape="weights", values=[0.3, 0.5], weights=[1.0, "heavy"]),
+         "'fix_hold' was sent the word 'heavy' among its weights"),
+        (dict(shape="list", values=[0.5] * (LISTED_LIMIT + 1)),
+         f"a 'form' command's values are at most {LISTED_LIMIT} numbers"),
+        (dict(shape="list", values=0.5), f"a 'form' command's values are at most {LISTED_LIMIT}"),
+        (dict(shape="spiky", numbers={"low": 0.2}), "a 'form' command's shape is one of "
+         "non_aging, uniform, normal, list, weights, scaled"),
+        (dict(numbers={"low": 0.2}), "a 'form' command's shape is one of"),
+        (dict(shape="uniform", numbers={"low": float("nan"), "high": 0.4}),
+         "which is not a real number"),
+    ]
+    for fields, said in cases:
+        with pytest.raises(CommandRefused) as refused:
+            _decode_command(_packed(kind="form", name="fix_hold", by=JAKE, **fields))
+        assert said in refused.value.why, (fields, refused.value.why)
+
+
+def test_a_card_carries_its_switch_and_the_shape_in_force_over_the_wire():
+    """Schema 22: each `ParamRow` says whether its card offers the drawn side (`switch`) and the
+    shape in force, a person's or the open block's draw, by whom; both cross the wire whole, and a
+    reader of 21 refuses 22 by name."""
+    shape = {"shape": "non_aging", "numbers": {"shortest": 0.75, "longest": 1.25}, "values": [],
+             "weights": [], "by": "person"}
+    rows = (ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "form", (), None, None,
+                        "drawn", shape),
+            ParamRow.of("fix_window", "deg", 0.5, 5.0, 2.0, False))
+    sent = _telemetry(params=rows)
+
+    restored = decode(encode(sent))
+
+    assert restored.params == rows
+    assert (restored.params[0].switch, restored.params[0].shape) == ("drawn", shape)
+    assert (restored.params[1].switch, restored.params[1].shape) == (None, None)
+    assert SCHEMA == 22
+    with pytest.raises(SchemaMismatch, match="carried schema 21 and this console reads schema 22"):
+        decode(encode(replace(sent, schema=21)))

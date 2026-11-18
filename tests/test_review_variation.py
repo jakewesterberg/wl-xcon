@@ -68,6 +68,10 @@ def _task(**fields) -> Task:
     return Task({"look": LOOK}, default="look", **fields)
 
 
+#: The two waits below in the rig's words, their decay's arithmetic said (TSK-15's revision).
+WAIT = "non-aging from 0.75 s to 1.25 s (τ 0.25 s, 1 in 7 drawn again, mean 0.9217 s)"
+LONG = "non-aging from 1.0 s to 3.0 s (τ 0.5 s, 1 in 55 drawn again, mean 1.463 s)"
+
 def test_the_review_lists_the_tasks_draws_and_each_blocks():
     """The PI, 2026-10-30, Q1a ("Task default, block may replace") and Q1b ("a condition may draw
     its own setting from its own range"): the report lists the task's draws, the plain run's, in
@@ -95,18 +99,18 @@ def test_the_review_lists_the_tasks_draws_and_each_blocks():
     assert "| Setting | Drawn from | On a repeat |" in out
     assert (out.index("### What each trial does to its condition's count") < out.index("### Draws")
             < out.index("### Plans"))
-    assert "| wait | non-aging from 0.75 s to 1.25 s, mean 1.0 s | fresh |" in out
+    assert f"| wait | {WAIT} | fresh |" in out
     assert "| dir | uniform from 315 deg to 45 deg | same |" in out
     assert "| Block | Setting | Drawn from | Whose | On a repeat |" in out
-    assert ("| plain | wait | non-aging from 0.75 s to 1.25 s, mean 1.0 s | the task's | fresh |"
+    assert (f"| plain | wait | {WAIT} | the task's | fresh |"
             in out)
     assert "| plain | dir | uniform from 315 deg to 45 deg | the task's | same |" in out
-    assert ("| long | wait | non-aging from 1.0 s to 3.0 s, mean 1.5 s | the block's own | same |"
+    assert (f"| long | wait | {LONG} | the block's own | same |"
             in out)
     assert ("| long | contrast | one of 0.1 fraction, 0.5 fraction, weighted 3:1 | the block's own "
             "| fresh |") in out
     assert "| long | dir | uniform from 315 deg to 45 deg | the task's | same |" in out
-    assert ("| given | wait | non-aging from 0.75 s to 1.25 s, mean 1.0 s | the task's | fresh |"
+    assert (f"| given | wait | {WAIT} | the task's | fresh |"
             in out)
     assert ("| given | dir | each condition's value or own range (above) | by its conditions | |"
             in out)
@@ -114,8 +118,8 @@ def test_the_review_lists_the_tasks_draws_and_each_blocks():
     assert "| given | left | look | 4 | dir = 180.0 |" in out
     assert ("| given | spread | look | 4 | dir = uniform from 350 deg to 10 deg (fresh on a "
             "repeat) |") in out
-    assert "`wait`, the task's draw: non-aging from 0.75 s to 1.25 s, mean 1.0 s." in out
-    assert "`wait` in block `long`, its own draw: non-aging from 1.0 s to 3.0 s, mean 1.5 s." in out
+    assert f"`wait`, the task's draw: {WAIT}." in out
+    assert f"`wait` in block `long`, its own draw: {LONG}." in out
     assert "| 2.9 s | 5.52 times |" in out
     assert "Its waits average 1.46 s, below the declared mean of 1.5 s" in out
 
@@ -161,14 +165,16 @@ def test_a_factorials_generated_conditions_exclusions_and_level_shares_are_liste
             "| side | right | 2 | 12 | 75.0% |") in out
 
     level = "wait=non-aging from 0.5 to 1.0, mean 0.75"
-    assert (f"| ranges | {level}, side=left | look | 0 | wait = non-aging from 0.5 s to 1.0 s, "
-            f"mean 0.75 s (fresh on a repeat), side = left |") in out
+    assert (f"| ranges | {level}, side=left | look | 0 | wait = non-aging from 0.5 s to 1.0 s "
+            f"(τ 0.25 s, 1 in 7 drawn again, mean 0.6717 s) (fresh on a repeat), side = left |"
+            ) in out
     assert ("Block `ranges` makes 2 conditions from its factors, its last 2 rows in the table of "
             f"conditions above: wait ({level[5:]}); side (left, right). Each is owed 0 trials. "
             "Excluded: none.") in out
     assert f"| wait | {level[5:]} | 2 | 0 | none owed |" in out
     assert (f"`wait` in block `ranges`, the own range of `{level}, side=left`, "
-            f"`{level}, side=right`: non-aging from 0.5 s to 1.0 s, mean 0.75 s.") in out
+            f"`{level}, side=right`: non-aging from 0.5 s to 1.0 s (τ 0.25 s, 1 in 7 drawn "
+            f"again, mean 0.6717 s).") in out
     assert out.count("| 0.5 s, the shortest |") == 1
 
 

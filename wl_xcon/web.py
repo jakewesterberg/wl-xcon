@@ -1745,7 +1745,9 @@ def _health_pane(frame: Telemetry | Idle | None, view: View) -> str:
 
 #: How the changes feed and a card lead a staged change of each kind but a person's value
 #: (`Staged.kind`, telemetry schema 19; the C3 spec §6 and §8).
-_STAGED_KINDS = {"hand_back": "hand back", "range": "range", "revert": "revert"}
+_STAGED_KINDS = {"hand_back": "hand back", "range": "range", "revert": "revert",
+                 # A person's draw (the console settings build; telemetry schema 22).
+                 "form": "drawn"}
 
 
 def _becomes(change) -> str:
@@ -1944,7 +1946,97 @@ _PER_TRIAL = {
     # A task's pool of pairings (`task.Pool`; the pop-out search build's Task 5): each trial draws
     # a pairing into the odd one's look and the distractors', and a value set over either holds it.
     "pool": ("drawn each trial from its pool", "a value over its pool"),
+    # A person's draw from the card's drawn side (the console settings build; telemetry schema
+    # 22): each trial draws it, and a value set over it ends it, the card's fixed side.
+    "form": ("drawn each trial, from a person&#x27;s draw", "a value over this draw"),
 }
+
+#: **The shapes a timing card's drawn side offers, in the trainer's words** (`task.SHAPES`; the
+#: console settings design's §3, the PI, 2026-11-16), each with the fields its numbers are typed in,
+#: by the names a `form` command sends them under (`variation.FORM_NUMBERS`; a list's and a weighted
+#: list's typed as numbers between commas). A size's scaling is not offered here: a size's card
+#: takes it (the console settings plan's Task 6).
+_SHAPES = (
+    ("non_aging", "non-aging", ("shortest", "longest")),
+    ("uniform", "uniform", ("low", "high")),
+    ("normal", "normal, cut", ("mean", "sd", "low", "high")),
+    ("list", "a list, in shuffled passes", ("values",)),
+    ("weights", "a list, weighted", ("values", "weights")),
+)
+
+
+def _typed(value: object) -> str:
+    """A number as a drawn side's field holds it, every digit (a float's `str`, the shortest that
+    reads back the same), or a list of them between commas; empty for none."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
+def _switch(row, view: View, drawn: bool) -> str:
+    """**A timing card's switch, *fixed* or *drawn*** (`ParamRow.switch`; the console settings
+    design's §3: "every timing setting gets the switch on its card"): two buttons, the side open
+    pressed. Pressing one opens its side on the page alone; nothing is sent until the fixed side's
+    value or the drawn side's *apply*. Greyed away from the box."""
+    name, off = _e(row.name), _gate(view)
+
+    def side(which: str, on: bool) -> str:
+        return (f'<button type="button" class="btn small seg{" on" if on else ""}" '
+                f'data-switch="{which}" data-name="{name}" '
+                f'aria-pressed="{"true" if on else "false"}"{off}>{which}</button>')
+
+    return (f'<div class="sw" role="group" aria-label="{name}: fixed or drawn">'
+            f'{side("fixed", not drawn)}{side("drawn", drawn)}</div>')
+
+
+def _drawn_side(row, view: View) -> str:
+    """**A timing card's drawn side** (the console settings design's §3; the PI, 2026-11-16: "the
+    shapes: non-aging: shortest, longest; uniform: min, max; normal cut to a range: mean, SD, min,
+    max; a list of values: shuffled passes, or a weight each"): the shape select, the shape in
+    force selected (`ParamRow.shape`, a person's or the block's) or non-aging, and each shape's
+    fields, only the selected shape's shown, each filled from the shape in force where it is that
+    shape; then *apply*, which sends `form` (`link.SetForm`), staged until the next trial.
+    Greyed away from the box."""
+    off, name = _gate(view), _e(row.name)
+    shape = row.shape or {}
+    chosen = shape.get("shape", "non_aging")
+    options = "".join(
+        f'<option value="{key}"{" selected" if key == chosen else ""}>{_e(said)}</option>'
+        for key, said, _ in _SHAPES)
+    groups = []
+    for key, _, fields in _SHAPES:
+        mine = shape if key == chosen else {}
+        numbers = mine.get("numbers") or {}
+        typed = {field: _typed(mine.get(field) if field in ("values", "weights")
+                               else numbers.get(field)) for field in fields}
+        cells = "".join(
+            f'<label class="rn">{field}<input class="field mono" data-form="{field}" '
+            f'inputmode="decimal" value="{_e(typed[field])}" '
+            f'aria-label="{name}: {field}"{off}></label>'
+            for field in fields)
+        groups.append(f'<div class="shp rng" data-fields="{key}"'
+                      f'{"" if key == chosen else " hidden"}>{cells}</div>')
+    return (f'<select class="field" data-shape="{name}" aria-label="{name}: shape"{off}>'
+            f"{options}</select>{''.join(groups)}"
+            f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
+            f"apply</button>")
+
+
+def _beneath(row, frame) -> str:
+    """**What a person's draw overrides**, as its card says it (the console settings design's §3:
+    "the card names what it overrides, as `_whence` does"): the open block's staircase where it
+    steps the setting (`Telemetry.staircase`), its draw where one draws it (`ParamRow.draw`), its
+    conditions where they set it, else the run's value."""
+    stair = getattr(frame, "staircase", None)
+    if stair is not None and stair.setting == row.name:
+        return "its staircase"
+    if row.draw is not None:
+        return "its draw"
+    if row.conditions:
+        return "its conditions"
+    return "the run's value"
 
 
 def _over(row, place: str, view: View) -> str:
@@ -1982,7 +2074,7 @@ def _range_editor(row, view: View) -> str:
             f'numbers back; the cards wait for it</span>')
 
 
-def _whence(row, view: View) -> str:
+def _whence(row, view: View, over: str = "") -> str:
     """**Where a card's value comes from, and what a person may do about it** (telemetry schema
     19; the C3 spec §6: "each setting's card says where its value comes from (task, run,
     conditions, a draw and its range, or a person) and which conditions set or draw it"),
@@ -1997,11 +2089,15 @@ def _whence(row, view: View) -> str:
     - on a card a person holds, *hand back* (the PI, 2026-10-30, Q7a: "Yes, a 'hand back'
       button"): from the next trial its conditions, its draw or the run's own value give it
       again, recorded as a change. Typing the old value back does not hand it back; this does.
+    - on a card a person's draw gives (`source` `form`; the console settings build), what it
+      overrides (`over`, from `_beneath`) and *hand back*, which ends the draw.
 
     Nothing between runs, nor for a ceiling, when the rig sends none."""
     parts = []
     if row.source in _SOURCES:
         parts.append(f'<span class="src">{_SOURCES[row.source]}</span>')
+    if row.source == "form":
+        parts.append(f'<span class="src">a person&#x27;s draw, over {_e(over)}</span>')
     if row.conditions:
         # The rig names at most twenty and counts the rest (`ParamRow.more`; the C3 plan's
         # engineering review, M-5).
@@ -2013,7 +2109,7 @@ def _whence(row, view: View) -> str:
         parts.append(f'<span class="src">its draw: {_e(row.draw)}</span>')
     if row.numbers is not None:
         parts.append(_range_editor(row, view))
-    if row.source == "person":
+    if row.source in ("person", "form"):
         parts.append(f'<button type="button" class="btn small" data-cmd="hand_back" '
                      f'data-name="{_e(row.name)}"{_gate(view)}>hand back</button>')
     return "".join(parts)
@@ -2041,7 +2137,12 @@ def _params(frame: Telemetry | None, view: View) -> str:
     spinner, with a field to set one value over them (`_over`); then, beneath its range, where
     its value comes from, the conditions that set or draw it, its draw, the numbers of that draw
     a person may change live, and *hand back* (`_whence`). A staged change on the card is led by
-    its kind and says what it leaves the setting with (`_becomes`)."""
+    its kind and says what it leaves the setting with (`_becomes`).
+
+    **A timing card is fixed or drawn** (`ParamRow.switch`; telemetry schema 22; the console
+    settings design's §3): its switch (`_switch`), then its fixed side -- the field above, `set` --
+    and its drawn side (`_drawn_side`), the side open drawn where a draw is in force
+    (`ParamRow.shape`), else fixed; where its value comes from stays above both."""
     if frame is None:
         return _NONE
     if not frame.params:
@@ -2070,18 +2171,28 @@ def _params(frame: Telemetry | None, view: View) -> str:
             isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
         per_trial = _PER_TRIAL.get(row.source)
         if per_trial is not None:
-            shown = f'<span class="pv">{per_trial[0]}</span>' + (
-                _over(row, per_trial[1], view) if settable and row.position is None else "")
+            label = f'<span class="pv">{per_trial[0]}</span>'
+            entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
         elif row.position is not None:
-            shown = f'<span class="pv">{_e(row.position)}</span>'
+            label, entry = f'<span class="pv">{_e(row.position)}</span>', ""
         else:
-            shown = (f'<span class="pv">{_e(_num(row.value))} '
-                     f'<span class="unit">{_e(row.unit)}</span></span>'
-                     + (_field(row, view) if settable else ""))
+            label = (f'<span class="pv">{_e(_num(row.value))} '
+                     f'<span class="unit">{_e(row.unit)}</span></span>')
+            entry = _field(row, view) if settable else ""
+        if row.switch == "drawn":
+            drawn = row.shape is not None
+            shown = (label + _switch(row, view, drawn)
+                     + f'<div class="side fixed" data-side="fixed"{" hidden" if drawn else ""}>'
+                     f"{entry}</div>"
+                     + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
+                     f"{_drawn_side(row, view)}</div>")
+        else:
+            shown = label + entry
         cards.append(
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
             f"{shown}"
-            f'<span class="range">{_range(row)}</span>{_whence(row, view)}{mark}{said}</div>'
+            f'<span class="range">{_range(row)}</span>'
+            f"{_whence(row, view, _beneath(row, frame))}{mark}{said}</div>"
         )
     return "".join(cards)
 
@@ -2817,6 +2928,14 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .param .rng { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .param .rn { display: inline-flex; gap: 3px; align-items: center; }
 .param .rn .field { width: 4.5em; border-radius: 3px; }
+.param .sw { display: inline-flex; gap: 0; }
+.param .sw .seg { border-radius: 0; }
+.param .sw .seg:first-child { border-radius: 4px 0 0 4px; }
+.param .sw .seg:last-child { border-radius: 0 4px 4px 0; }
+.param .sw .seg.on { background: var(--ink); color: var(--bg); }
+.param .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.param .side[hidden], .param .shp[hidden] { display: none; }
+.param .shp .rn .field[data-form="values"], .param .shp .rn .field[data-form="weights"] { width: 9em; }
 .param > .btn { justify-self: start; }
 .field.over { width: 100%; border-radius: 3px; }
 #moments .rv { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px; overflow-wrap: anywhere; }
@@ -3415,6 +3534,13 @@ _SCRIPT = """
   var pressedAt = null;
   var PRESS_MS = 10000;
   var rangeOut = {};
+  // The timing switch (the console settings build; the PI, 2026-11-16, "fixed or drawn"): the
+  // side of each timing card a person opened and the shape chosen on its drawn side, by setting,
+  // kept across the frames that replace the cards until a draw is sent from it; and each card
+  // whose draw is out, as `rangeOut` holds a range's.
+  var sides = {};
+  var shapes = {};
+  var formOut = {};
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -3484,7 +3610,48 @@ _SCRIPT = """
   }
   function rangeEdited() {
     var fields = document.querySelectorAll("#params input[data-number]");
-    return Array.prototype.some.call(fields, rangeChanged);
+    return Array.prototype.some.call(fields, rangeChanged) || formEdited();
+  }
+  // A drawn side's number typed and not yet applied holds the cards as a range's does (the
+  // console settings build), for the same reason: WebKit takes focus off the field as the mouse
+  // goes down on *apply*.
+  function formEdited() {
+    var fields = document.querySelectorAll("#params input[data-form]");
+    return Array.prototype.some.call(fields, function (input) {
+      return input.value !== input.defaultValue;
+    });
+  }
+  function cardOf(name) {
+    var button = document.querySelector('#params [data-switch][data-name="' + CSS.escape(name) + '"]');
+    return button ? button.closest(".param") : null;
+  }
+  function showSide(card, which) {
+    Array.prototype.forEach.call(card.querySelectorAll("[data-side]"), function (side) {
+      side.hidden = side.getAttribute("data-side") !== which;
+    });
+    Array.prototype.forEach.call(card.querySelectorAll("[data-switch]"), function (button) {
+      var on = button.getAttribute("data-switch") === which;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+  function showShape(card, shape) {
+    var select = card.querySelector("select[data-shape]");
+    if (select) { select.value = shape; }
+    Array.prototype.forEach.call(card.querySelectorAll("[data-fields]"), function (group) {
+      group.hidden = group.getAttribute("data-fields") !== shape;
+    });
+  }
+  // After the cards are replaced: each timing card on the side and shape a person chose.
+  function restoreSides() {
+    Object.keys(sides).forEach(function (name) {
+      var card = cardOf(name);
+      if (card) { showSide(card, sides[name]); }
+    });
+    Object.keys(shapes).forEach(function (name) {
+      var card = cardOf(name);
+      if (card) { showShape(card, shapes[name]); }
+    });
   }
   // A number typed and not sent is marked pending, and, while a frame is held because of it,
   // its card says so under the editor: never a silent freeze of the cards (fix round 2).
@@ -3513,7 +3680,7 @@ _SCRIPT = """
   // what the press did.
   function busy() {
     var focused = document.activeElement;
-    return Boolean(focused && focused.matches && focused.matches("#params input")) ||
+    return Boolean(focused && focused.matches && focused.matches("#params input, #params select")) ||
       rangeEdited() || pressing() || Object.keys(timers).length > 0;
   }
   function swap(id, html) {
@@ -3528,6 +3695,7 @@ _SCRIPT = """
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
     if (node) { node.innerHTML = html; }
     if (chosen !== null) { choose(node, chosen); }
+    if (id === "params") { restoreSides(); }
     // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
     applySignIn();
     if (id === "controls") { holdReward(); }
@@ -3542,6 +3710,7 @@ _SCRIPT = """
     if (heldParams !== null && !busy()) {
       el("params").innerHTML = heldParams;
       heldParams = null;
+      restoreSides();
       applySignIn();
     }
     if (heldMoments !== null && !pressing()) {
@@ -4188,6 +4357,56 @@ _SCRIPT = """
       release();
     }, function () { delete rangeOut[key]; });
   }
+  // A person's draw of a timing setting (the console settings build; the PI, 2026-11-16): the
+  // drawn side's shape and its fields, each a number, a list's values and weights numbers between
+  // commas, sent as `form`, staged by the rig until the next trial. A field that holds no number
+  // is not sent, said as a range's is; once sent, a second press is held as a range's is.
+  function sendForm(button, detail) {
+    var key = button.getAttribute("data-name");
+    var card = button.closest(".param");
+    var shape = card.querySelector("select[data-shape]").value;
+    var fields = card.querySelectorAll('[data-fields="' + CSS.escape(shape) + '"] input[data-form]');
+    var command = { kind: "form", name: key, shape: shape };
+    var numbers = {};
+    var bad = null;
+    Array.prototype.forEach.call(fields, function (input) {
+      var field = input.getAttribute("data-form");
+      var raw = input.value.trim();
+      if (field === "values" || field === "weights") {
+        var items = raw.split(/[\\s,]+/).filter(Boolean).map(Number);
+        if (!items.length || items.some(function (item) { return !isFinite(item); })) {
+          bad = bad || field;
+        }
+        command[field] = items;
+        return;
+      }
+      var value = Number(raw);
+      if (raw === "" || !isFinite(value)) { bad = bad || field; }
+      numbers[field] = value;
+    });
+    if (bad !== null) {
+      tell("not sent: " + key + "'s " + bad + " needs a number", "crit");
+      return;
+    }
+    if (Object.keys(numbers).length) { command.numbers = numbers; }
+    if (!clearAllowed(detail, "form/" + key)) { return; }
+    if (formOut[key]) {
+      tell("not sent: the draw of " + key + " is still being sent; wait for its answer", "crit");
+      return;
+    }
+    var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
+    formOut[key] = true;
+    post(command, function (answer) {
+      if (answer.status !== "sent") { return; }
+      Array.prototype.forEach.call(fields, function (input, i) {
+        input.defaultValue = sentText[i];
+      });
+      // Sent: the rig's cards say which side is in force from here.
+      delete sides[key];
+      delete shapes[key];
+      release();
+    }, function () { delete formOut[key]; });
+  }
   function closeNote(note) {
     if (markNo === null) { return; }
     var number = markNo;
@@ -4451,6 +4670,14 @@ _SCRIPT = """
     if (resuming && !resuming.disabled) { post({ kind: "resume_session", session_id: resuming.getAttribute("data-resume") }); return; }
     var returning = e.target.closest("[data-return]");
     if (returning && !returning.disabled) { openReturn(returning.getAttribute("data-return")); return; }
+    var switched = e.target.closest("[data-switch]");
+    if (switched && !switched.disabled) {
+      // A timing card's side, on this page alone: nothing is sent until its value or *apply*.
+      var side = switched.getAttribute("data-switch");
+      sides[switched.getAttribute("data-name")] = side;
+      showSide(switched.closest(".param"), side);
+      return;
+    }
     var button = e.target.closest("[data-cmd]");
     if (button && !button.disabled) {
       var cmd = button.getAttribute("data-cmd");
@@ -4490,6 +4717,7 @@ _SCRIPT = """
         return;
       }
       if (cmd === "range") { sendRange(button, e.detail); return; }
+      if (cmd === "form") { sendForm(button, e.detail); return; }
       // The trainer's panel (the pop-out search build's Task 7): *Move up* or *Move back* confirms
       // the rig's suggestion, naming it, and *Hold* declines it, the whole prompt; *lock at* holds
       // the staircase's setting at its level, as a person's value does; *add* widens the pool by
@@ -4536,6 +4764,10 @@ _SCRIPT = """
   document.addEventListener("change", function (e) {
     if (!e.target.matches) { return; }
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
+    else if (e.target.matches("select[data-shape]")) {
+      shapes[e.target.getAttribute("data-shape")] = e.target.value;
+      showShape(e.target.closest(".param"), e.target.value);
+    }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
     else if (e.target.id === "start-block") {
       picked.block = e.target.value;

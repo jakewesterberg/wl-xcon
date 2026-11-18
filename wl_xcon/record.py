@@ -113,14 +113,20 @@ CONTROLS = "controls.jsonl"
 #: `{"correct", "of"}` -- and `at_hardest`), and a person's hold of one (`declined`: `was` and
 #: `now` the stage it stays in, and the `suggestion` it answers, the suggested row's `change`); a
 #: confirmation is the `next_block` or `back_block` row of `CONTROLS`, naming that `suggestion`.
-#: **Appended only**, after `training`: `STROBED` is the first four by place.
+#: **Since the console settings build (2026-11-17), a person's form** (`form`: a timing setting
+#: switched to drawn on its card, `now` its draw every field, its `shape` beside; XC-513, the ask in
+#: `docs/pending-wl-preproc-amendments.md`), and **the training switch** (`shaping`, which the
+#: build's Task 10 writes; nothing writes it before that). **Appended only**: a reader keys on the
+#: names, and `STROBED` names its kinds.
 KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training", "suggested",
-         "declined")
+         "declined", "form", "shaping")
 
 #: **The kinds that strobe `PARAM_CHANGED`**, once for each row, and so carry its `sequence`, which
-#: joins the n-th such row to the n-th such code (XC-288 §3.4): the first four `KINDS`. A clear,
-#: a switch, a suggestion and a hold strobe nothing.
-STROBED = KINDS[:4]
+#: joins the n-th such row to the n-th such code (XC-288 §3.4), **by name** (it was the first four
+#: `KINDS` by place until `form`, appended after `declined`, strobed too; XC-513): a person's
+#: value, a hand-back, a live range, a revert's rows and a person's form. A clear, a switch, a
+#: suggestion, a hold and the training switch strobe nothing.
+STROBED = ("set", "hand_back", "range", "revert", "form")
 
 #: One row when each run starts and one when it ends (P4d-2b spec §6.3), joined by
 #: `run`: the task, the allocation and their versions, the values and the bounded values
