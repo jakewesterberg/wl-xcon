@@ -1140,3 +1140,98 @@ you only when someone points you at one.
 ## What is deliberately not asked for
 
 Nothing in the trial lines marks a demo, and nothing should: the session is the unit, and its `config.json` says it.
+
+# OPEN — the console settings: forms, scaled sizes, a light's saturation, the training switch (new, 2026-11-16)
+
+Opened 2026-11-16 on the PI's approved design (`docs/superpowers/specs/2026-11-16-console-settings-design.md`, §9: "Before
+anything here ships, it is told the new shapes and accepts them, as with XC-491 and XC-502"), backlog XC-513, **before
+any of these shapes is written**. Four groups, all shapes JSON, all read against our source on 2026-11-17
+(`wl_xcon/record.py`'s `KINDS` and `STROBED`, `taskd.Session._given_by`, `taskd._color_sets` and `_realization`, the trial
+line's `drawn` and the block end's `varied`). Yours to accept, rename or refuse before we write them; until your answer we
+build to these names.
+
+## What changes on our side
+
+**1. A timing setting a person draws or scales, in the console.** A person may now give a setting a draw (a uniform, a
+normal, a non-aging wait, a list, weights) or a scaling of the task's value, where today a person gives a value, or
+changes the numbers of a draw the task declared.
+
+- **`parameter_changes.jsonl` gains kind `form`**, appended after `declined` (`KINDS` is appended only). **It strobes
+  `PARAM_CHANGED`, so it carries a `sequence`** as a `set`, `hand_back`, `range` and `revert` row does; `STROBED` becomes
+  exactly those five by name (today it is the first four of `KINDS` by place, which `form`'s place after `declined` no
+  longer allows). A reader's rule is unchanged: the n-th row of a strobed kind joins the n-th `PARAM_CHANGE`.
+- **`now` is the person's form**, written as the record writes any declared draw (`variation.recorded`), every field,
+  `repeat` included, and for a person's form `repeat` is always `"fresh"`:
+
+  ```json
+  {"class": "NonAging", "fields": {"minimum": 0.75, "mean": 0.9166666666666666, "maximum": 1.25, "repeat": "fresh"}}
+  ```
+
+  **A scaling** (a setting's value as a multiple of another's, for a size) is `{"class": "Scaled", "fields": {"factor":
+  0.3}}`.
+- **`was`** follows the rule every change row's `was` follows (`taskd.Session._given_by`): null where a draw, a staircase,
+  a pool or the conditions gave the setting, since no single value was held; the person's value or earlier form where one
+  stood; otherwise the run's value.
+- **`detail` gains `"shape"`**, one of `non_aging`, `uniform`, `normal`, `list`, `weights` or `scaled`, so a reader can
+  tell the form's kind without reading its class.
+- **A form ends** by a `set` row (a person gives a value), a `hand_back` row (its `was` the form), or `revert` rows (their
+  `was` and `now` forms or values, as a revert's rows say today).
+- **Each trial line's `drawn[name]` is the form row's `change` id**, an integer, exactly as it is for a range changed
+  live (the C3 ask: "the integer `change` id of the live act that put the range in force"). Its `params[name]` is the
+  value drawn, or, for a scaling, the `Scaled` object as written above.
+- **A block end's `varied[name]` entry** is `{"by": "draw", "from": <that id>, "distribution": <the form's `now`>}` for a
+  draw, as C3 wrote it, or **`{"by": "scaled", "from": <id>, "factor": <f>}`** for a scaling, a new `by` beside
+  `condition`, `draw` and `person`.
+- **A non-aging wait's mean, where a person gives one, is derived** in the console from its two ends: shortest + (longest
+  - shortest) / 3, so `0.75` to `1.25` gives the `0.9166666666666666` above (a ratio of 3 between the range and the
+  exponential's scale, `R/τ = 3.0`). A non-aging wait a task declares is written as declared, with the mean the task gave.
+
+**2. A scaled size and its window.** A look's size and an object window's radius may be derived from another setting's
+value; the record gives the result in degrees so a reader needs neither.
+
+- **Each `stimuli[]` entry of a trial line gains `size_deg`**: the look's size as drawn at its place, in degrees. Null for
+  an array (its objects carry theirs) and for a look with no single `size`. (This entry's existing `drawn` is a boolean
+  about its appearance, unrelated to the line's `drawn` object.)
+- **Each `objects[]` entry gains `size_deg` and `window_deg`**: the object's size and its object window's radius, both in
+  degrees, **both keys always written**, `window_deg` null where the array has no object window.
+- **An object window may be declared as a multiple of its object's radius.** Its setting's value is then that multiple, so
+  the pop-out search's `object_window` is `3.0` to start where it was `1.5` degrees; `window_deg` gives the degrees, which
+  is what a reader uses.
+
+**3. A color by set, with a hue, a saturation and two levels.** Where a color set's light is drawn at a hue, a
+saturation and a luminance a person may move.
+
+- **The `ColorSetLight` form gains `"saturation"`**, always written: a number, `1.0` by default, or a setting by reference,
+  beside the form's `color`, `colorset`, `fraction` and `luminance` (the set still by name alone).
+- **Each realization entry gains `"macaque_row": [rX, rY, rZ]`**: the start row's `color_sets[set].realized[]` entries and a
+  trial line's `color_realized[set][]` entries, beside their `luminance_cd_m2`, `desaturation`, `xy`, `xyz` and `drive`.
+  It is the calibration's macaque luminance row (the weights that turn an XYZ into the light's macaque luminance).
+- **Each `color_sets[set]` gains `"design"`**, `{"space": "CAM16-UCS", "gray_lightness": 65.0, "chroma": 29.49}` for a set
+  generated at equal hue steps and null for a set written by hand.
+- **How a reader computes a look's light** (so no light is written on a line):
+  - its chromaticity: `xy = apex + saturation × (realized xy − apex)`, the apex the set's own, the realized `xy` that
+    color's entry in the realization at the line's luminance;
+  - its macaque luminance: `L = fraction × luminance`;
+  - its XYZ: with `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)`.
+
+**4. The training switch.** The trainer's switch for the progression's help, beside the drumming and clear switches.
+
+- **Change kind `shaping`**, appended after `form`, **not strobed** (no `sequence`; your clock fit times it by `at`, as
+  for a `training` or `drum` row): `name` `"shaping"`, `was` and `now` each one of `"on"`, `"frozen"` or `"full"`, and
+  `meaning` null.
+- **Each trial line gains `"shaping"`**, the switch's state for that trial.
+- **`drawn[name]` may be `"full"`**, a new source token beside `task`, `block`, `condition`, `staircase` and `pool`, for
+  a value the task's full version gives.
+- **A run starts `"on"`.** Nothing is added to the start row.
+
+## The ask
+
+1. Accept the names and shapes above, or rename them before we write them.
+2. Say whether your reader needs anything else of a `form` or `shaping` row. Until you read `form` and `shaping`, they are
+   published as written and noted as kinds it does not yet know, as `suggested` and `declined` were.
+
+## What is deliberately not asked for
+
+- The new warning codes: they are values in `warnings.jsonl`'s `code`, not shapes.
+- Sections and limit reasons: the task's declaration, which the record hashes as before.
+- Any timing claim: `form`'s mean and `size_deg` are arithmetic on declared numbers.
