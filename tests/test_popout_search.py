@@ -745,11 +745,12 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     assert start["color_sets"] == {"isohue": {
         "name": "isohue", "colors": {color: list(xy) for color, xy in theirs.colors.items()},
         "apex": list(theirs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
-        "source": theirs.source,
+        "source": theirs.source, "design": None,
         "realized": [{"luminance_cd_m2": 15.0, "desaturation": shown.desaturation,
                       "xy": {color: list(xy) for color, xy in shown.xy.items()},
                       "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
-                      "drive": {color: list(levels) for color, levels in shown.drive.items()}}],
+                      "drive": {color: list(levels) for color, levels in shown.drive.items()},
+                      "macaque_row": list(photometry.macaque_row(SRGB))}],
     }}
 
     restored = resume.read(session.directory, departure=1_700_000_000.0)
@@ -1137,7 +1138,8 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
         "luminance_cd_m2": 12.0, "desaturation": at[12.0].desaturation,
         "xy": {color: list(xy) for color, xy in at[12.0].xy.items()},
         "xyz": {color: list(xyz) for color, xyz in at[12.0].xyz.items()},
-        "drive": {color: list(levels) for color, levels in at[12.0].drive.items()}}]}
+        "drive": {color: list(levels) for color, levels in at[12.0].drive.items()},
+        "macaque_row": list(photometry.macaque_row(SRGB))}]}
     # Each line's light, from the record alone: its luminance's realization times its fraction.
     found = {entry["luminance_cd_m2"]: entry
              for entry in [*start["color_sets"]["isohue"]["realized"], *realized["isohue"]]}
@@ -1168,7 +1170,7 @@ def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_r
     assert [list(each) for each in written] == [["isohue"]]
     (entry,) = written[0]["isohue"]
     assert (sorted(entry), entry["luminance_cd_m2"]) == (
-        ["desaturation", "drive", "luminance_cd_m2", "xy", "xyz"], 12.0)
+        ["desaturation", "drive", "luminance_cd_m2", "macaque_row", "xy", "xyz"], 12.0)
     (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
     defined = start["color_sets"]["isohue"]
     assert "color_realized" not in defined

@@ -56,6 +56,7 @@ from wl_xcon.task import Polar
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 from wl_xcon.web import (
     _CSS,
+    COLOR_APPROXIMATE,
     _SCRIPT,
     _clock_time,
     CONTROLS_AT_THE_BOX,
@@ -4486,3 +4487,77 @@ def test_a_size_card_offers_fixed_and_scaled_and_says_what_each_object_gets():
     assert '<span class="src gives">gives radius 1.5° at 8° out, every object</span>' in window
     assert "data-switch" not in window
     assert 'data-switch="scaled" data-name="disc_size" aria-pressed="false" disabled' in lan
+
+
+#: A color card as the rig makes it (`ParamRow.color`; the console settings design's §6), its
+#: distractors' card: a saturation setting and the distractors' fraction, each with its cd/m².
+_COLOR = {
+    "sets": {"isohue": {"apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "design": None,
+                        "hues": {"green": {"xy": [0.31324, 0.50711], "srgb": "#4A9A3E"},
+                                 "red": {"xy": [0.45955, 0.32918],
+                                         "srgb": "red;background:url(x)"}}}},
+    "set": "isohue", "hue": "green", "approximate": True,
+    "saturation": {"setting": "distractor_saturation", "value": 0.25, "cd_m2": 7.5},
+    "luminance": {"setting": "distractor_fraction", "value": 0.5, "cd_m2": 7.5,
+                  "set_wide": False},
+}
+
+
+def test_the_color_card_offers_set_hue_and_two_levels_and_says_approximate():
+    """The design's §6 (the PI, 2026-11-16: "you select a set, and then you have hue options from
+    the set, then you have salience options for each hue"): the set, a select; its hues, a swatch
+    with its name each, the run's pressed, each sending `color` with its set and hue; then the
+    saturation and the luminance, each typed in its own setting's unit with the light's cd/m²
+    beside it -- the set's luminance setting saying it moves every light of the set, a level the
+    task file writes as a number shown fixed there -- and the caption. A swatch's color is written
+    only where the rig sent a `#rrggbb`. The look is shown in the rig's words, with no field.
+    Greyed away from the box."""
+    target = {**_COLOR, "hue": None, "set": None,
+              "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+              "luminance": {"setting": "color_luminance", "value": 15.0, "cd_m2": 15.0,
+                            "set_wide": True}}
+    rows = (
+        replace(ParamRow.of("distractor_appearance", "appearance", None, None, None, False,
+                            source="run", color=_COLOR),
+                words="Disc: color isohue green at saturation distractor_saturation"),
+        ParamRow.of("target_appearance", "appearance", None, None, None, False, source="pool",
+                    color=target),
+        ParamRow.of("distractor_saturation", "fraction", 0.0, 1.0, 0.25, False),
+        ParamRow.of("distractor_fraction", "fraction", 0.0, 1.0, 0.5, False),
+        ParamRow.of("color_luminance", "cd/m2", 1.0, 30.0, 15.0, False),
+    )
+    cards = _cards(fragments(frame(params=rows), view())["params"])
+    lan = _cards(fragments(frame(params=rows), view(can_write=False))["params"])
+
+    among = cards["distractor_appearance"]
+    assert '<span class="pv">Disc: color isohue green at saturation distractor_saturation</span>' in among
+    assert 'data-param="distractor_appearance"' not in among
+    assert ('<select class="field" data-colorset="distractor_appearance" '
+            'aria-label="distractor_appearance: color set"><option value="isohue" selected>'
+            'isohue</option></select>') in among
+    assert ('<button type="button" class="btn small hue on" data-cmd="color" '
+            'data-name="distractor_appearance" data-colorset="isohue" data-color="green" '
+            'aria-pressed="true"><span class="chip" style="background:#4a9a3e"></span>green'
+            '</button>') in among
+    assert ('data-color="red" aria-pressed="false"><span class="chip none"></span>red</button>'
+            in among)
+    assert "url(x)" not in among
+    assert ('saturation <span class="mono">distractor_saturation</span><input class="field mono" '
+            'data-param="distractor_saturation" inputmode="decimal" value="0.25" '
+            'aria-label="distractor_saturation: saturation"><span class="unit">fraction</span>'
+            ' <span class="unit">· 7.50 cd/m²</span>') in among
+    assert ('luminance <span class="mono">distractor_fraction</span><input class="field mono" '
+            'data-param="distractor_fraction" inputmode="decimal" value="0.5"') in among
+    assert "moves every light of the set" not in among
+    assert COLOR_APPROXIMATE in html.unescape(among)
+    assert COLOR_APPROXIMATE == ("approximate: this screen is not measured; the rig's measured "
+                                 "panel decides what is drawn")
+
+    odd = cards["target_appearance"]
+    assert 'aria-pressed="true"' not in odd
+    assert ('saturation <span class="mono">1.00</span>, fixed in the task file'
+            ' <span class="unit">· 15.00 cd/m²</span>') in odd
+    assert 'data-param="color_luminance"' in odd and "moves every light of the set" in odd
+    assert all(card.count(" disabled") >= 4 for name, card in lan.items()
+               if name in ("distractor_appearance", "target_appearance"))
+    assert "data-colorset" not in cards["distractor_saturation"]

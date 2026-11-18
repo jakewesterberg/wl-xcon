@@ -3751,10 +3751,13 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         # What it gives each object in degrees (schema 22; the console settings plan's Task 6):
         # none before a run, and none for a timing setting.
         None,
+        # A color setting's card (schema 22; the console settings plan's Task 7): none for a
+        # timing setting.
+        None,
     )
     assert by_name["reward_correct"] == (
         "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None, None, None, None,
-        None, None)
+        None, None, None)
     # Each setting's choices, seventh (schema 18, XC-401's fix round, M2): a pair is shown as a
     # position only for a setting whose choices declare one.
     looks = next(p for p in declared if p.name == "target_appearance")

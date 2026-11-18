@@ -1230,8 +1230,10 @@ def render(frame: _link.Telemetry | _link.Idle) -> str:
         # A whole position in the rig's words, eccentricity and direction first, its unit in
         # them (`ParamRow.position`, schema 18; XC-401): the line `wlx console` already has,
         # though it shows none of schema 16's, 17's and 19's additions (XC-387).
+        # And a look or a color in the rig's words (`ParamRow.words`, schema 22; XC-420).
         shown = (
             _printable(row.position) if row.position is not None
+            else _printable(row.words) if row.words is not None
             else _with_unit(_shown(value), unit)
         )
         if row.bounded:
@@ -1563,7 +1565,7 @@ def main(argv: list[str] | None = None) -> int:
         "them), `stop`, `pause`, `resume`, `reward` (a manual reward, "
         "while paused), `schedule` and `cancel` (a scheduled stop), `mark` (a mark's "
         "note), `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, `form`, and `revert` (the run's counts, blocks, settings and draws), and the "
+        "`range`, `form`, `color`, and `revert` (the run's counts, blocks, settings and draws), and the "
         "five only `wlx taskd` acts on, which a `wlx run` session refuses: `open` (open "
         "a session, recording the departure time and the fluid the animal has already "
         "had today, and accepting warnings), `check`, `start` (start a run, "
@@ -1768,7 +1770,7 @@ def main(argv: list[str] | None = None) -> int:
         "settings), `stop` and `pause` (of the run), `resume`, `reward` (a manual "
         "reward, also while the animal's return is awaited), `schedule`, `cancel`, "
         "`mark`, `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, `form`, and `revert`; see `wlx run "
+        "`range`, `form`, `color`, and `revert`; see `wlx run "
         "--link-allow-remote` for the rest of what it exposes",
     )
 

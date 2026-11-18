@@ -731,6 +731,59 @@ def position_words(value: object, choices=()) -> str | None:
     return None
 
 
+#: The longest an appearance's words run (`appearance_words`): a frame is re-encoded at every
+#: trial boundary, and an appearance nests; a display bound, as `link.TEXT_LIMIT` is.
+APPEARANCE_WORDS_LIMIT = 200
+
+
+def appearance_words(value: object) -> str | None:
+    """**A setting's value that is an appearance or a color, or a piece of one, in the rig's words**
+    (XC-420; the console settings design's §6: a color pick is the first console path that puts
+    one among the run's values): what a console shows in its place, made by the rig, so that no
+    console reads a declaration -- telemetry carries the words and a null value
+    (`link.ParamRow.words`, a staged row's `was` and `now`). **A color-set light by its set and
+    hue**, then each level not at full, in the order the light declares them: `isohue blue`,
+    `isohue red at saturation 0.5`, `isohue blue at fraction distractor_fraction, luminance
+    color_luminance`; a gray by its cd/m²; any other
+    declaration by its class and each field not at its default, a setting by its name: `Disc: size
+    disc_size, color isohue blue at luminance color_luminance`. Cut at `APPEARANCE_WORDS_LIMIT`
+    characters. `None` for any other value: a number, a word, a position (`position_words`)."""
+    from wl_xcon.look import Edge, Fill, Outline, Shape
+    from wl_xcon.photometry import Color, ColorSetLight, Contrast, Gray
+    from wl_xcon.task import Appearance
+
+    def said(part: object) -> str:
+        if isinstance(part, P):
+            return part.name
+        if isinstance(part, bool) or part is None:
+            return str(part)
+        if isinstance(part, (int, float)):
+            return f"{part:g}"
+        if isinstance(part, ColorSetLight):
+            levels = [f"{field} {said(getattr(part, field))}"
+                      for field, full in (("fraction", 1.0), ("luminance", None),
+                                          ("saturation", 1.0))
+                      if getattr(part, field) != full]
+            return (f"{part.colorset.name} {part.color}"
+                    + (f" at {', '.join(levels)}" if levels else ""))
+        if isinstance(part, Gray):
+            return f"gray at {said(part.cd_m2)} cd/m²"
+        if is_dataclass(part) and not isinstance(part, type):
+            shown = [f"{spec.name} {said(getattr(part, spec.name))}" for spec in fields(part)
+                     if getattr(part, spec.name) != spec.default]
+            return f"{type(part).__name__}" + (f": {', '.join(shown)}" if shown else "")
+        if isinstance(part, (tuple, list)):
+            return "(" + ", ".join(said(item) for item in part) + ")"
+        return str(part)
+
+    if not isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline)):
+        return None
+    words = said(value)
+    if len(words) > APPEARANCE_WORDS_LIMIT:
+        words = words[:APPEARANCE_WORDS_LIMIT - 1] + "…"
+    return words
+
+
 def _set_label(value: object, choices=(), unit: str = "", direction: bool = False) -> str:
     """A value a condition sets, as the plan's table shows it: **a position eccentricity and
     direction first, its (x, y) beside them** (`position_words`), whether the setting takes a

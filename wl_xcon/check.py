@@ -115,6 +115,7 @@ from wl_xcon.task import (
     is_point,
     limit_reason,
     rule_at,
+    shared_color_choices,
     size_at,
     sized_places,
 )
@@ -238,6 +239,7 @@ def check_task(
         findings
         + _structure_faults(task)
         + _unexplained_limits(task)
+        + _ambiguous_color_choices(task)
         + _meaning_faults(task)
         + _reaction_time_faults(task)
         + _choice_faults(task)
@@ -530,6 +532,30 @@ def _unexplained_limits(task: Task) -> list[Finding]:
             f"{param.name!r} declares {said}{unit}, with no reason: every limit is hard, a value "
             f"past it refused (the PI, 2026-11-16, \"Hard limits only where impossible\"); give "
             f"its reason in one line (`why`), or take it away"),
+            blocking=False, accepted_in=SESSION_KINDS, subjects=(f"setting {param.name!r}",)))
+    return findings
+
+
+#: **Two of a setting's choices showing one set's one hue** (the console settings design's §6): a
+#: console's pick names a set and a hue (`link.SetColor`), so it could not say which of the two it
+#: is. A warning at load, accepted in every kind: the setting's other choices are still picked
+#: by set and hue, these two only by code (`task.color_choices` leaves their key out).
+AMBIGUOUS_COLOR_CHOICE = "ambiguous-color-choice"
+
+
+def _ambiguous_color_choices(task: Task) -> list[Finding]:
+    """`AMBIGUOUS_COLOR_CHOICE` for each setting whose choices share a set and hue
+    (`task.shared_color_choices`), naming each key."""
+    findings: list[Finding] = []
+    for param in task.params:
+        shared = shared_color_choices(param)
+        if not shared:
+            continue
+        said = "; ".join(f"{colorset}'s {hue}" for colorset, hue in shared)
+        findings.append(Finding(AMBIGUOUS_COLOR_CHOICE, (
+            f"{param.name!r} offers two or more choices in {said}, and a console picks a color by "
+            f"its set and hue, so it cannot say which of them it means: those are left off its "
+            f"card, the rest picked as ever; give each choice its own hue, or keep one"),
             blocking=False, accepted_in=SESSION_KINDS, subjects=(f"setting {param.name!r}",)))
     return findings
 
@@ -2805,6 +2831,8 @@ def _alike(left: object, right: object, one: bool) -> bool | None:
         if not (isinstance(left, _Made) and isinstance(right, _Made)) or (
                 left.kind is not right.kind):
             return False
+        if left.kind is ColorSetLight:
+            return _lights_alike(dict(left.parts), dict(right.parts), one)
         return _every(_alike(mine, yours, one)
                       for (_, mine), (_, yours) in zip(left.parts, right.parts))
     if isinstance(left, _Seq) or isinstance(right, _Seq):
@@ -2816,6 +2844,21 @@ def _alike(left: object, right: object, one: bool) -> bool | None:
         return bool(left == right)
     except Exception:  # noqa: BLE001 -- a value's own equality is the task's code
         return None
+
+
+def _lights_alike(left: dict, right: dict, one: bool) -> bool | None:
+    """**Whether two color-set lights can be one light** (`_alike`), each read at its own
+    saturation (the console settings design's §6; the plan's Review Focus 5): **a light at
+    saturation 0 is its set's apex, whatever its hue**, so two lights of one set, fraction and
+    luminance whose saturations can both be 0 are alike though their hues differ -- the odd one
+    is odd no longer -- and otherwise alike only where their hues and saturations can be. Every
+    other field as `_alike` reads a declaration's."""
+    rest = _every(_alike(left[field], right[field], one)
+                  for field in left if field not in ("color", "saturation"))
+    gray = _every((_alike(left["saturation"], 0.0, one), _alike(right["saturation"], 0.0, one)))
+    hued = _every((_alike(left["color"], right["color"], one),
+                   _alike(left["saturation"], right["saturation"], one)))
+    return _every((rest, _some((hued, gray))))
 
 
 def _spans(form: object) -> list[tuple[float, float]] | None:
@@ -4624,29 +4667,43 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
     by how much"). A set whose apex the panel cannot show at all is refused where its lights are
     checked (`unrealizable-color`). **On a calibration measured without spectra**, macaque
     luminance is wl-style's model of the sRGB primaries, as on the default: a warning in every
-    kind, as cone colors have there (`cone-colors-without-spectra`)."""
+    kind, as cone colors have there (`cone-colors-without-spectra`).
+
+    **Each light is read at its own saturation** (`ColorSetLight.saturation`; the console settings
+    design's §6): a light whose every saturation is 0 is the set's gray, its apex, whatever its hue,
+    so no chroma of the set is drawn for it and the set's loss of chroma at its luminance is no
+    loss of what it shows -- it adds no `color-set-desaturated` (the pop-out revision's seam, defect
+    1: a fixation point at saturation 0). Its luminance is still held through the set's macaque
+    model, so it is named among the lights `color-set-without-spectra` names."""
     sets: list[tuple] = []
     for what, color in _colors(trial, params):
         if not isinstance(color, ColorSetLight):
             continue
         try:
-            at = ([color.colorset.luminance_cd_m2] if color.luminance is None
+            gray = all(v == 0.0 for v in _reach(color.saturation, params))
+        except (_Unbounded, _Unreal):
+            gray = False  # refused where its fields are checked (`_block_faults`)
+        try:
+            at = ([] if gray else [color.colorset.luminance_cd_m2] if color.luminance is None
                   else _reach(color.luminance, params))
         except (_Unbounded, _Unreal):
             at = []  # refused where its fields are checked (`_block_faults`)
-        named = ([color.luminance.name] if isinstance(color.luminance, P) else [])
-        for colorset, whats, values, names in sets:
+        named = ([color.luminance.name] if isinstance(color.luminance, P) and not gray else [])
+        for colorset, whats, values, names, chroma in sets:
             if colorset == color.colorset:
                 if what not in whats:
                     whats.append(what)
                 values += [v for v in at if v not in values]
                 names += [n for n in named if n not in names]
+                chroma.append(not gray)
                 break
         else:
-            sets.append((color.colorset, [what], list(at), named))
+            sets.append((color.colorset, [what], list(at), named, [not gray]))
     findings: list[Finding] = []
     name = panel.id or panel.measured_on
-    for colorset, whats, values, names in sets:
+    for colorset, whats, values, names, chroma in sets:
+        if not any(chroma):
+            continue  # every light of it the set's gray: no chroma of it drawn
         ranged = [float(v) for v in values if _is_number(v) and v > 0.0]
         if names and ranged and len(set(ranged)) > 1:
             findings += _desaturated_range(colorset, panel, sorted(set(ranged)), names, whats)
@@ -4672,7 +4729,7 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
             f"hold their macaque luminance (L + M at L:M 1, CIE 2006 2°) through "
             f"{MACAQUE_WITHOUT_SPECTRA}, whose fit to this panel is unknown: they are equal in "
             f"macaque luminance only nominally; the lights it names: "
-            f"{'; '.join(what for _, whats, _, _ in sets for what in whats)}"),
+            f"{'; '.join(what for _, whats, _, _, _ in sets for what in whats)}"),
             blocking=False, accepted_in=SESSION_KINDS))
     return findings
 
@@ -5096,8 +5153,12 @@ def _lights(color, params: dict[str, Param]) -> list:
         # Its luminance as each value it can take, as its fraction (the pop-out search build's
         # fix round): the panel's gamut is convex, so both ends of each range are enough.
         luminances = [None] if color.luminance is None else _reach(color.luminance, params)
-        return [ColorSetLight(color.colorset, color.color, fraction, luminance)
-                for fraction in _reach(color.fraction, params) for luminance in luminances]
+        # And its saturation (the console settings design's §6), each end: every saturation of a
+        # realizable set is realizable (`photometry.ColorSetLight`), so this reads what the panel
+        # is asked for, never a light it could not show that its ends could.
+        return [ColorSetLight(color.colorset, color.color, fraction, luminance, saturation)
+                for fraction in _reach(color.fraction, params) for luminance in luminances
+                for saturation in _reach(color.saturation, params)]
     return [color]
 
 
@@ -5879,6 +5940,12 @@ def _block_faults(trial: Trial) -> list[Finding]:
                 kind(f"{name}.luminance", part.luminance, _is_number, "a number")
                 first([(v, f"{said}: a color set's luminance is a number of cd/m² above 0")
                        for v, said in values(part, "luminance")], lambda v: v <= 0.0)
+            # Its saturation, a fraction of the way from the set's apex to its color, 0 to 1 (the
+            # console settings design's §6): hard at both ends, as a fraction is.
+            kind(f"{name}.saturation", part.saturation, _is_number, "a number")
+            first([(v, f"{said}: a saturation is a fraction of the way from the set's apex, "
+                    f"0 to 1") for v, said in values(part, "saturation")],
+                  lambda v: not 0.0 <= v <= 1.0)
         if isinstance(part, xyY):
             for attr in ("x", "y", "Y"):
                 # Bounded here; whether the panel makes each value is `_color_faults`' test.

@@ -146,9 +146,9 @@ class Param:
     #: **The value a run starts with when nobody gives one** (P4d-2b spec §6.2:
     #: "Starting values are the task's own"; S8 §3.4's *task* layer, under what a console
     #: or `wlx run --set` gives): a number inside the parameter's own declared range.
-    #: `__post_init__` refuses any other as the task is built: a starting appearance is
-    #: not carried until telemetry publishes one (XC-420; the record writes one since REC-27),
-    #: and a start outside `[low, high]` would run under `wlx run`, which takes no
+    #: `__post_init__` refuses any other as the task is built: a starting appearance is not
+    #: taken yet, though telemetry carries one as its words since XC-420 closed (the console
+    #: settings build) and the record writes one since REC-27 (XC-517), and a start outside `[low, high]` would run under `wlx run`, which takes no
     #: pre-flight (XC-159; the b3a-2 final review, m2). A bound past a float's range is refused
     #: as the setting is built, with a start or without (XC-423); any other bound that is not a
     #: real number is left to
@@ -192,8 +192,8 @@ class Param:
         ):
             raise ValueError(
                 f"parameter {self.name!r}: a task's starting value is a number, and "
-                f"{start!r} is not a finite one; a starting appearance is not carried "
-                f"until telemetry publishes one (XC-420)"
+                f"{start!r} is not a finite one; a starting appearance is not taken yet "
+                f"(XC-517)"
             )
         if start is None:
             return
@@ -2753,8 +2753,55 @@ def _set_color(look: object) -> "str | None":
     """**The name of a look's color in its color set** (`photometry.ColorSetLight.color`): the
     look's own where it is a color-set light, or its `color`'s where that is one (a `Disc`'s, a
     `Square`'s); else `None`. For a pool's names (`Pool.named`)."""
+    color = set_light(look)
+    return None if color is None else color.color
+
+
+def set_light(look: object) -> "ColorSetLight | None":
+    """**The color-set light a look shows** (`photometry.ColorSetLight`): the look itself where it
+    is one, or its `color` where that is one (a `Disc`'s, a `Square`'s); else `None`."""
     color = look if isinstance(look, ColorSetLight) else getattr(look, "color", None)
-    return color.color if isinstance(color, ColorSetLight) else None
+    return color if isinstance(color, ColorSetLight) else None
+
+
+def color_choices(param: object) -> "dict[tuple[str, str], object] | None":
+    """**A setting's choices by the set and the hue of their light** (the console settings design's
+    §6: "you select a set, and then you have hue options from the set"): each choice by `(set
+    name, color name)` of the color-set light it shows (`set_light`: a look's `color`, or the
+    choice itself), in the order declared -- what a console's pick names (`link.SetColor`), mapped
+    back to the one declared choice it is (`taskd.Session._color`). **`None` unless every choice
+    shows one**, and for a setting with no choices. **A key two choices share is left out**, since
+    a pick naming it could be either (the load warns, `ambiguous-color-choice`); `None` where that
+    leaves none. At load or between trials, never in a frame."""
+    choices = getattr(param, "choices", ())
+    if not choices:
+        return None
+    found: dict[tuple[str, str], object] = {}
+    shared: set[tuple[str, str]] = set()
+    for choice in choices:
+        light = set_light(choice)
+        if light is None:
+            return None
+        key = (light.colorset.name, light.color)
+        if key in found:
+            shared.add(key)
+        else:
+            found[key] = choice
+    for key in shared:
+        del found[key]
+    return found or None
+
+
+def shared_color_choices(param: object) -> "list[tuple[str, str]]":
+    """**The `(set, hue)` keys two or more of a setting's choices share** (`color_choices` leaves
+    them out), in the order first met; empty unless every choice shows a color-set light. What
+    the load warns of, `ambiguous-color-choice`."""
+    choices = getattr(param, "choices", ())
+    lights = [set_light(choice) for choice in choices]
+    if not choices or any(light is None for light in lights):
+        return []
+    keys = [(light.colorset.name, light.color) for light in lights]
+    return list(dict.fromkeys(key for key in keys if keys.count(key) > 1))
 
 
 @dataclass(frozen=True, slots=True)

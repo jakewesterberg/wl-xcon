@@ -329,14 +329,15 @@ def test_a_runs_start_row_defines_each_set_as_written_and_as_this_panel_draws_it
         return {"luminance_cd_m2": shown.luminance, "desaturation": shown.desaturation,
                 "xy": {name: list(xy) for name, xy in shown.xy.items()},
                 "xyz": {name: list(xyz) for name, xyz in shown.xyz.items()},
-                "drive": {name: list(levels) for name, levels in shown.drive.items()}}
+                "drive": {name: list(levels) for name, levels in shown.drive.items()},
+                "macaque_row": list(photometry.macaque_row(panel))}
 
     defined = _color_sets(_task(_four(cs)), panel, {})
 
     assert defined == {"isohue": {
         "name": "isohue", "colors": {name: list(xy) for name, xy in cs.colors.items()},
         "apex": list(cs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
-        "source": cs.source, "realized": [realization(shown)],
+        "source": cs.source, "design": None, "realized": [realization(shown)],
     }}
     assert defined["isohue"]["realized"][0]["xy"]["green"] != defined["isohue"]["colors"]["green"]
     dimmer = _trial({name: photometry.ColorSetLight(cs, name, luminance=P("bright"))
@@ -403,3 +404,92 @@ def test_a_luminance_range_that_desaturates_the_set_is_a_warning_saying_which_pa
     (every,) = [f for f in check(always, calibration=SRGB) if f.code == "color-set-desaturated"]
     assert "at any luminance setting 'bright' allows, 40 to 50 cd/m²" in every.detail
 
+
+
+# --- A light's saturation (the console settings design's §6) ----------------------------------
+
+
+def _xy(xyz) -> tuple[float, float]:
+    X, Y, Z = xyz
+    return (X / (X + Y + Z), Y / (X + Y + Z))
+
+
+def test_saturation_moves_a_light_toward_the_apex_holding_its_macaque_luminance():
+    """The design's §6 (the PI, 2026-11-16: a saturation level, "gray to full, luminance held"): a
+    light at saturation 0 is its set's apex, at 0.5 halfway from the apex to its color as the set is
+    realized, at 1 that color; at each its macaque luminance is its fraction of the set's, within
+    1e-9, on the standard and on a panel that desaturates the set. The screen binds a saturation
+    setting as it binds a fraction."""
+    from wl_xcon.screen import _Lights
+
+    cs = colorset()
+    for panel in (SRGB, measured(green=NARROW_GREEN)):
+        shown = photometry.realize(cs, panel)
+        (ax, ay), (rx, ry) = cs.apex, shown.xy["red"]
+        for s, xy in ((0.0, cs.apex), (0.5, ((ax + rx) / 2, (ay + ry) / 2)), (1.0, (rx, ry))):
+            light = photometry.ColorSetLight(cs, "red", fraction=0.8, saturation=s)
+            xyz = photometry.colorset_xyz(light, panel)
+            assert _xy(xyz) == pytest.approx(xy, abs=1e-9), (panel.id, s)
+            assert photometry.macaque_cd_m2(xyz, panel) == pytest.approx(0.8 * 15.0, abs=1e-9)
+    lights = _Lights(values={"pale": 0.5}, calibration=SRGB, background=None)
+    assert lights.xyz(photometry.ColorSetLight(cs, "red", saturation=P("pale"))) == pytest.approx(
+        photometry.colorset_xyz(photometry.ColorSetLight(cs, "red", saturation=0.5), SRGB),
+        rel=1e-12)
+    with pytest.raises(ValueError, match="0 to 1"):
+        photometry.colorset_xyz(photometry.ColorSetLight(cs, "red", saturation=1.5), SRGB)
+
+
+def test_every_saturation_of_a_realizable_set_is_realizable():
+    """A line in xy is a line in a light's equal-luminance plane, which meets the gamut in a convex
+    set holding both its ends, the apex and the realized color: so on the standard and on a narrow
+    test panel, at luminances the set is shown at as written and desaturated, every saturation on a
+    grid from 0 to 1 is a light the panel makes, none clipped, each where its saturation puts it."""
+    cs = colorset()
+    for panel, luminances in ((SRGB, (5.0, 15.0, 30.0)), (measured(green=NARROW_GREEN), (15.0,))):
+        for luminance in luminances:
+            assert photometry.unrealizable(
+                photometry.ColorSetLight(cs, "green", luminance=luminance), panel) is None
+            shown = photometry.realize(cs, panel, luminance)
+            (ax, ay) = cs.apex
+            for color in COLORS:
+                rx, ry = shown.xy[color]
+                for step in range(21):
+                    s = step / 20
+                    light = photometry.ColorSetLight(cs, color, luminance=luminance, saturation=s)
+                    assert photometry.unrealizable(light, panel) is None, (
+                        panel.id, luminance, color, step)
+                    assert _xy(photometry.colorset_xyz(light, panel)) == pytest.approx(
+                        (ax + s * (rx - ax), ay + s * (ry - ay)), abs=1e-9)
+
+
+def test_a_swatch_is_the_light_as_the_srgb_standard_shows_it():
+    """`photometry.srgb_hex`: the standard's white at its 80 cd/m² is `#ffffff`, black `#000000`,
+    wl-style's four previews and its gray read back as themselves, and a light past the gamut is
+    clipped to a color the page can show."""
+    assert photometry.srgb_hex(photometry.to_xyz(xyY(*D65, 80.0))) == "#ffffff"
+    assert photometry.srgb_hex((0.0, 0.0, 0.0)) == "#000000"
+    for hex_ in (*PREVIEWS.values(), GRAY):
+        assert photometry.srgb_hex(_srgb_light(hex_)) == hex_
+    bright = photometry.srgb_hex(photometry.to_xyz(xyY(0.15, 0.06, 500.0)))
+    assert len(bright) == 7 and bright.startswith("#")
+
+
+def test_a_light_at_saturation_zero_adds_no_desaturation_warning():
+    """The pop-out revision's seam, defect 1: a light is read at its own saturation. Beside the
+    four colors at 15 cd/m², a fixation light at saturation 0 drawn at a luminance setting of 1 to
+    30 cd/m² -- where the standard cannot show the set as written above about 26 -- is the set's
+    gray whatever its hue, so it adds no `color-set-desaturated`; at saturation 1 the same light
+    is warned for it."""
+    cs = colorset()
+    bright = Param("bright", unit="cd/m2", low=1.0, high=30.0, start=15.0)
+
+    def warned(saturation: float) -> list:
+        lights = {name: photometry.ColorSetLight(cs, name) for name in COLORS[:3]}
+        lights["fix"] = photometry.ColorSetLight(cs, "green", luminance=P("bright"),
+                                                 saturation=saturation)
+        return [f for f in check(_trial(lights, params=[bright]), calibration=SRGB)
+                if f.code == "color-set-desaturated"]
+
+    assert warned(0.0) == []
+    (pale,) = warned(1.0)
+    assert "'bright'" in pale.detail

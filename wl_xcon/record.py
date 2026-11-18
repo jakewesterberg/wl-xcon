@@ -253,9 +253,13 @@ def _written(value: object) -> object:
     (`photometry.ColorSetLight`, the pop-out search's colors) **names its set by the set's name
     alone** (`canonical`'s `sets_by_name`; the pop-out search build's final fixes, 2026-11-07, told
     to wl-preproc before it was written): `{"class": "ColorSetLight", "fields": {"color": "blue",
-    "colorset": "isohue", "fraction": 1.0}}`, the set itself -- its colors, apex, held luminance and
-    source, and how the rig drew it -- defined once in each run's start row (`color_sets`), where
-    written whole it rode every trial line once per look, about 3.9 KB a line.
+    "colorset": "isohue", "fraction": 1.0, "luminance": null, "saturation": 1.0}}` -- **its
+    `saturation` always written** (the console settings build, told to wl-preproc 2026-11-17: a
+    number, or a setting by reference), so a reader computes its light from the realization
+    (`photometry.colorset_xyz`'s formula) -- the set itself -- its colors, apex, held luminance,
+    source and `design`, and how the rig drew it, each realization with its calibration's
+    `macaque_row` -- defined once in each run's start row (`color_sets`), where written whole it
+    rode every trial line once per look, about 3.9 KB a line.
 
     **A draw** (`task.Distribution`: a task's, a block's or a condition's own range) **is written
     the same way, every field** (engine build C3's call 12; the controller's ruling 2 of

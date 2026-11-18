@@ -2117,6 +2117,95 @@ def _profile(row) -> str:
         f'<text class="ax" x="{_PROFILE_LEFT}" y="141">{_PROFILE_SAID}</text></svg>')
 
 
+#: **What a color card says of its swatches** (the console settings design's §6: "the swatches are
+#: approximate on any panel not measured, and the page says so"), word for word.
+COLOR_APPROXIMATE = (
+    "approximate: this screen is not measured; the rig's measured panel decides what is drawn")
+
+#: A swatch's color as the page may write it into a style: `#` and six hex digits, nothing else.
+_HEX = frozenset("0123456789abcdef")
+
+
+def _swatch(hex_: object) -> str:
+    """A swatch's `#rrggbb` as the rig sent it (`photometry.srgb_hex`), or `""` where it is not one,
+    so nothing but a color ever reaches the style attribute."""
+    if (isinstance(hex_, str) and len(hex_) == 7 and hex_[0] == "#"
+            and set(hex_[1:].lower()) <= _HEX):
+        return hex_.lower()
+    return ""
+
+
+def _color_level(said: str, level: object, frame, view: View, note: str = "") -> str:
+    """**One of a color card's two levels** (`ParamRow.color`'s `saturation` or `luminance`): typed in
+    its setting's own unit, as that setting's card types it (`set`, the setting's name), the cd/m²
+    of the light beside it; or, where the task file writes a number, shown as fixed there."""
+    level = level if isinstance(level, dict) else {}
+    setting, value, cd_m2 = level.get("setting"), level.get("value"), level.get("cd_m2")
+    lit = (f' <span class="unit">· {_e(_num(cd_m2))} cd/m²</span>'
+           if isinstance(cd_m2, (int, float)) and not isinstance(cd_m2, bool) else "")
+    if not isinstance(setting, str) or not setting:
+        shown = _num(value) if isinstance(value, (int, float)) else "–"
+        return (f'<span class="rn lvl">{_e(said)} <span class="mono">{_e(shown)}</span>'
+                f'{" cd/m²" if said == "luminance" else ""}, fixed in the task file{lit}</span>')
+    row = next((other for other in getattr(frame, "params", ()) if other.name == setting), None)
+    unit = row.unit if row is not None else ""
+    typed = "" if not isinstance(value, (int, float)) or isinstance(value, bool) else f"{value:g}"
+    return (f'<label class="rn lvl">{_e(said)} <span class="mono">{_e(setting)}</span>'
+            f'<input class="field mono" data-param="{_e(setting)}" inputmode="decimal" '
+            f'value="{_e(typed)}" aria-label="{_e(setting)}: {_e(said)}"{_gate(view)}>'
+            f'<span class="unit">{_e(unit)}</span>{lit}{note}</label>')
+
+
+def _color_card(row, frame, view: View) -> str:
+    """**A color setting's card** (`ParamRow.color`; the console settings design's §6; the PI,
+    2026-11-16: "you select a set, and then you have hue options from the set, then you have
+    salience options for each hue"), three steps: **the set** (a select of the sets its choices
+    show, the run's value's chosen), **the hue** (a swatch with its name for each hue the set
+    offers, the run's value's pressed; pressing one sends `color`, `link.SetColor`, staged until
+    the next trial), and **two levels** (`_color_level`): its saturation, gray to full, its luminance
+    held, and its luminance, its saturation held -- the latter the light's fraction setting, or its
+    set's luminance setting, which moves every light of the set that reads it. Then the caption:
+    `COLOR_APPROXIMATE`. Each swatch's color is the rig's (`photometry.srgb_hex`), written only
+    where it is a `#rrggbb`. Greyed away from the box. `""` where the rig sent none."""
+    color = row.color
+    if not isinstance(color, dict) or not isinstance(color.get("sets"), dict) or not color["sets"]:
+        return ""
+    name, off = _e(row.name), _gate(view)
+    sets = color["sets"]
+    chosen = color.get("set") if color.get("set") in sets else next(iter(sets))
+    options = "".join(
+        f'<option value="{_e(named)}"{" selected" if named == chosen else ""}>{_e(named)}</option>'
+        for named in sets)
+    groups = []
+    for named, entry in sets.items():
+        hues = entry.get("hues") if isinstance(entry, dict) else None
+        buttons = []
+        for hue, shown in (hues or {}).items():
+            hex_ = _swatch((shown or {}).get("srgb"))
+            on = named == color.get("set") and hue == color.get("hue")
+            chip = (f'<span class="chip" style="background:{hex_}"></span>' if hex_
+                    else '<span class="chip none"></span>')
+            buttons.append(
+                f'<button type="button" class="btn small hue{" on" if on else ""}" '
+                f'data-cmd="color" data-name="{name}" data-colorset="{_e(named)}" '
+                f'data-color="{_e(hue)}" aria-pressed="{"true" if on else "false"}"{off}>'
+                f"{chip}{_e(hue)}</button>")
+        groups.append(f'<div class="hues" data-hues="{_e(named)}" data-name="{name}"'
+                      f'{"" if named == chosen else " hidden"}>{"".join(buttons)}</div>')
+    luminance = color.get("luminance") if isinstance(color.get("luminance"), dict) else {}
+    # The light's set's luminance moves every light of the set that reads it, not this one alone
+    # (the design's §6, as the card says).
+    every = (' <span class="unit">· moves every light of the set</span>'
+             if luminance.get("setting") and luminance.get("set_wide") is True else "")
+    return (f'<div class="clr" data-color="{name}">'
+            f'<label class="rn">set <select class="field" data-colorset="{name}" '
+            f'aria-label="{name}: color set"{off}>{options}</select></label>'
+            f'{"".join(groups)}'
+            f'<div class="lvls">{_color_level("saturation", color.get("saturation"), frame, view)}'
+            f'{_color_level("luminance", luminance, frame, view, every)}</div>'
+            f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span></div>')
+
+
 def _beneath(row, frame) -> str:
     """**What a person's draw overrides**, as its card says it (the console settings design's §3:
     "the card names what it overrides, as `_whence` does"): the open block's staircase where it
@@ -2276,6 +2365,10 @@ def _params(frame: Telemetry | None, view: View) -> str:
             entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
         elif row.position is not None:
             label, entry = f'<span class="pv">{_e(row.position)}</span>', ""
+        elif row.words is not None:
+            # An appearance or a color in the rig's words (`ParamRow.words`; XC-420), no field:
+            # a color setting's is picked on its color card, below.
+            label, entry = f'<span class="pv">{_e(row.words)}</span>', ""
         else:
             label = (f'<span class="pv">{_e(_num(row.value))} '
                      f'<span class="unit">{_e(row.unit)}</span></span>')
@@ -2293,6 +2386,9 @@ def _params(frame: Telemetry | None, view: View) -> str:
                      f"{entry}</div>"
                      + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
                      f"{_scaled_side(row, view)}</div>")
+        elif row.color is not None:
+            # A color setting: its set, its hues as swatches, its two levels (the design's §6).
+            shown = label + _color_card(row, frame, view)
         else:
             shown = label + entry
         if row.gives is not None:
@@ -3054,6 +3150,15 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .param .prof .ax { fill: var(--muted); font: 8px sans-serif; }
 .param .shp .rn .field[data-form="values"], .param .shp .rn .field[data-form="weights"] { width: 9em; }
 .param > .btn { justify-self: start; }
+.param .clr { display: grid; gap: 4px; }
+.param .clr .hues { display: flex; flex-wrap: wrap; gap: 4px; }
+.param .clr .hues[hidden] { display: none; }
+.param .clr .hue { display: inline-flex; gap: 4px; align-items: center; }
+.param .clr .hue.on { background: var(--ink); color: var(--bg); }
+.param .clr .chip { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); }
+.param .clr .chip.none { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--rule) 3px, var(--rule) 4px); }
+.param .clr .lvls { display: grid; gap: 4px; }
+.param .clr .lvl .field { width: 4.5em; border-radius: 3px; }
 .field.over { width: 100%; border-radius: 3px; }
 #moments .rv { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px; overflow-wrap: anywhere; }
 .ev.ctl .kind { color: var(--accent); }
@@ -3658,6 +3763,9 @@ _SCRIPT = """
   var sides = {};
   var shapes = {};
   var formOut = {};
+  // A color card's set a person chose to see the hues of (the design's §6), by setting, kept
+  // across the frames that replace the cards until a hue of it is picked.
+  var colorSets = {};
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -3768,6 +3876,17 @@ _SCRIPT = """
     Object.keys(shapes).forEach(function (name) {
       var card = cardOf(name);
       if (card) { showShape(card, shapes[name]); }
+    });
+    Object.keys(colorSets).forEach(function (name) {
+      var select = document.querySelector('#params select[data-colorset="' + CSS.escape(name) + '"]');
+      if (select) { showHues(select, colorSets[name]); }
+    });
+  }
+  function showHues(select, named) {
+    select.value = named;
+    var card = select.closest(".clr");
+    Array.prototype.forEach.call(card.querySelectorAll("[data-hues]"), function (group) {
+      group.hidden = group.getAttribute("data-hues") !== named;
     });
   }
   // A number typed and not sent is marked pending, and, while a frame is held because of it,
@@ -4837,6 +4956,17 @@ _SCRIPT = """
       }
       if (cmd === "range") { sendRange(button, e.detail); return; }
       if (cmd === "form") { sendForm(button, e.detail); return; }
+      // A color setting's hue picked by its set (the console settings build; the design's §6):
+      // the set and the hue its swatch names, staged by the rig until the next trial. A double
+      // click is one pick, as a clear's is.
+      if (cmd === "color") {
+        var hueOf = button.getAttribute("data-name");
+        if (!clearAllowed(e.detail, "color/" + hueOf)) { return; }
+        post({ kind: "color", name: hueOf, colorset: button.getAttribute("data-colorset"),
+               color: button.getAttribute("data-color") });
+        delete colorSets[hueOf];
+        return;
+      }
       // The trainer's panel (the pop-out search build's Task 7): *Move up* or *Move back* confirms
       // the rig's suggestion, naming it, and *Hold* declines it, the whole prompt; *lock at* holds
       // the staircase's setting at its level, as a person's value does; *add* widens the pool by
@@ -4886,6 +5016,10 @@ _SCRIPT = """
     else if (e.target.matches("select[data-shape]")) {
       shapes[e.target.getAttribute("data-shape")] = e.target.value;
       showShape(e.target.closest(".param"), e.target.value);
+    }
+    else if (e.target.matches("select[data-colorset]")) {
+      colorSets[e.target.getAttribute("data-colorset")] = e.target.value;
+      showHues(e.target, e.target.value);
     }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
     else if (e.target.id === "start-block") {

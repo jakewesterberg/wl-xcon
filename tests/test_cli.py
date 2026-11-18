@@ -2467,6 +2467,18 @@ def test_console_shows_a_setting_holding_a_position_eccentricity_and_direction_f
                                "8° at 45° · (x, y) (5.675, 5.675) by jake") for line in rendered)
 
 
+def test_console_shows_a_setting_holding_a_look_in_the_rigs_words():
+    """XC-420 closed: a setting whose value is a look travels as the rig's words, `value` null
+    (`ParamRow.words`), and `wlx console`'s parameter line prints the words, never *unset*."""
+    rendered = render(_telemetry(params=(
+        ParamRow("distractor_appearance", "appearance", None, None, None, False,
+                 words="Disc: color isohue red"),),
+    )).splitlines()
+
+    assert ("  param: distractor_appearance Disc: color isohue red (no declared range)"
+            in rendered)
+
+
 def test_console_shows_a_staged_value_that_is_no_number_or_word_as_written():
     """XC-401's second fix round: a staged value that is neither a number nor a word -- a pair a
     setting not declared a position holds, arriving as a list -- is printed as written, where

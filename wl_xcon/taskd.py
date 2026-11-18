@@ -68,7 +68,9 @@ from wl_xcon.encode import (
 from wl_xcon.findings import SESSION_KINDS, kind_named
 from wl_xcon.geometry import DISPARITY_CONVENTION, Geometry, shown_direction
 from wl_xcon.levels import Levels
-from wl_xcon.photometry import Calibration, cone_record, realized
+from wl_xcon.photometry import (
+    SRGB, Calibration, ColorSetLight, colorset_xyz, cone_record, macaque_row, realized, srgb_hex,
+)
 from wl_xcon.record import XCON_DIRNAME, SessionRecord, _local, welfare_note
 from wl_xcon.record import unwritable as record_unwritable
 from wl_xcon.scheduler import (
@@ -95,8 +97,8 @@ from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, ObjectWindows, Outcome, P, Param,
     Plan, SaccadeTo, Scaled, Show, Staircase,
-    Task, Trial, actions_of, at_hardest, limit_reason, position_of, size_at, size_settings,
-    sized_places, staircase_verdict,
+    Task, Trial, actions_of, at_hardest, color_choices, limit_reason, position_of, set_light,
+    size_at, size_settings, sized_places, staircase_verdict,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
@@ -245,11 +247,14 @@ def _luminances(lights: list, values: dict) -> dict[str, list[float]]:
     return found
 
 
-def _realization(shown) -> dict:
+def _realization(shown, row) -> dict:
     """One realization of a color set (`photometry.Realized`) as the record writes it: the
     luminance it is at, each color's chromaticity as shown, the share of chroma every color gave
     up together (`desaturation`), each color's light at full in CIE XYZ, cd/m² (`xyz`), and its
-    output levels, red, green and blue (`drive`)."""
+    output levels, red, green and blue (`drive`); and **the calibration's macaque luminance row**
+    (`macaque_row`, `row`; the console settings build, told to wl-preproc 2026-11-17), the weights
+    that turn an XYZ into its macaque luminance, so a reader computes any light's XYZ at its
+    saturation and fraction from the record alone (`photometry.colorset_xyz`'s formula)."""
     return {
         "luminance_cd_m2": shown.luminance,
         "desaturation": shown.desaturation,
@@ -258,6 +263,7 @@ def _realization(shown) -> dict:
         # without the calibration (the re-review, M-5).
         "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
         "drive": {color: list(levels) for color, levels in shown.drive.items()},
+        "macaque_row": list(row),
     }
 
 
@@ -277,6 +283,7 @@ def _color_sets(task: Task, calibration: Calibration, values: dict) -> dict | No
     if not sets:
         return None
     at = _luminances(color_set_lights(task), values)
+    row = macaque_row(calibration)
     defined = {}
     for name, colorset in sets.items():
         defined[name] = {
@@ -286,7 +293,10 @@ def _color_sets(task: Task, calibration: Calibration, values: dict) -> dict | No
             "luminance_cd_m2": colorset.luminance_cd_m2,
             "held": colorset.held,
             "source": colorset.source,
-            "realized": [_realization(realized(colorset, calibration, luminance))
+            # How the set was generated, where it was (the console settings build's Task 8,
+            # `ColorSet.design`): null until then, written by hand.
+            "design": None,
+            "realized": [_realization(realized(colorset, calibration, luminance), row)
                          for luminance in at.get(name, [colorset.luminance_cd_m2])],
         }
     return defined
@@ -2740,7 +2750,8 @@ class Session:
     @property
     def parameters(self) -> tuple:
         """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
-        choices, source, conditions, draw, numbers, switch, shape, profile, why)` -- the shape `link.Telemetry.of`
+        choices, source, conditions, draw, numbers, switch, shape, profile, why, gives, color)` --
+        `color` a color setting's card (`_color_card`; telemetry schema 22) -- the shape `link.Telemetry.of`
         builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it").
         `choices` is the setting's own, empty for a ceiling: they say whether a pair it holds is a
         position (schema 18, XC-401's fix round, M2; `review.declares_position`).
@@ -2813,14 +2824,76 @@ class Session:
                    else {"low": limit_reason(p, "low"), "high": limit_reason(p, "high")})
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
                              p.choices, source, conditions, draw, numbers, switch, shape, profile,
-                             why, gives))
+                             why, gives, self._color_card(p, source)))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None, None, None, None)
+             None, None, None, None, None, None, None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
         return tuple(declared) + ceilings
+
+    def _color_card(self, declared: Param, source: str | None) -> dict | None:
+        """**A color setting's card** (`link.ParamRow.color`; the console settings design's §6: a set,
+        then its hues as swatches, then two levels): `None` unless every choice of `declared` shows
+        a color-set light (`task.color_choices`). Each set its choices show, by name, with its apex,
+        its luminance, its `design` (null until the build's Task 8 gives a set one) and each hue
+        the choices offer, its chromaticity as the set writes it and its swatch on the sRGB
+        standard at the set's own luminance (`photometry.srgb_hex`; `None` where the standard
+        cannot show it), `approximate` always: the rig's measured panel decides what is drawn.
+        `set` and `hue`, the run's value's (`spec.values`), `None` where the pool draws it
+        (`source` `"pool"`) or the value is none of them. **Its two levels**, read on the light of
+        the run's value, else of the first choice: each `{"setting", "value", "cd_m2"}` -- the
+        saturation's setting where it is one, the luminance's the light's `fraction` setting where
+        that is one, else its `luminance` setting (which moves every light of the set that reads
+        it, `set_wide` true); `None` where the task file writes a number, the value then that number for the
+        saturation and the cd/m² for the luminance; `cd_m2` the light's macaque luminance,
+        `fraction` × its set's luminance, at the values in force. Between trials, never in a
+        frame."""
+        choices = color_choices(declared)
+        if choices is None:
+            return None
+        values = self.spec.values
+        sets: dict = {}
+        for (named, hue), choice in choices.items():
+            colorset = set_light(choice).colorset
+            entry = sets.setdefault(named, {
+                "apex": list(colorset.apex), "luminance_cd_m2": colorset.luminance_cd_m2,
+                "design": None, "hues": {}})
+            try:
+                swatch = srgb_hex(colorset_xyz(ColorSetLight(colorset, hue), SRGB))
+            except ValueError:
+                swatch = None
+            entry["hues"][hue] = {"xy": list(colorset.colors[hue]), "srgb": swatch}
+        now = values.get(declared.name)
+        key = None if source == "pool" else next(
+            (key for key, choice in choices.items() if choice == now), None)
+        light = set_light(choices[key] if key is not None else next(iter(choices.values())))
+
+        def bound(part: object) -> object:
+            return values.get(part.name) if isinstance(part, P) else part
+
+        try:
+            cd_m2 = float(bound(light.fraction)) * dataclasses.replace(
+                light, luminance=bound(light.luminance)).at()
+        except (TypeError, ValueError):
+            cd_m2 = None
+        by = next((part.name for part in (light.fraction, light.luminance) if isinstance(part, P)),
+                  None)
+        return {
+            "sets": sets,
+            "set": None if key is None else key[0],
+            "hue": None if key is None else key[1],
+            "approximate": True,
+            "saturation": {
+                "setting": light.saturation.name if isinstance(light.saturation, P) else None,
+                "value": bound(light.saturation), "cd_m2": cd_m2},
+            # `set_wide`: its setting is the set's luminance, which moves every light of the set
+            # that reads it, not this light's fraction (the builder's call: the card says so).
+            "luminance": {"setting": by, "value": cd_m2 if by is None else values.get(by),
+                          "cd_m2": cd_m2,
+                          "set_wide": by is not None and not isinstance(light.fraction, P)},
+        }
 
     def _scalable(self, declared: Param, sizes: frozenset) -> bool:
         """**Whether a person may scale `declared` by eccentricity from its card** (the console
@@ -4446,6 +4519,43 @@ class Session:
                 f"the revert to {where} could not be checked ({type(broken).__name__}: "
                 f"{broken}), so it is refused, none of it applies, and the session runs on"))
 
+    def _color(self, command, index: int) -> None:
+        """**A color setting's hue picked by its set on its card** (`link.SetColor`; the console
+        settings design's §6): mapped to the one choice the setting declares whose color-set light
+        is that set's hue (`task.color_choices`), then judged and staged **through `_impossible`
+        and `set`, unchanged, as the choice it names** -- as `_revert` sets a value -- so it is
+        validated, staged until the next trial and recorded as any value set is, its source a
+        person's from then. **Refused with the sentence, nothing staged**: a setting with no such
+        card (an undeclared name, or one whose choices show no color-set light each), a set or a
+        hue none of its choices names, and whatever `_impossible` or `set` refuses (`Exceeded`).
+        **It never raises**: it runs outside `_command`'s listed `try`, so a check that raises
+        refuses the pick, saying it could not be checked, and the session runs on. `index`, the
+        trial about to run. Not welfare-critical: no ceiling has choices, so no reward size is
+        picked here, and `set` judges the value as ever."""
+        name, by = command.name, command.by
+        try:
+            declared = self._params().get(name)
+            choices = None if declared is None else color_choices(declared)
+            if choices is None:
+                raise Exceeded(
+                    f"{name!r} is no color setting this task declares, whose every choice shows a "
+                    f"color set's light, so no hue is picked for it")
+            choice = choices.get((command.colorset, command.color))
+            if choice is None:
+                offered = ", ".join(f"{colorset}'s {hue}" for colorset, hue in choices)
+                raise Exceeded(
+                    f"{name!r} offers no choice in {command.colorset}'s {command.color}, so the "
+                    f"pick is refused and the previous value stands; it offers {offered}")
+            self._impossible(name, choice, by=by)
+            self.set(name, choice, by=by)
+        except Exceeded as refused:
+            self._refuse(name, by, str(refused))
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse(name, by, (
+                f"the pick of {command.colorset}'s {command.color} for {name!r} could not be "
+                f"checked ({type(broken).__name__}: {broken}), so it is refused and the session "
+                f"runs on"))
+
     def _declared_draw(self, key: tuple) -> Distribution:
         """The draw `key` names as the task declares it (`variation.in_force`'s keys): the task's,
         or a block's own, of the run's plan. What a range changed live is judged against
@@ -4837,6 +4947,9 @@ class Session:
             return
         if isinstance(command, _link.SetForm):
             self._form(command, index)
+            return
+        if isinstance(command, _link.SetColor):
+            self._color(command, index)
             return
         if isinstance(command, _link.Revert):
             self._revert(command, index)
@@ -5556,7 +5669,8 @@ class Session:
                     continue
                 if (name, luminance) not in self._realized_at:
                     self._realized_at.add((name, luminance))
-                    new.setdefault(name, []).append(_realization(shown))
+                    new.setdefault(name, []).append(
+                        _realization(shown, macaque_row(self.spec.calibration)))
         return new or None
 
     def _leave(self) -> None:

@@ -190,8 +190,12 @@ class _Lights:
             if self.calibration is None:
                 raise ValueError(f"{color} is realized on a calibration, and none was given")
             luminance = None if color.luminance is None else _num(color.luminance, values)
+            # Its saturation bound with its fraction and luminance (the console settings design's
+            # §6): toward the set's apex, its macaque luminance held.
             return colorset_xyz(replace(color, fraction=_num(color.fraction, values),
-                                        luminance=luminance), self.calibration)
+                                        luminance=luminance,
+                                        saturation=_num(color.saturation, values)),
+                                self.calibration)
         raise ValueError(f"{color!r} is not a color; `check` refuses it at load (bad-block)")
 
 

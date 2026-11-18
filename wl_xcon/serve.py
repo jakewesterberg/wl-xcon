@@ -791,6 +791,8 @@ _SHAPES = {
     # The console settings build (the PI, 2026-11-16): a timing setting switched to drawn on its
     # card, a person's draw of one of its shapes (`link.SetForm`).
     "form": frozenset({"name", "shape", "numbers", "values", "weights"}),
+    # And a color setting's hue picked by its set on its card (`link.SetColor`; the design's §6).
+    "color": frozenset({"name", "colorset", "color"}),
 }
 _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 #: The kinds `wlx taskd` takes (open, check, start, end and resume_session) that the page sends by the wire's own field names, built
@@ -802,10 +804,10 @@ _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
 #: `training`, since C3 its `hand_back`, `range` and `revert`, and since the pop-out search build
 #: `next_block`, `back_block` and `decline`, whose `suggestion` the wire checks
 #: (`link._suggestion`), which go to the run as any control does, and since the console settings
-#: build `form`. A range's numbers, and a form's numbers, values and weights, are decoded there by
-#: `link._setting`, as a setting's value is.
+#: build `form` and `color`. A range's numbers, and a form's numbers, values and weights, are decoded
+#: there by `link._setting`, as a setting's value is; a color's set and hue are words (`link._word`).
 _WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training", "hand_back", "range", "revert",
-                                "next_block", "back_block", "decline", "form"}
+                                "next_block", "back_block", "decline", "form", "color"}
 
 
 def _finite(value: int | float) -> bool:

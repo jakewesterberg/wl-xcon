@@ -3295,3 +3295,36 @@ def test_scaling_disc_size_sends_its_factor(rig):
     assert (type(sent), sent.name, sent.shape, sent.numbers, sent.values, sent.weights,
             sent.by.name) == (SetForm, "disc_size", "scaled", {"factor": 0.3}, (), (),
                               "Jake Westerberg")
+
+
+def test_picking_a_hue_swatch_sends_color(rig):
+    """A color setting's card (the console settings design's §6; the PI, 2026-11-16, "you select a
+    set, and then you have hue options from the set"): pressing a hue's swatch sends a `color` of
+    its set and hue, reaching the rig as the signed-in member's; a frame arriving meanwhile leaves
+    the card as it was. Through the wire, in a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
+    from wl_xcon.link import ParamRow, SetColor, decode, encode
+
+    color = {
+        "sets": {"isohue": {"apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "design": None,
+                            "hues": {"green": {"xy": [0.31324, 0.50711], "srgb": "#4a9a3e"},
+                                     "red": {"xy": [0.45955, 0.32918], "srgb": "#c76f6a"}}}},
+        "set": "isohue", "hue": "green", "approximate": True,
+        "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+        "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False},
+    }
+    rows = (ParamRow.of("distractor_appearance", "appearance", None, None, None, False,
+                        source="run", color=color),)
+    rig.hub.offer(decode(encode(frame(params=rows))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+
+    page.select_option('select[data-colorset="distractor_appearance"]', "isohue")
+    rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
+    page.click('[data-cmd="color"][data-name="distractor_appearance"][data-color="red"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.colorset, sent.color, sent.by.name) == (
+        SetColor, "distractor_appearance", "isohue", "red", "Jake Westerberg")

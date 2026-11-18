@@ -835,12 +835,26 @@ class ColorSetLight(Color):
     and "everything should be adjustable in the console"; the pop-out search build's fix round):
     cd/m² of macaque luminance, a number or a setting (`P`) a trainer changes live; `None`, the
     set's own `luminance_cd_m2`. The set is realized once for each value a run draws it at, on
-    each panel (`realized`), between trials; `check` reads the whole range it can take."""
+    each panel (`realized`), between trials; `check` reads the whole range it can take.
+
+    **`saturation`, how far it stands from the set's apex** (the console settings design's §6; the
+    PI, 2026-11-16: salience "Both, as two choices", a saturation level, gray to full, its
+    luminance held): a fraction from 0 to 1, a number or a setting (`P`), hard at both ends (a
+    fraction is at most 1, and below 0 it cannot be). **Its chromaticity is apex + s × (realized
+    xy − apex)**, the realized xy its color's as the set is realized at its luminance
+    (`realize`), and **its macaque luminance, `fraction` times `at()`, is held** (`colorset_xyz`):
+    at 0 it is the set's gray whatever its hue, at 1 the color as the set is shown. **Every
+    saturation of a realizable set is realizable**: the lights of one macaque luminance form a
+    plane in CIE XYZ, a line in xy is a line in that plane (a chromaticity is a ray from black,
+    and a plane of rays through a line meets the plane in a line), and the panel's gamut meets the
+    plane in a convex set, which holds the segment between the apex and the realized color since
+    it holds both ends. So no saturation asks the panel for more than its set already does."""
 
     colorset: ColorSet
     color: str
     fraction: object = 1.0
     luminance: object = None
+    saturation: object = 1.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.colorset, ColorSet):
@@ -853,8 +867,9 @@ class ColorSetLight(Color):
 
     def __repr__(self) -> str:
         at = "" if self.luminance is None else f", luminance={self.luminance!r}"
+        pale = "" if self.saturation == 1.0 else f", saturation={self.saturation!r}"
         return (f"ColorSetLight({self.colorset.name!r}, {self.color!r}, "
-                f"fraction={self.fraction!r}{at})")
+                f"fraction={self.fraction!r}{at}{pale})")
 
     def at(self) -> float:
         """The cd/m² of macaque luminance its set is realized at, bound to a number
@@ -986,16 +1001,65 @@ def realized(colorset: ColorSet, calibration: Calibration,
 
 def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float, float, float]:
     """CIE XYZ, Y in cd/m², of a color-set light on `calibration`: its color as the set is realized
-    there at its luminance (`realized`, `ColorSetLight.at`), times its `fraction`, each bound to a
-    number first (`screen.resolve`; `check` reads each value they can take)."""
+    there at its luminance (`realized`, `ColorSetLight.at`), times its `fraction`, **moved toward
+    the set's apex by its `saturation`** (the console settings design's §6), each bound to a number
+    first (`screen.resolve`; `check` reads each value they can take). At saturation 1 the realized
+    light times the fraction, as it always was. Otherwise, as a reader of the record computes it
+    from the start row's realization alone (wl-preproc was told, 2026-11-17): the chromaticity
+    `xy = apex + s × (realized xy − apex)`, the macaque luminance `L = fraction × at()`, and with
+    `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)`, so its macaque luminance is
+    held whatever its saturation. Between trials or at load, never in a frame: the realization is
+    kept (`realized`)."""
     fraction = light.fraction
     if not _finite_number(fraction) or fraction < 0.0:
         raise ValueError(
             f"{light}'s fraction is {fraction!r}: a parameter is bound, or read at each value it "
             f"can take, and a fraction of the set's luminance is a number, 0 or above"
         )
-    X, Y, Z = realized(light.colorset, calibration, light.at()).xyz[light.color]
-    return (fraction * X, fraction * Y, fraction * Z)
+    saturation = light.saturation
+    if not _finite_number(saturation) or not 0.0 <= saturation <= 1.0:
+        raise ValueError(
+            f"{light}'s saturation is {saturation!r}: a parameter is bound, or read at each value "
+            f"it can take, and a saturation is a fraction of the way from the set's apex, 0 to 1"
+        )
+    shown = realized(light.colorset, calibration, light.at())
+    if saturation == 1.0:
+        X, Y, Z = shown.xyz[light.color]
+        return (fraction * X, fraction * Y, fraction * Z)
+    (ax, ay), (rx, ry) = light.colorset.apex, shown.xy[light.color]
+    return _held_light((ax + saturation * (rx - ax), ay + saturation * (ry - ay)),
+                       fraction * light.at(), calibration)
+
+
+def _held_light(xy, luminance: float, calibration: Calibration) -> tuple[float, float, float]:
+    """The light of chromaticity `xy` at `luminance` cd/m² of macaque luminance on `calibration`
+    (`macaque_row`), CIE XYZ in cd/m²: `u × L / (macaque_row · u)`, `u = (x/y, 1, (1 − x − y)/y)`,
+    as `realize` makes each color's. A chromaticity a realizable set's segment holds has a positive
+    macaque luminance per unit, since both its ends do and the row is linear in `y·u`."""
+    x, y = xy
+    unit = (x / y, 1.0, (1.0 - x - y) / y)
+    per = sum(r * u for r, u in zip(macaque_row(calibration), unit))
+    if not per > 0.0:
+        raise ValueError(
+            f"chromaticity ({x:g}, {y:g}) has no positive macaque luminance on calibration "
+            f"{calibration.id or calibration.measured_on}"
+        )
+    return (unit[0] * luminance / per, luminance / per, unit[2] * luminance / per)
+
+
+def srgb_hex(xyz) -> str:
+    """**A light as a swatch on the sRGB standard** (`SRGB`; the console settings design's §6): CIE
+    XYZ in cd/m² as the `#rrggbb` an sRGB screen shows it at, its white the standard's 80 cd/m²
+    (`SRGB_WHITE_CD_M2`), each primary's weight clipped to [0, 1] and encoded by the sRGB curve
+    (the inverse of `_srgb_fraction`) to 8 bits. **Approximate on any panel not measured**, and the
+    console says so: what the rig draws is decided by its measured panel, never by this."""
+    levels = []
+    for weight in SRGB.weights_of(xyz):
+        weight = min(max(float(weight), 0.0), 1.0) if weight == weight else 0.0
+        level = (12.92 * weight if weight <= 0.0031308
+                 else 1.055 * weight ** (1.0 / 2.4) - 0.055)
+        levels.append(min(max(round(level * 255.0), 0), 255))
+    return "#" + "".join(f"{level:02x}" for level in levels)
 
 
 #: A calibration record's fields, each required and no other but `RECORD_OPTIONAL` (Question 4:

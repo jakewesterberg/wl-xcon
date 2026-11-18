@@ -262,7 +262,14 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: size setting (`task.size_settings`), `ParamRow.shape` `{"shape": "scaled", "numbers": {"factor"},
 #: ...}` for a person's scaling, and `ParamRow.gives`, the rig's words for what a scaled size or an
 #: object window's ratio gives each object in degrees, else `None`; a `form` command's shape may
-#: be `scaled`. The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
+#: be `scaled`. **Colors by set, hue and two levels** (the design's §6; the build's Task 7):
+#: `ParamRow.color`, a color setting's card -- each set its choices show, with its apex,
+#: luminance, `design` and each hue's xy and sRGB swatch, the set and hue of the run's value, and
+#: its saturation and luminance levels, each `{"setting", "value", "cd_m2"}` -- else `None`; and
+#: `ParamRow.words`, **a value that is an appearance or a color in the rig's words**
+#: (`review.appearance_words`; XC-420 closed), `value` `None` beside it, as a staged row's `was`
+#: and `now` carry one; and a `color` command on the wire (`SetColor`). The build's later tasks
+#: add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
 SCHEMA = 22
 
@@ -500,13 +507,31 @@ class ParamRow:
     #: (`taskd.Session.parameters`), so no console computes a size. `None` for every other card,
     #: a fixed size's among them, and between runs.
     gives: str | None = None
+    #: **A color setting's card** (schema 22; the console settings design's §6: "you select a set,
+    #: and then you have hue options from the set, then you have salience options for each hue"),
+    #: for a setting whose every choice shows a color-set light (`task.color_choices`), made by the
+    #: rig (`taskd.Session.parameters`): `{"sets", "set", "hue", "approximate", "saturation",
+    #: "luminance"}` -- `sets` each set its choices show by name, `{"apex", "luminance_cd_m2",
+    #: "design", "hues"}`, each hue the choices offer `{"xy", "srgb"}`, its chromaticity as the set
+    #: writes it and its swatch on the sRGB standard (`photometry.srgb_hex`), `approximate` always
+    #: true since no swatch is the rig's measured panel; `set` and `hue` the run's value's, `None`
+    #: where the pool draws it; and the two levels of its light, each `{"setting", "value",
+    #: "cd_m2"}` -- the setting a person types it by (`None` where the task file writes a
+    #: number), its value in that setting's own unit, and the light's macaque luminance in cd/m².
+    #: `None` for every other card.
+    color: dict | None = None
+    #: **The value in the rig's words, where it is an appearance or a color** (schema 22; XC-420,
+    #: closed by the console settings build): `review.appearance_words`, `value` then `None`, as
+    #: `position` is for a whole position; `None` for every other value.
+    words: str | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
            bounded: bool, choices=(), source: str | None = None, conditions=(),
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
            shape: dict | None = None, profile: dict | None = None,
-           why: dict | None = None, gives: str | None = None) -> "ParamRow":
+           why: dict | None = None, gives: str | None = None,
+           color: dict | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -517,18 +542,24 @@ class ParamRow:
         `Polar(8.123456789, 45)` reads `8.12346°`; a position holding an infinity or a NaN is
         said to be no position, as written. Any other value as it is. Where it comes from
         (`source`, `conditions`, `draw`, `numbers`; schema 19) as given, the conditions cut to the
-        first `CONDITIONS_SHOWN` and the rest counted (`more`)."""
-        from wl_xcon.review import position_words
+        first `CONDITIONS_SHOWN` and the rest counted (`more`). **A value that is an appearance
+        or a color** in the rig's words (`words`, `review.appearance_words`; XC-420), `value`
+        `None`: msgpack carries no declaration, and no console reads one."""
+        from wl_xcon.review import appearance_words, position_words
 
         named = tuple(conditions)
         shown = named[:CONDITIONS_SHOWN]
         more = len(named) - len(shown)
         words = position_words(value, choices)
+        looks = appearance_words(value)
+        if looks is not None:
+            return cls(name, unit, low, high, None, bounded, None, source, shown, draw,
+                       numbers, more, switch, shape, profile, why, gives, color, looks)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape, profile, why, gives)
+                       numbers, more, switch, shape, profile, why, gives, color)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape, profile, why, gives)
+                   more, switch, shape, profile, why, gives, color)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1578,11 +1609,14 @@ class Drawn:
 def _carried(value: object, choices=()) -> object:
     """A staged value as a frame carries it: a whole position -- a `Polar`, or a pair where its
     setting's `choices` declare one -- as the rig's words for it, eccentricity and direction first
-    with its (x, y) beside them (`review.position_words`; schema 18, XC-401), anything else as
-    it is."""
-    from wl_xcon.review import position_words
+    with its (x, y) beside them (`review.position_words`; schema 18, XC-401); **an appearance or a
+    color, or a piece of one, as its words** (`review.appearance_words`; XC-420, closed by the
+    console settings build: a color pick stages a look); anything else as it is."""
+    from wl_xcon.review import appearance_words, position_words
 
     words = position_words(value, choices)
+    if words is None:
+        words = appearance_words(value)
     return value if words is None else words
 
 
@@ -1838,6 +1872,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "profile": p.profile,
                 "why": p.why,
                 "gives": p.gives,
+                "color": p.color,
+                "words": p.words,
             }
             for p in telemetry.params
         ],
@@ -2684,6 +2720,25 @@ class SetForm:
     weights: tuple = ()
 
 
+@dataclass(frozen=True, slots=True)
+class SetColor:
+    """**A person picks a color setting's hue on its card** (the console settings design's §6; the
+    PI, 2026-11-16: "you select a set, and then you have hue options from the set"): setting
+    `name` to the one choice it declares whose color-set light is `color` of set `colorset`
+    (`task.color_choices`), from the next trial, through `Session.set` unchanged as the choice it
+    names (`taskd.Session._color`), so it is recorded as any value set is. **Its own command,
+    never a `SetParameter`**: a console sends words alone (`_setting`), and a pick names the set
+    and the hue, never a choice's place in a list. Each of the three is text of 1 to
+    `TEXT_LIMIT` characters; which choice they name is the session's to say."""
+
+    KIND: ClassVar[str] = "color"
+
+    name: str
+    colorset: str
+    color: str
+    by: Actor
+
+
 #: **The shapes a `form` command may name on the wire**: the five a timing card draws
 #: (`task.SHAPES`) and a size's scaling (`task.Scaled`; the design's §5), which the session takes
 #: on a size setting alone (`taskd.Session._scale`).
@@ -2733,6 +2788,7 @@ Command = (
     | HandBack
     | SetRange
     | SetForm
+    | SetColor
     | Revert
     | Decline
 )
@@ -2902,6 +2958,9 @@ def _encode_command(command: Command) -> bytes:
         payload = {"kind": "form", "by": actors.to_map(command.by), "name": command.name,
                    "shape": command.shape, "numbers": dict(command.numbers),
                    "values": list(command.values), "weights": list(command.weights)}
+    elif isinstance(command, SetColor):
+        payload = {"kind": "color", "by": actors.to_map(command.by), "name": command.name,
+                   "colorset": command.colorset, "color": command.color}
     elif isinstance(command, Revert):
         payload = {"kind": "revert", "by": actors.to_map(command.by), "change": command.change}
     else:
@@ -3413,6 +3472,11 @@ def _command_from(data: dict) -> Command:
         return SetForm(name=name, shape=shape, numbers=numbers, by=by,
                        values=_listed(data, "values", name, by),
                        weights=_listed(data, "weights", name, by))
+    if kind == "color":
+        by = _actor(data.get("by"), kind)
+        return SetColor(name=_word(data, "name", kind, by),
+                        colorset=_word(data, "colorset", kind, by),
+                        color=_word(data, "color", kind, by), by=by)
     if kind == "revert":
         by = _actor(data.get("by"), kind)
         change = data.get("change")
@@ -3670,6 +3734,7 @@ _COMMAND_EXPOSURE = {
     "hand_back": ("both", "hand a held setting back"),
     "range": ("both", "change a drawn range"),
     "form": ("both", "draw a timing setting each trial from a shape a person gives"),
+    "color": ("both", "pick a color setting's hue by its set"),
     "revert": ("both", "take the run's settings and ranges back to an earlier change"),
     "open": ("taskd", "open a session, recording the animal's departure time and the fluid it has already had today, and accepting warnings"),
     "check": ("taskd", "take a run's pre-flight"),

@@ -4081,3 +4081,63 @@ def test_a_card_carries_each_limits_reason_over_the_wire():
 
     assert restored.params == rows
     assert (restored.params[0].why, restored.params[1].why) == (why, None)
+
+
+#: A color card as the rig makes it (`ParamRow.color`; the console settings design's §6).
+COLOR_CARD = {
+    "sets": {"isohue": {"apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "design": None,
+                        "hues": {"green": {"xy": [0.31324, 0.50711], "srgb": "#4a9a3e"},
+                                 "red": {"xy": [0.45955, 0.32918], "srgb": None}}}},
+    "set": "isohue", "hue": "green", "approximate": True,
+    "saturation": {"setting": "distractor_saturation", "value": 0.25, "cd_m2": 7.5},
+    "luminance": {"setting": "distractor_fraction", "value": 0.5, "cd_m2": 7.5,
+                  "set_wide": False},
+}
+
+
+def test_set_color_round_trips_and_a_malformed_one_is_refused_where_it_is_decoded():
+    """`SetColor` over the wire and back (the design's §6: a pick names a set and a hue), `KIND`
+    `"color"`, and from a page's body (`serve.parse_command`); a set, a hue or a name that is no
+    text of 1 to `TEXT_LIMIT` characters is refused, naming the field."""
+    from wl_xcon.link import CommandRefused, SetColor, TEXT_LIMIT
+    from wl_xcon.serve import parse_command
+
+    pick = SetColor(name="distractor_appearance", colorset="isohue", color="red", by=Box("jake"))
+    assert SetColor.KIND == "color"
+    assert _decode_command(_encode_command(pick)) == pick
+    body = {"kind": "color", "name": "distractor_appearance", "colorset": "isohue",
+            "color": "red"}
+    parsed = parse_command({**body, "by": "jake"})
+    assert (type(parsed), parsed.name, parsed.colorset, parsed.color) == (
+        SetColor, "distractor_appearance", "isohue", "red")
+    for field, bad in (("colorset", 3), ("color", ""), ("color", "r" * (TEXT_LIMIT + 1)),
+                       ("name", None)):
+        with pytest.raises(CommandRefused, match=f"a 'color' command's {field} is text"):
+            _command_from({**body, "by": {"kind": "box", "name": "jake"}, field: bad})
+
+
+def test_a_color_card_and_a_look_in_words_cross_the_wire():
+    """Schema 22, XC-420 closed: a color card crosses the wire whole, and a value that is a look
+    crosses as its words with `value` null -- a staged one too, its `was` and `now` the words."""
+    from wl_xcon.photometry import ColorSet, ColorSetLight
+    from wl_xcon.review import appearance_words
+    from wl_xcon.task import Disc, P
+
+    isohue = ColorSet.load("tests/fixtures/isohue.json")
+    green, red = (Disc(size=1.0, color=ColorSetLight(isohue, hue, saturation=P("pale")))
+                  for hue in ("green", "red"))
+    row = ParamRow.of("distractor_appearance", "appearance", None, None, green, False,
+                      (green, red), "run", color=COLOR_CARD)
+    assert (row.value, row.words, row.color) == (
+        None, "Disc: color isohue green at saturation pale", COLOR_CARD)
+    staged = Staged(name="distractor_appearance", was=appearance_words(green),
+                    now=appearance_words(red), by=Box("jake"), bounded=False)
+    sent = _telemetry(params=(row, ParamRow.of("fix_window", "deg", 0.5, 5.0, 2.0, False)),
+                      staged=(staged,))
+
+    restored = decode(encode(sent))
+
+    assert restored == sent
+    assert restored.params[0].color == COLOR_CARD and restored.params[1].color is None
+    assert restored.params[1].words is None
+    assert restored.staged[0].now == "Disc: color isohue red at saturation pale"
