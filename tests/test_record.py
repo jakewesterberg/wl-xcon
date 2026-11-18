@@ -344,6 +344,52 @@ def test_a_stimulus_whose_appearance_is_a_setting_has_its_arrays_objects_only_wh
         _is_at(drawn, x, y)
 
 
+def test_each_look_drawn_in_a_color_sets_light_writes_its_light_xy(tmp_path):
+    """**`light_xy`** (accepted by wl-preproc 2026-11-18 as named): each `stimuli[]` entry and each
+    of an array's `objects[]` has the key, always: the CIE 1931 `[x, y]` of the light a color set's
+    light draws it in, at its saturation (a setting's value read from the line), as the rig draws
+    it on the run's panel (`photometry.colorset_xy`); null for the array's own entry, for a look in
+    no color set's light, and with no calibration to read it on."""
+    from wl_xcon import photometry
+    from wl_xcon.task import Array, Disc, P, Stimulus
+
+    isohue = photometry.ColorSet.load(Path(__file__).parent / "fixtures" / "isohue.json")
+    red = photometry.ColorSetLight(isohue, "red", saturation=P("pale"))
+    blue = photometry.ColorSetLight(isohue, "blue", fraction=0.5)
+    placed = (
+        _shown(Stimulus("odd", at=(5.0, 0.0), looks=Disc(size=1.0, color=red)), 3),
+        _shown(Stimulus("gray", at=(0.0, 0.0), looks=Disc(size=0.5, color=photometry.Gray(20.0))),
+               3),
+        _shown(Stimulus("ring", at=(0.0, 0.0), looks=Array(
+            n=3, radius=4.0, looks=Disc(size=1.0, color=red), among=Disc(size=1.0, color=blue))),
+            3),
+    )
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(index=1, outcome="correct", params={"pale": 0.5}, run=0,
+                 position=Position.lone(1), fluid_ml=0.0, last_reward_at=None, placed=placed,
+                 calibration=photometry.SRGB)
+    odd, gray, ring = json.loads((record.directory / "trials.jsonl").read_text())["stimuli"]
+
+    drawn, _ = photometry.colorset_xy(photometry.ColorSetLight(isohue, "red", saturation=0.5),
+                                      photometry.SRGB)
+    assert odd["light_xy"] == list(drawn)
+    assert drawn != photometry.realized(isohue, photometry.SRGB).xy["red"]
+    assert gray["light_xy"] is None
+    assert ring["light_xy"] is None
+    assert [each["light_xy"] for each in ring["objects"]] == [list(drawn)] + [
+        list(photometry.realized(isohue, photometry.SRGB).xy["blue"])] * 2
+    (plain,) = _stimuli_of(tmp_path / "plain", placed[:1], {"pale": 0.5})
+    assert "light_xy" in plain and plain["light_xy"] is None
+
+
+def _stimuli_of(folder, placed, params) -> list[dict]:
+    """The `stimuli` of one line written with no calibration (a census's)."""
+    record = SessionRecord.open(folder, session_id="2027-01-14_01", subject="A")
+    record.trial(index=1, outcome="correct", params=params, run=0, position=Position.lone(1),
+                 fluid_ml=0.0, last_reward_at=None, placed=placed)
+    return json.loads((record.directory / "trials.jsonl").read_text())["stimuli"]
+
+
 def test_a_trial_row_is_never_written_without_what_it_showed(tmp_path):
     """XC-399: a line written without its stimuli would say the trial showed nothing, and nothing
     would say that was wrong -- the way `Mark` and `Reward` were once dropped while sessions read

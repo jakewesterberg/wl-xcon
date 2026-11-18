@@ -574,13 +574,19 @@ A run with a training progression, a staircase or a pool has one switch, `Shapin
 next trial: **on**, training as declared; **frozen** (`Scheduler.freeze`), a training
 progression's stage moved by no rule, fall-back or time, nothing suggested and a suggestion
 standing withdrawn, no staircase stepping, each frozen trial entering no bar nor, in a training
-progression, its stage's count of trials or targets, a person's move, value and hand-back still
-applying; **full task** (`Scheduler.play_full`), the plan's declared finished version
+progression, its stage's count of trials or targets, nor its stage's time limit, whose clock
+stops while frozen and picks up with the time it had left (`Scheduler.clock_held`; the PI,
+2026-11-18, "Stop the clock"; the run's own time limit runs on), a person's move, value and
+hand-back still applying; **full task** (`Scheduler.play_full`), the plan's declared finished version
 (`Plan.full`, a `task.FullTask`: a block of the plan and values over its conditions, checked at
 load, `bad-full-task`), entered as a block of its own, the stage left closing `shaping`, its
 staircase held at its hardest level and its values where a condition's own would sit, under a
 person's value and draw, each named `drawn: "full"`, no move by hand while it plays; on again, the
-stage left reopens as a block of its own at its staircase's level. Each switch is judged at what it
+stage left reopens as a block of its own at its staircase's level, **picking up where it was**
+(the PI, 2026-11-18): its trial count, its criterion and fall-back windows, a confirmed
+progression's bars and the panel's last answers, and its time left as the full task found them,
+the full task's trials and time in none of them (`scheduler._CARRIED`; `taskd.Session
+._stage_spent`), each block's report in the run's end row counting its own trials. Each switch is judged at what it
 leaves (`_possible`, `_laid_out` with the full task's block, `Session._full_judged`), written as a
 `shaping` change row (`name` `"shaping"`, its two positions, no `sequence`), kept in each moment
 (`Moment.shaping`) so a revert takes it back, and said on each trial line (`shaping`), as wl-preproc
@@ -993,14 +999,24 @@ output levels; a luminance a later trial draws it at first is that trial line's 
 (wl-preproc's name for it, 2026-11-14, XC-491), once a run (`taskd.Session._realize`); a task declaring two different
 sets of one name is refused at load (`color-set-named-twice`). **A light has a saturation, since the
 console settings build (2026-11-17; its design §6)**: `ColorSetLight.saturation`, a fraction 0 to 1,
-a number or a setting, moves it toward its set's apex, `xy = apex + s × (realized xy − apex)`, its
-macaque luminance, its fraction of the set's, held (`photometry.colorset_xyz`); every saturation of
-a realizable set is realizable, a line in xy being a line in the light's equal-luminance plane. The
-checks read each light at its own saturation: one at 0 is its set's apex whatever its hue, so it adds
-no `color-set-desaturated`, and two lights alike but for a hue are alike when both are at 0 (an odd
-one is then odd no longer, `impossible-trial`). The record writes each light's `saturation`, each
-realization's `macaque_row` and each set's `design` (its file's, or null), told to
-wl-preproc before any was written (XC-513), so a reader computes every light from the record alone.
+a number or a setting, **scales its CAM16-UCS chroma at a fixed hue** (the PI, 2026-11-18; COL-39):
+the realized color's (a', b') in the set's design frame (its `gray_lightness`, or the generator's J'
+65, `photometry.GRAY_LIGHTNESS`), taken toward the apex's at the same J' by `s`
+(`photometry.saturated_xy`), only its chromaticity kept, its macaque luminance, its fraction of the
+set's, held (`photometry.colorset_xyz`); `s = 1` is the realized color and `s = 0` the apex,
+exactly. A CAM16-UCS hue line is no straight line in xy, so a saturation between may leave the
+panel's gamut where both ends are inside: such a light is moved toward the apex in xy by the least
+share that shows it, as `realize` moves a set (`photometry.colorset_xy`), and warned
+`color-set-desaturated`, naming the light, its saturation and the share (a range read every 0.05,
+`check.SATURATION_STEPS`; live, the value set). The checks read each light at its own saturation:
+one at 0 is its set's apex whatever its hue, so it adds no `color-set-desaturated`, and two lights
+alike but for a hue are alike when both are at 0 (an odd one is then odd no longer,
+`impossible-trial`). The record writes each light's `saturation`, each realization's `macaque_row`,
+each set's `design` (its file's, or null), and **each look's `light_xy`**, the CIE 1931 `[x, y]` it
+is drawn at, on each `stimuli[]` and `objects[]` entry of a trial line (null for an array's own
+entry, a look in no set's light, and where it cannot be read; `record._light_xy`), all accepted by
+wl-preproc 2026-11-18 (XC-513, closed), so a reader computes every light from the record alone:
+`u = (x/y, 1, (1 − x − y)/y)`, `L = fraction × luminance`, `XYZ = u × L / (macaque_row · u)`.
 A setting whose choices each show a color-set light is picked by set and hue on its card
 (`task.color_choices`; two choices of one set's one hue warn `ambiguous-color-choice` at load). **A new
 color is defined from its card three ways** (the console settings build's Task 8; the design's §6;

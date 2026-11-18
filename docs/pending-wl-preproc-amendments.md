@@ -1141,7 +1141,12 @@ you only when someone points you at one.
 
 Nothing in the trial lines marks a demo, and nothing should: the session is the unit, and its `config.json` says it.
 
-# OPEN — the console settings: forms, scaled sizes, a light's saturation, the training switch (new, 2026-11-16)
+# ANSWERED 2026-11-18 — the console settings: forms, scaled sizes, a light's saturation, the training switch (new, 2026-11-16)
+
+**Accepted by wl-preproc 2026-11-18, in full** (groups 1 to 4 and the 2026-11-18 addendum, no renames), with one change
+of ours told to it first and accepted as named: **a light's saturation now scales its CAM16-UCS chroma at a fixed hue**
+(the PI's answer of 2026-11-18, COL-39), so group 3's xy formula is gone and each look's `light_xy` takes its place
+(below). Closed XC-513.
 
 Opened 2026-11-16 on the PI's approved design (`docs/superpowers/specs/2026-11-16-console-settings-design.md`, §9: "Before
 anything here ships, it is told the new shapes and accepts them, as with XC-491 and XC-502"), backlog XC-513, **before
@@ -1208,11 +1213,16 @@ saturation and a luminance a person may move.
   It is the calibration's macaque luminance row (the weights that turn an XYZ into the light's macaque luminance).
 - **Each `color_sets[set]` gains `"design"`**, `{"space": "CAM16-UCS", "gray_lightness": 65.0, "chroma": 29.49}` for a set
   generated at equal hue steps and null for a set written by hand.
-- **How a reader computes a look's light** (so no light is written on a line):
-  - its chromaticity: `xy = apex + saturation × (realized xy − apex)`, the apex the set's own, the realized `xy` that
-    color's entry in the realization at the line's luminance;
+- **Each `stimuli[]` entry and each `objects[]` entry of a trial line gains `light_xy`** (accepted by wl-preproc
+  2026-11-18, the PI's CAM16-UCS answer; it replaces the xy formula first asked): the CIE 1931 `[x, y]` of the light
+  the look is drawn in, where a color set's light draws it (`ColorSetLight`), after the saturation and any
+  desaturation the realization applied; null for an array's entry (its objects carry theirs), for a look in no color
+  set's light, and where it cannot be read; **both keys always written**, as `size_deg` and `window_deg` are. Computed
+  as the line is written, between trials, never in a frame.
+- **How a reader computes a look's light at any saturation**, from `light_xy`:
+  - `u = (x/y, 1, (1 − x − y)/y)`;
   - its macaque luminance: `L = fraction × luminance`;
-  - its XYZ: with `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)`.
+  - its XYZ: `XYZ = u × L / (macaque_row · u)`.
 
 **4. The training switch.** The trainer's switch for the progression's help, beside the drumming and clear switches.
 

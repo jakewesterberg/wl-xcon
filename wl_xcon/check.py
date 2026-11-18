@@ -4726,8 +4726,20 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
     so no chroma of the set is drawn for it and the set's loss of chroma at its luminance is no
     loss of what it shows -- it adds no `color-set-desaturated` (the pop-out revision's seam, defect
     1: a fixation point at saturation 0). Its luminance is still held through the set's macaque
-    model, so it is named among the lights `color-set-without-spectra` names."""
+    model, so it is named among the lights `color-set-without-spectra` names.
+
+    **And a light its saturation puts outside the panel's gamut** (COL-39: saturation scales its
+    CAM16-UCS chroma at a fixed hue, a path that is no straight line in xy, so a light between the
+    apex and its color, both shown, need not be one the panel shows): it is moved toward the apex
+    in xy by the least share that brings it inside (`photometry.colorset_xy`), as the set's own
+    colors are, its luminance held, and warned once per set (`color-set-desaturated`, naming the
+    light, its saturation and the share), read at each saturation it can take -- a choice each, a
+    range at `SATURATION_STEPS` steps from end to end, since its ends never need it -- at each
+    luminance it can take, read by its ends."""
+    from wl_xcon.photometry import colorset_xy
+
     sets: list[tuple] = []
+    pulled: dict = {}
     for what, color in _colors(trial, params):
         if not isinstance(color, ColorSetLight):
             continue
@@ -4740,6 +4752,18 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
                   else _reach(color.luminance, params))
         except (_Unbounded, _Unreal):
             at = []  # refused where its fields are checked (`_block_faults`)
+        for saturation in ([] if gray else _saturations(color.saturation, params)):
+            for luminance in at:
+                try:
+                    _, share = colorset_xy(ColorSetLight(color.colorset, color.color,
+                                                         luminance=luminance,
+                                                         saturation=saturation), panel)
+                except (ValueError, TypeError, ArithmeticError):
+                    continue  # refused where its lights are checked (`_one_color`)
+                named = f"{what} in {color.color}"
+                most = pulled.setdefault(color.colorset, {}).get(named)
+                if share > 0.0 and (most is None or share > most[0]):
+                    pulled[color.colorset][named] = (share, saturation, luminance)
         named = ([color.luminance.name] if isinstance(color.luminance, P) and not gray else [])
         for colorset, whats, values, names, chroma in sets:
             if colorset == color.colorset:
@@ -4776,6 +4800,22 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
                 f"asked for by {'; '.join(whats)}"),
                 blocking=False, accepted_in=SESSION_KINDS,
                 subjects=(f"color set {colorset.name!r}",)))
+    for colorset, lights in pulled.items():
+        if not lights:
+            continue
+        said = "; ".join(
+            f"{what} at saturation {saturation:g} and {luminance:g} cd/m², by {100 * share:.1f}%"
+            for what, (share, saturation, luminance) in lights.items())
+        findings.append(Finding("color-set-desaturated", (
+            f"calibration {name} cannot show some saturations of color set {colorset.name!r}'s "
+            f"lights as asked: a saturation scales a color's CAM16-UCS chroma at its hue, a path "
+            f"that is no straight line in CIE 1931 xy, and at these it leaves the panel's gamut, so "
+            f"each is moved toward the apex ({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}) in xy "
+            f"by the least share that shows it, its luminance held and none clipped, as the set's "
+            f"own colors are (COL-39), less saturated than asked; the most each gives up of its "
+            f"distance from the apex: {said}"),
+            blocking=False, accepted_in=SESSION_KINDS,
+            subjects=(f"color set {colorset.name!r}",)))
     if sets and not panel.standard and panel.spectra is None:
         findings.append(Finding("color-set-without-spectra", (
             f"calibration {name} was measured without spectra, so this task's color-set lights "
@@ -4789,6 +4829,30 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
 
 #: How finely `_desaturated_range` finds where a color set starts to lose chroma, in cd/m².
 DESATURATED_STEP = 0.05
+
+#: **The steps a saturation's range is read at for a light its saturation puts outside the gamut**
+#: (`_color_set_faults`): 20, every 0.05 of a range from 0 to 1, its ends included. Its ends never
+#: need it (a saturation of 1 is its color as the set is shown, 0 its apex), so the reading is of
+#: the path between; a light a finer step would catch is still moved inside as it is drawn
+#: (`photometry.colorset_xy`) and written as drawn (`light_xy`), only not warned at load. Live, a
+#: value set is read as itself.
+SATURATION_STEPS = 20
+
+
+def _saturations(value: object, params: dict[str, Param]) -> list[float]:
+    """Each saturation a light's `saturation` is read at for its gamut (`_color_set_faults`): a
+    number as itself, a setting's choices each, a range at `SATURATION_STEPS` steps from its lowest
+    to its highest; none where it cannot be bounded (refused where its fields are checked)."""
+    try:
+        ends = _reach(value, params)
+    except (_Unbounded, _Unreal):
+        return []
+    param = params.get(value.name) if isinstance(value, P) else None
+    if param is None or param.choices or len(ends) != 2:
+        return [float(v) for v in ends if 0.0 <= v <= 1.0]
+    low, high = (float(v) for v in ends)
+    return [v for v in (low + (high - low) * k / SATURATION_STEPS
+                        for k in range(SATURATION_STEPS + 1)) if 0.0 <= v <= 1.0]
 
 
 def _desaturated_range(colorset, panel: Calibration, values: list[float], names: list[str],
@@ -5207,9 +5271,10 @@ def _lights(color, params: dict[str, Param]) -> list:
         # Its luminance as each value it can take, as its fraction (the pop-out search build's
         # fix round): the panel's gamut is convex, so both ends of each range are enough.
         luminances = [None] if color.luminance is None else _reach(color.luminance, params)
-        # And its saturation (the console settings design's §6), each end: every saturation of a
-        # realizable set is realizable (`photometry.ColorSetLight`), so this reads what the panel
-        # is asked for, never a light it could not show that its ends could.
+        # And its saturation (the console settings design's §6), each end: a saturation between
+        # that its CAM16-UCS path takes outside the gamut is moved inside as it is drawn
+        # (`photometry.colorset_xy`; COL-39), so none is clipped, and that move is warned where the
+        # set's own are (`_color_set_faults`).
         return [ColorSetLight(color.colorset, color.color, fraction, luminance, saturation)
                 for fraction in _reach(color.fraction, params) for luminance in luminances
                 for saturation in _reach(color.saturation, params)]

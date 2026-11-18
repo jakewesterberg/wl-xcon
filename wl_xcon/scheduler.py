@@ -326,6 +326,33 @@ class Shortfall:
         return self.because == CAP
 
 
+#: **What a stage carries through the full task** (`Scheduler.play_full`; the PI, 2026-11-18, "Pick
+#: up where it was"): every part of the open block's own state `_open` starts afresh but the
+#: stream's (`in_session`, the record's block number, which the reopened block takes anew) and the
+#: drum switch's (`_switched`, `_carried`, a person's and the run's): its counts, its windows and
+#: bars, its queue, repeats and drum, its designed order, whether its time ran out, and when its top
+#: stage passed.
+_CARRIED = (
+    "_counts", "_queue", "_window", "_back", "_up", "_down", "_widen", "_shown", "_aside",
+    "_bar_answered", "_answered", "_eased_chain", "_tries", "_drawn", "_due", "_drum", "_expired",
+    "passed_at", "_design", "_plan", "_place", "_cycle", "_groups", "_passes", "_runs", "_lengths",
+    "_coming", "_at", "_seen", "_again",
+)
+#: A condition's counts before any trial (`Scheduler._report`'s `_before` for a block opened
+#: afresh). Never changed.
+_UNCOUNTED = Counts()
+
+
+def _kept(value):
+    """`value` as a stage keeps it through the full task: a container copied, each `deque` at its
+    own length, since `Scheduler._open` clears some in place; anything else as it is."""
+    if isinstance(value, deque):
+        return deque(value, maxlen=value.maxlen)
+    if isinstance(value, (list, dict)):
+        return type(value)(value)
+    return value
+
+
 @dataclass
 class Scheduler:
     blocks: list[Block]
@@ -485,6 +512,15 @@ class Scheduler:
     #: sequence (`_position`) left as it was, the stage it reopens at; `None` otherwise.
     _frozen: bool = field(init=False, default=False, repr=False)
     _full: int | None = field(init=False, default=None, repr=False)
+    #: **The stage the full task left, as it was** (`play_full`; the PI, 2026-11-18: "Pick up where
+    #: it was: the stage resumes with its trial count and its last-N-trials window as you left
+    #: them; the full-task trials in between are skipped over"): its own state by attribute name
+    #: (`_CARRIED`) while the full task plays, `None` otherwise; and **what the reopened stage
+    #: carried in**, each condition's counts as it reopened, by name (empty for a block opened
+    #: afresh), which its report leaves out (`_report`), so each block's report counts its own
+    #: trials and the run's end row counts none twice.
+    _left: dict | None = field(init=False, default=None, repr=False)
+    _before: dict = field(init=False, default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -1300,17 +1336,24 @@ class Scheduler:
                 "value": self._groups[group][1]}
 
     def _report(self, condition: str) -> ConditionReport:
+        """One condition's `ConditionReport` in the open block: **its own trials only** -- a stage
+        reopened after the full task carries its counts in (`play_full`), which its report leaves
+        out (`_before`), so the run's end row counts no trial twice -- and what it still owes, the
+        stage's."""
         counts = self._counts[condition]
+        before = self._before.get(condition, _UNCOUNTED)
         waiting = self._drum is not None and self._drum[0] == condition
         # **A drummed try still in flight counts too**: `next_trial` cleared `_drum` at its draw, so
         # a run that faults or is stopped mid-try would otherwise read 0 failed tries in a row.
         flying = (self.drawn is not None and self.drawn.drummed
                   and self.drawn.condition.name == condition
                   and counts.attempted > counts.presented)
+        trials, presented = counts.trials - before.trials, counts.presented - before.presented
         return ConditionReport(
-            self.block.name, condition, counts.trials, counts.presented, counts.right,
-            counts.wrong, counts.right_first, self.owed(condition), counts.repeats,
-            counts.forgiven, counts.flagged, counts.presented - counts.trials,
+            self.block.name, condition, trials, presented, counts.right - before.right,
+            counts.wrong - before.wrong, counts.right_first - before.right_first,
+            self.owed(condition), counts.repeats - before.repeats,
+            counts.forgiven - before.forgiven, counts.flagged, presented - trials,
             self._tries if waiting or flying else 0,
         )
 
@@ -1516,6 +1559,7 @@ class Scheduler:
             self._opened.add(index)
         self.in_session = None
         self.passed_at = None
+        self._before = {}
         self._counts = {c.name: Counts() for c in self.block.conditions}
         self._queue.clear()
         self._window.clear()
@@ -1586,10 +1630,24 @@ class Scheduler:
         (`suggestion`, `widening`, `holds`); and **each trial is counted toward no bar** -- not
         the criterion's window, the fall-back's, a confirmed progression's bars nor the panel's
         last answers -- and, in a training progression, neither its stage's number of trials nor
-        its targets, as an eased one is not (`record`). A person's own move still applies
-        (`move`). The staircase is the session's (`taskd.Session`), which steps none while
-        frozen."""
+        its targets, as an eased one is not (`record`). **Nor toward its stage's time limit**
+        (`clock_held`; the PI, 2026-11-18: "Stop the clock: frozen time doesn't count toward the
+        stage's time limit. Switching back on picks up with the time the stage had left"). A
+        person's own move still applies (`move`). The staircase is the session's
+        (`taskd.Session`), which steps none while frozen."""
         self._frozen = bool(on)
+
+    @property
+    def clock_held(self) -> bool:
+        """**Whether the open block's time stands still now** (`Block.time_limit_s`; the PI,
+        2026-11-18, "Stop the clock"): while a training progression is frozen (`freeze`), whose
+        stage it holds. The session's trial clock counts toward the open block's time limit only
+        the trials run while this is false (`taskd.Session`, which reads it as each trial's time is
+        added), so a stage switched back on has exactly the time it had left as it was frozen, and
+        several freezes add up. **The run's own time limit** (`task.Plan.time_limit_s`) is the
+        run's, not the stage's, and runs on. In a plan that is no progression a frozen block still
+        ends as declared (`ends`), on its time too, so its clock runs."""
+        return self._frozen and isinstance(self.order, ByCriterion)
 
     def play_full(self, index: int | None, by: object = None) -> Block:
         """**Into the plan's full task, or back out of it** (the training switch's `"full"`;
@@ -1598,11 +1656,33 @@ class Scheduler:
         switched), and plays with no move -- no rule, fall-back or time ends it (`ends`), its
         conditions drawn on past their targets, nothing suggested and no bar fed (`record`);
         with `None`, **the stage the run left reopens**, its place in the run's sequence as it
-        was, started afresh as any block opened is. Returns the block open now."""
+        was, **and picks up where it was** (the PI, 2026-11-18: "Pick up where it was: the stage
+        resumes with its trial count and its last-N-trials window as you left them; the
+        full-task trials in between are skipped over"): a block of its own in the stream, as
+        wl-preproc accepted, but carrying the stage's own state as the full task found it
+        (`_CARRIED`) -- each condition's counts, so its number of trials and its targets, the
+        criterion's window and the fall-back's, a confirmed progression's bars and the panel's
+        last answers, its queue, its repeats waiting and a drummed trial waiting, its designed
+        order's place, whether its time had run out and when its top stage passed. The full
+        task's trials are in none of them, as they fed no bar (`record`). Its report counts its
+        own trials (`_report`). Returns the block open now."""
         self._reports.extend(self.block_report)
+        if index is not None and self._full is None:
+            # The stage as the full task finds it, each container copied, since `_open` clears
+            # some in place.
+            self._left = {name: _kept(getattr(self, name)) for name in _CARRIED}
         self.close(SHAPING, by)
         self._full = index
-        return self._open(self._type_at(self._position) if index is None else index, SHAPING)
+        opened = self._open(self._type_at(self._position) if index is None else index, SHAPING)
+        if index is None and self._left is not None:
+            for name, kept in self._left.items():
+                setattr(self, name, kept)
+            self._left = None
+            for counts in self._counts.values():
+                # A flag is its block's: the reopened block's report flags what it forgives.
+                counts.flagged = False
+            self._before = {name: replace(counts) for name, counts in self._counts.items()}
+        return opened
 
     @property
     def full(self) -> bool:

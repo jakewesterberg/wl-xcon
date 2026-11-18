@@ -5,7 +5,9 @@ revertible; frozen holds the stage, every staircase's level and the pool's pairi
 no suggestion and no step, its trials counted toward no bar; full task plays the plan's finished
 version, `Plan.full`, as a block of its own, its staircase at its hardest level and its values over
 its conditions, each line naming them `drawn: "full"`; on again reopens the stage left at its
-staircase's level ("Pick up where it left").
+staircase's level ("Pick up where it left"), its count, its windows and its time left as it left
+them (the PI, 2026-11-18, "Pick up where it was"). Frozen time is not the stage's: its time limit
+counts none of it (the PI, 2026-11-18, "Stop the clock").
 
 Engine test material, run only in the simulator: the reference search task with a pool of three
 pairings of its own looks and a confirmed progression of two stages, Fade-in, whose staircase
@@ -285,7 +287,8 @@ def test_full_task_plays_its_block_at_its_hardest_with_its_values(tmp_path):
 def test_on_after_full_reopens_the_stage_left_at_its_level(tmp_path):
     """**On again, the stage left reopens at its staircase's level** ("Pick up where it left"):
     three right answers step Fade-in to 30 cd/m2; the full task plays three trials of Crowd; on
-    again, Fade-in reopens as a block of its own at 30, its count fresh."""
+    again, Fade-in reopens as a block of its own at 30, its count and windows as it left them
+    (`test_a_return_from_the_full_task_picks_the_stage_up_where_it_was`)."""
     script = ["right"] * 10
     session = _session(tmp_path, script, {5: [Shaping("full", JAKE)], 8: [Shaping("on", JAKE)]})
 
@@ -437,3 +440,155 @@ def test_the_switch_round_trips_on_the_wire():
     assert _decode_command(_encode_command(Shaping("full", JAKE))) == Shaping("full", JAKE)
     with pytest.raises(CommandRefused, match="none of them"):
         _decode_command(_encode_command(Shaping("off", JAKE)))
+
+
+# --- the stage's clock and its return (the PI, 2026-11-18) -----------------------------------
+
+#: Fade-in with a time limit of 6 s of trials: each scripted right answer here takes 1.125 s (270
+#: frames at 240 Hz, its ITI included), so an unfrozen Fade-in ends on its time after 6 trials.
+TIMED = "criterion=(0.8, 5), time_limit_s=6.0, staircase=Staircase('fix_luminance'"
+
+
+def _timed() -> str:
+    source = _source()
+    assert source.count("criterion=(0.8, 5), staircase=Staircase('fix_luminance'") == 1
+    return source.replace("criterion=(0.8, 5), staircase=Staircase('fix_luminance'", TIMED)
+
+
+def _fade_ins(session: Session) -> list[str]:
+    """Each line's training switch, for the lines Fade-in played."""
+    return [line["shaping"] for line in _lines(session) if line["block"] == "Fade-in"]
+
+
+def test_frozen_stops_the_stages_clock_and_on_picks_up_its_time_left(tmp_path):
+    """**"Stop the clock"** (the PI, 2026-11-18: "frozen time doesn't count toward the stage's time
+    limit. Switching back on picks up with the time the stage had left"): Fade-in, 6 s, three trials
+    in (2.625 s left), is frozen for nine trials, 10.125 s, far past its limit; its time left stands
+    at 2.625 s on every frozen boundary, it does not move the moment training is on, and it ends on
+    its time after exactly the three trials that 2.625 s takes -- the six on trials an unfrozen
+    Fade-in runs."""
+    plain = _session(tmp_path / "plain", ["right"] * 10, source=_timed())
+    plain.run()
+    assert _fade_ins(plain) == ["on"] * 6
+
+    session = _session(tmp_path / "frozen", ["right"] * 20, {
+        3: [Shaping("frozen", JAKE)], 12: [Shaping("on", JAKE)]}, source=_timed())
+
+    session.run()
+
+    assert session.refusals == []
+    frames = _frames(session)
+    assert [frames[at].block_left_s for at in range(3, 13)] == [2.625] * 10
+    assert _fade_ins(session) == ["on"] * 3 + ["frozen"] * 9 + ["on"] * 3
+    assert _lines(session)[12]["block"] == "Fade-in"
+    assert [(end["block"], end["ended"], end["after_trial"]) for end in _ends(session)][0] == (
+        "Fade-in", "time", 14)
+
+
+def test_two_freezes_both_leave_the_stages_clock_still(tmp_path):
+    """**Several freezes add up**: Fade-in frozen for four trials, on for two, frozen for five, then
+    on runs exactly the six on trials its 6 s take, whatever the frozen time between them."""
+    session = _session(tmp_path, ["right"] * 24, {
+        2: [Shaping("frozen", JAKE)], 6: [Shaping("on", JAKE)],
+        8: [Shaping("frozen", JAKE)], 13: [Shaping("on", JAKE)]}, source=_timed())
+
+    session.run()
+
+    assert session.refusals == []
+    assert _fade_ins(session) == (
+        ["on"] * 2 + ["frozen"] * 4 + ["on"] * 2 + ["frozen"] * 5 + ["on"] * 2)
+    assert _ends(session)[0]["ended"] == "time"
+
+
+def test_the_full_tasks_time_is_not_the_stages(tmp_path):
+    """**With a return from the full task, the stage's time left is as it was**: Fade-in, two trials
+    in (3.75 s left), plays the full task for eight trials, 9 s, past its limit; back on, it reopens
+    with 3.75 s left and runs exactly the four trials an unfrozen Fade-in has left."""
+    session = _session(tmp_path, ["right"] * 20, {
+        2: [Shaping("full", JAKE)], 10: [Shaping("on", JAKE)]}, source=_timed())
+
+    session.run()
+
+    assert session.refusals == []
+    frames = _frames(session)
+    assert (frames[1].block_left_s, frames[2].block_left_s) == (4.875, None)
+    assert frames[10].block_left_s == 3.75
+    assert [line["block"] for line in _lines(session)][:16] == (
+        ["Fade-in"] * 2 + ["Crowd"] * 8 + ["Fade-in"] * 4 + ["Crowd"] * 2)
+    assert [end["ended"] for end in _ends(session)][:3] == ["shaping", "shaping", "time"]
+
+
+#: Fade-in at its hardest step from its first trial, so each right answer enters its bar to move
+#: up as well as its bar to move back.
+HARDEST = FADE.replace("start=0", "start=2")
+
+
+def test_a_return_from_the_full_task_picks_the_stage_up_where_it_was(tmp_path):
+    """**"Pick up where it was"** (the PI, 2026-11-18: "the stage resumes with its trial count and
+    its last-N-trials window as you left them; the full-task trials in between are skipped
+    over"): four right answers into Fade-in (its bars 4 of 5), three full-task trials of Crowd,
+    then on: Fade-in reopens with both bars as they were, and one more right answer completes the
+    window, the rig suggesting the move up at that boundary with the bars a Fade-in run with no
+    full task suggests it on after its fifth."""
+    plain = _session(tmp_path / "plain", ["right"] * 6, source=_source(fade=HARDEST))
+    plain.run()
+    alone = _frames(plain)
+    assert alone[4].suggestion is None and alone[5].suggestion is not None
+
+    session = _session(tmp_path / "full", ["right"] * 9, {
+        4: [Shaping("full", JAKE)], 7: [Shaping("on", JAKE)]}, source=_source(fade=HARDEST))
+
+    session.run()
+
+    assert session.refusals == []
+    assert [line["block"] for line in _lines(session)] == (
+        ["Fade-in"] * 4 + ["Crowd"] * 3 + ["Fade-in"] * 2)
+    frames = _frames(session)
+    assert (frames[3].bars.of, frames[3].bars.up_of) == (3, 3)
+    assert frames[7].bars == alone[4].bars
+    assert (frames[7].bars.of, frames[7].bars.up_of) == (4, 4)
+    assert frames[7].suggestion is None
+    assert frames[8].suggestion is not None and frames[8].bars == alone[5].bars
+    assert frames[8].suggestion.move == alone[5].suggestion.move
+
+
+def test_a_stage_back_from_the_full_task_ends_on_its_carried_count(tmp_path):
+    """**Its trial count carried**: a Fade-in of six trials, moving up of itself, four trials in,
+    then three of the full task, then on: two more trials end it on its rule, as six would end it
+    with no full task, and the full task's trials are in its count nowhere. **Each block reports its
+    own trials** in the run's end row: four, three, two -- no trial counted twice."""
+    counted = _source(order="ByCriterion(fall_back=(0.5, 4))").replace(
+        "criterion=(0.8, 5), staircase=Staircase('fix_luminance'",
+        "trials=6, staircase=Staircase('fix_luminance'")
+    assert "trials=6" in counted
+    session = _session(tmp_path, ["right"] * 12, {
+        4: [Shaping("full", JAKE)], 7: [Shaping("on", JAKE)]}, source=counted)
+
+    session.run()
+
+    assert session.refusals == []
+    assert [line["block"] for line in _lines(session)][:10] == (
+        ["Fade-in"] * 4 + ["Crowd"] * 3 + ["Fade-in"] * 2 + ["Crowd"])
+    assert [end["ended"] for end in _ends(session)][:3] == ["shaping", "shaping", "rule"]
+    rows = [json.loads(line) for line in (session.directory / "runs.jsonl").read_text()
+            .splitlines()]
+    end = next(row for row in rows if row["event"] == "end")
+    assert [(each["block"], each["trials"]) for each in end["conditions"]][:3] == [
+        ("Fade-in", 4), ("Crowd", 3), ("Fade-in", 2)]
+
+
+def test_a_stage_back_from_the_full_task_meets_its_rule_on_its_carried_window(tmp_path):
+    """**Its criterion window carried**, in a progression that moves of itself: four right answers
+    into Fade-in (its rule, 80% of its last 5 answers right), three of the full task, then on:
+    the first right answer back fills its window of five, and Fade-in ends on its rule at that
+    boundary, as its fifth would end it with no full task."""
+    session = _session(tmp_path, ["right"] * 11, {
+        4: [Shaping("full", JAKE)], 7: [Shaping("on", JAKE)]},
+        source=_source(order="ByCriterion(fall_back=(0.5, 4))"))
+
+    session.run()
+
+    assert session.refusals == []
+    assert [line["block"] for line in _lines(session)][:9] == (
+        ["Fade-in"] * 4 + ["Crowd"] * 3 + ["Fade-in"] + ["Crowd"])
+    assert [end["ended"] for end in _ends(session)][:3] == ["shaping", "shaping", "rule"]

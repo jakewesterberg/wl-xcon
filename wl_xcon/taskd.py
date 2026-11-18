@@ -253,8 +253,9 @@ def _realization(shown, row) -> dict:
     up together (`desaturation`), each color's light at full in CIE XYZ, cd/m² (`xyz`), and its
     output levels, red, green and blue (`drive`); and **the calibration's macaque luminance row**
     (`macaque_row`, `row`; the console settings build, told to wl-preproc 2026-11-17), the weights
-    that turn an XYZ into its macaque luminance, so a reader computes any light's XYZ at its
-    saturation and fraction from the record alone (`photometry.colorset_xyz`'s formula)."""
+    that turn an XYZ into its macaque luminance, so a reader computes any light's XYZ from the
+    record alone: from its look's `light_xy` on the trial line (`record._light_xy`), its fraction
+    and its luminance (`photometry.colorset_xyz`'s rule; accepted by wl-preproc 2026-11-18)."""
     return {
         "luminance_cd_m2": shown.luminance,
         "desaturation": shown.desaturation,
@@ -3805,13 +3806,18 @@ class Session:
         given; the console settings design's §8), between trials:
 
         - **frozen**: the scheduler holds the stage (`Scheduler.freeze`), and a suggestion standing
-          is withdrawn as `_lapse` withdraws one; no staircase steps from the next trial (`run`);
-        - **full**: the stage left keeps its staircase's level (`_leave`), a suggestion standing
-          lapses, and the run enters its plan's full task's block as a block of its own
-          (`Scheduler.play_full`), closing the open one in the stream (`BLOCK_END`) as a move does;
+          is withdrawn as `_lapse` withdraws one; no staircase steps from the next trial (`run`),
+          and **the stage's clock stops**: its time limit counts no frozen trial's time
+          (`Scheduler.clock_held`; the PI, 2026-11-18, "Stop the clock");
+        - **full**: the stage left keeps its staircase's level (`_leave`) and the time it has spent
+          (`_stage_spent`), a suggestion standing lapses, and the run enters its plan's full
+          task's block as a block of its own (`Scheduler.play_full`), closing the open one in the
+          stream (`BLOCK_END`) as a move does;
         - **on again from the full task**: the stage left reopens as a block of its own, its
           staircase at the level it was left at (`_rejoin`, `_resumed`; the PI's "Pick up where it
-          left").
+          left"), **and its count, its windows and its time left as they were** (the PI,
+          2026-11-18, "Pick up where it was"; `Scheduler.play_full`): the full task's trials and
+          its time are the stage's in nothing.
 
         Then its `shaping` change row, **strobing nothing, with no `sequence`** (XC-513's group 4),
         `name` `"shaping"`, `was` and `now` positions and `meaning` null -- a revert's naming the
@@ -3824,6 +3830,10 @@ class Session:
             self._rejoin = scheduler.block.name
             opened = f"; block {scheduler.block.name} reopens where it was left"
         if now == "full":
+            # **The stage's time as the full task finds it** (the PI, 2026-11-18, "Pick up where it
+            # was"): the full task's time is not the stage's, so the stage reopens with the time
+            # it had left (frozen time already out of it, `Scheduler.clock_held`).
+            self._stage_spent = self._elapsed - self._block_from
             self._leave()
             self._lapse()
             full = self._played.full
@@ -3835,7 +3845,7 @@ class Session:
             if self._levels.end_block():
                 self.card.emit(BLOCK_END)
             self.blocks_run.append(scheduler.block.name)
-            self._block_from = self._elapsed
+            self._block_from = self._elapsed - (self._stage_spent if was == "full" else 0.0)
         scheduler.freeze(now == "frozen")
         if now == "frozen":
             self._lapse(FROZE)
@@ -5850,6 +5860,10 @@ class Session:
     #: once it has.
     _shaped: str = field(init=False, default="on", repr=False)
     _rejoin: str | None = field(init=False, default=None, repr=False)
+    #: **The trial time the stage the full task left had spent toward its time limit**
+    #: (`_apply_shaping`; the PI, 2026-11-18, "Pick up where it was"), which it has spent again as
+    #: it reopens, so it has the time it had left; 0 until a full task starts.
+    _stage_spent: float = field(init=False, default=0.0, repr=False)
     #: **The run's color-set lights and each set's luminances it has realized and written**, as
     #: `(set name, cd/m²)` (`_realize`; the pop-out search build's fix round): the start row's,
     #: then each a line writes first.
@@ -6935,7 +6949,7 @@ class Session:
         self._suggested, self._suggestions = None, {}
         # Training on, as every run starts (the console settings design's §8; XC-513's "a run
         # starts on"), with no stage to rejoin from a full task.
-        self._shaped, self._rejoin = "on", None
+        self._shaped, self._rejoin, self._stage_spent = "on", None, 0.0
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
         # Each color set's luminances realized and written in this run (`_realize`).
@@ -7457,7 +7471,13 @@ class Session:
                     ended()
                 # The marks this trial's frames stamped, written now that it is over.
                 self._settle_stamps(index)
-                self._elapsed += result.frames * self.spec.frame_period + self.spec.iti
+                spent = result.frames * self.spec.frame_period + self.spec.iti
+                self._elapsed += spent
+                if scheduler.clock_held:
+                    # **Frozen time is not the stage's** (the PI, 2026-11-18, "Stop the clock"):
+                    # the open block's time limit counts from a start moved on by this trial's
+                    # time, so its time left stands still while frozen and picks up as it was.
+                    self._block_from += spent
                 if result.outcome is not None:
                     # The terminal `Marker`, which is `wl-preproc`'s and the
                     # framework's to emit -- a task declares an `Outcome` and never a
@@ -7559,6 +7579,9 @@ class Session:
                     # console settings design's §5).
                     object_windows=tuple(window for window in trial.windows
                                          if isinstance(window, ObjectWindows)),
+                    # The light each look is drawn in (`light_xy`; wl-preproc, 2026-11-18), on the
+                    # run's panel.
+                    calibration=self.spec.calibration,
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,

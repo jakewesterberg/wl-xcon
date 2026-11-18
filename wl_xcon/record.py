@@ -255,9 +255,10 @@ def _written(value: object) -> object:
     alone** (`canonical`'s `sets_by_name`; the pop-out search build's final fixes, 2026-11-07, told
     to wl-preproc before it was written): `{"class": "ColorSetLight", "fields": {"color": "blue",
     "colorset": "isohue", "fraction": 1.0, "luminance": null, "saturation": 1.0}}` -- **its
-    `saturation` always written** (the console settings build, told to wl-preproc 2026-11-17: a
-    number, or a setting by reference), so a reader computes its light from the realization
-    (`photometry.colorset_xyz`'s formula) -- the set itself -- its colors, apex, held luminance,
+    `saturation` always written** (the console settings build, accepted by wl-preproc 2026-11-18:
+    a number, or a setting by reference), the chromaticity it is drawn at its look's `light_xy`
+    beside it on the line (`_stimuli`), so a reader computes its light from that and the
+    realization (`photometry.colorset_xyz`'s rule) -- the set itself -- its colors, apex, held luminance,
     source and `design`, and how the rig drew it, each realization with its calibration's
     `macaque_row` -- defined once in each run's start row (`color_sets`), where written whole it
     rode every trial line once per look, about 3.9 KB a line.
@@ -301,7 +302,39 @@ def _written(value: object) -> object:
 _UNREADABLE = (KeyError, TypeError, ValueError, IndexError, ArithmeticError)
 
 
-def _stimuli(placed: tuple, values: dict, windows: tuple = ()) -> list[dict]:
+def _light_xy(looks, values: dict, calibration) -> "list[float] | None":
+    """**The CIE 1931 `[x, y]` of the light a look is drawn in, where a color set's light draws it**
+    (`photometry.ColorSetLight`; its `light_xy`, accepted by wl-preproc 2026-11-18): a sized look's
+    `color` (`Disc`, `Square`, `Cross`, `Polygon`) or a `Look`'s flat fill's, bound from `values`,
+    at its saturation and after any move into the gamut (`photometry.colorset_xy`); `None` for
+    any other look or light, with no calibration, and where it cannot be read."""
+    from wl_xcon.look import Flat, Look
+    from wl_xcon.photometry import ColorSetLight, colorset_xy
+    from wl_xcon.task import SIZED_LOOKS, P
+
+    def value(field):
+        return values.get(field.name) if isinstance(field, P) else field
+
+    looks = value(looks)
+    if isinstance(looks, SIZED_LOOKS):
+        light = value(looks.color)
+    elif isinstance(looks, Look) and isinstance(looks.fill, Flat):
+        light = value(looks.fill.color)
+    else:
+        return None
+    if not isinstance(light, ColorSetLight) or calibration is None:
+        return None
+    try:
+        bound = ColorSetLight(light.colorset, light.color, fraction=value(light.fraction),
+                              luminance=value(light.luminance),
+                              saturation=value(light.saturation))
+        (x, y), _ = colorset_xy(bound, calibration)
+    except _UNREADABLE:
+        return None
+    return [float(x) + 0.0, float(y) + 0.0]
+
+
+def _stimuli(placed: tuple, values: dict, windows: tuple = (), calibration=None) -> list[dict]:
     """**Where each stimulus a trial showed was** (XC-399; the PI, 2026-10-19, "Record both, tell
     wl-preproc"), as its line writes it: one entry for each `Show` and each `Update` the trial drew,
     in the order they took effect (`run.Result.placed`).
@@ -330,6 +363,15 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = ()) -> list[dict]:
     `size_deg` and `window_deg`, its object window's radius in degrees (`windows`, the trial's
     `ObjectWindows`; `ObjectWindows.radius_at`), both keys always written, `window_deg` null where
     the array has no object window.
+
+    **And the light each look is drawn in** (the PI's CAM16-UCS answer of 2026-11-18; accepted by
+    wl-preproc 2026-11-18 as named): every entry's and each of an array's `objects`' `light_xy`,
+    the CIE 1931 `[x, y]` of the light, where a color set's light draws it (`ColorSetLight`), after
+    its saturation and any move into the gamut its realization made (`_light_xy`,
+    `photometry.colorset_xy`) on `calibration`, the run's; null for an array's own entry (its
+    objects carry theirs), for a look in no color set's light, and where it cannot be read; the key
+    always written. A reader's light at any saturation: `u = (x/y, 1, (1 − x − y)/y)`, `L =
+    fraction × luminance`, `XYZ = u × L / (macaque_row · u)`.
 
     **Never raises on a position** (the review's I1): one naming a setting with no value, or one
     that cannot be read, is written null with why in `unresolved` (null when everything resolved),
@@ -420,6 +462,7 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = ()) -> list[dict]:
                             except _UNREADABLE:
                                 own = None
                             object_entry["size_deg"] = size_of(own, place)
+                            object_entry["light_xy"] = _light_xy(own, values, calibration)
                             object_entry["window_deg"] = None
                             if family is not None:
                                 try:
@@ -445,6 +488,9 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = ()) -> list[dict]:
         except _UNREADABLE:
             cyclopean = None
         entry["size_deg"] = None if array else size_of(looks, cyclopean)
+        # **The light it is drawn in** (`_light_xy`; wl-preproc, 2026-11-18): null for an array,
+        # whose objects carry theirs.
+        entry["light_xy"] = None if array else _light_xy(looks, values, calibration)
         if array:
             entry["target"] = None
             if unset(looks.target):
@@ -538,6 +584,7 @@ class SessionRecord:
         color_realized: dict | None = None,
         object_windows: tuple = (),
         shaping: str = "on",
+        calibration=None,
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -605,10 +652,11 @@ class SessionRecord:
         it** (`shaping`, one of `task.SHAPING`: `"on"`, `"frozen"` or `"full"`; the console
         settings design's §8, XC-513's group 4), so a reader tells a frozen trial, which counted
         toward no bar, and one of the full task from training as declared, its values the full
-        task gave each named `drawn: "full"`. **Returns the line's `stimuli`**, so the session can say on the changes feed
+        task gave each named `drawn: "full"`. And each look's `light_xy` on `calibration`, the
+        run's (`_stimuli`). **Returns the line's `stimuli`**, so the session can say on the changes feed
         that one could not be resolved (`taskd`, once a run).
         """
-        stimuli = _stimuli(placed, params, object_windows)
+        stimuli = _stimuli(placed, params, object_windows, calibration)
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
         self._trials.write(

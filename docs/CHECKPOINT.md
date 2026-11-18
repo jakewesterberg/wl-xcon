@@ -33,17 +33,19 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   order). Before it: the pop-out search and the XC-491 answers; wl-preproc's pop-out reader is on its main, `d8fe06b`.
 - **`console-build-2026-11-17`** (worktree `.claude/worktrees/console-build-2026-11-17`, **not pushed**): the console
   settings build, Tasks 1 to 12 (design `docs/superpowers/specs/2026-11-16-console-settings-design.md`, plan
-  `docs/superpowers/plans/2026-11-16-console-settings.md`), built on `main` `89f7b94`; **6379 passed**, none skipped.
-  Its wl-xtasks half is the branch **`console-settings-2026-11-16`** (`da695de`, from wl-xtasks `64929fe`, not merged,
-  not pushed), which the PI reviews. Filed by the build: XC-516 to XC-519. Open for the PI at review: the DKL default
-  contrast (some directions give no possible light), and the whole-build review's list (the plan's ledger, git-ignored,
-  in the worktree's `.superpowers/sdd/2026-11-16-console-settings/progress.md`).
+  `docs/superpowers/plans/2026-11-16-console-settings.md`), built on `main` `89f7b94`; then its whole-build review's
+  fix wave (`f8a4071`: I1 to I3 and the small items; XC-520 to XC-522 filed); then **the PI's four answers of
+  2026-11-18**, built after it: frozen stops a training stage's clock, so on again picks up with the time it had left;
+  a return from the full task picks the stage up where it was (its count, its windows, its time left); a light's
+  saturation scales its CAM16-UCS chroma at a fixed hue (COL-39), each trial line writing each look's `light_xy`; and
+  the DKL default contrast stays the set's mean radius. **6407 passed**, none skipped. Its wl-xtasks half is the branch
+  **`console-settings-2026-11-16`** (`da695de`, from wl-xtasks `64929fe`, not merged, not pushed), which the PI
+  reviews. The ledger, git-ignored: the worktree's `.superpowers/sdd/2026-11-16-console-settings/`.
 - **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the pop-out's
   revision, designed with the PI and approved (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks,
-  ask XC-514, codes from 4139). Its counter text must say XC-520 (the next free) when it is built.
-- **wl-preproc** has XC-513 (the console settings' record shapes) and its 2026-11-18 addendum (block end `shaping`, a
-  revert of the switch writing a `shaping` row), both sent by message, and **has not answered**. Acceptance is the PI's
-  call in that session; we build to our names meanwhile.
+  ask XC-514, codes from 4139). Its counter text must say XC-523 (the next free) when it is built.
+- **wl-preproc accepted XC-513 in full on 2026-11-18** (groups 1 to 4 and the addendum, no renames), and `light_xy`
+  in place of the xy saturation formula, as named; the ask is marked answered in `docs/pending-wl-preproc-amendments.md`.
 
 ## What exists
 - **Tasks**: the task object and its load check (`task.py`, `check.py`), engine builds A1 to C3; five reference
@@ -66,8 +68,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07, 2026-11-14 and 2026-11-16)
-1. **The console settings build to merge**, in this order: one whole-build review (the most capable model); the PI's
-   review of the wl-xtasks branch `console-settings-2026-11-16`; his Safari try-out; CI (a sweep by hand on the
+1. **The console settings build to merge**, in this order: a scoped review of the fix wave and of the PI's-answers
+   build (from `3a110ad`); the PI's review of the wl-xtasks branch `console-settings-2026-11-16` (its training bounds,
+   XC-519); his Safari try-out (run `tests/test_page_browser.py` in WebKit first); push and CI (a sweep by hand on the
    branch); the merge on his yes by name. **Then the pop-out revision**, from `tryout-design-2026-11-17`.
 2. **The XC-505 warning**, a side build after demo mode (the PI, 2026-11-14: "Warn when settings allow it").
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.
@@ -83,7 +86,7 @@ is settled from his stated principles and told to him in one line; every merge w
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, at `d8fe06b` or later, and a `wl-xtasks`
   one, git-ignored at `/wl-xtasks`; wl-sync at the commit `wl-preproc/pyproject.toml` pins). **6200 passed on
-  `main`** (`89f7b94`); 6379 on `console-build-2026-11-17`; none skipped.
+  `main`** (`89f7b94`); 6407 on `console-build-2026-11-17`; none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`), the nightly all, in 36 shards;
   a big branch runs that sweep by hand before its merge (`gh workflow run ci.yml --ref <branch>`). Read every shard's
   log to its closing line; the run's summary can be wrong.

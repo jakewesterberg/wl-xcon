@@ -8,7 +8,10 @@ revision](2026-11-16-popout-revision-design.md), uses what this one builds.
 > **Built 2026-11-18** on branch `console-build-2026-11-17` (Tasks 1 to 12 of the plan, not merged; wl-xtasks'
 > half on `console-settings-2026-11-16`). Where the build differs from this design, the plan's ledger and the
 > code are the record: a size's lowest is left open rather than given an invented number; `frozen` also holds a
-> stage's time limit; the DKL default contrast is open with the PI (some directions give no possible light).
+> stage's time limit, **and since the PI's answers of 2026-11-18 stops its clock**, so on again picks up with the
+> time it had left; **a return from the full task picks the stage up where it was** (its count, its windows, its
+> time left); **a light's saturation scales its CAM16-UCS chroma at a fixed hue** (COL-39), each line writing the
+> light's `light_xy`; the DKL default contrast stays the set's mean radius (the PI, 2026-11-18).
 
 ## 1. Why
 

@@ -5,10 +5,11 @@ set, then you have salience options for each hue", salience "Both, as two choice
 A pick names a set and a hue (`link.SetColor`) and goes through `Session.set`, unchanged, as the
 one declared choice it names (`task.color_choices`, `Session._color`), so it is staged until the
 next trial and recorded as any value set is. A light's saturation (`photometry.ColorSetLight
-.saturation`) moves it toward its set's apex, its macaque luminance held: at 0 every hue is the
-set's gray, so a target and its distractors both at 0 leave no odd one (the plan's Review Focus 5).
-Telemetry carries a look as its words (XC-420), and the record writes each light's saturation and
-each realization's macaque row, so a reader computes every light from the record alone.
+.saturation`) scales its CAM16-UCS chroma at its hue toward its set's apex (COL-39), its macaque
+luminance held: at 0 every hue is the set's gray, so a target and its distractors both at 0 leave
+no odd one (the plan's Review Focus 5). Telemetry carries a look as its words (XC-420), and the
+record writes each light's saturation, each realization's macaque row and each look's `light_xy`,
+so a reader computes every light from the record alone.
 
 The fixture is `visual_search` drawn in the isohue set: its target's three looks and its
 distractors' two, each color-set light reading a saturation setting of its role, the distractors'
@@ -405,12 +406,19 @@ def _bound(form: dict, params: dict) -> object:
     return form
 
 
+def _fixating(trial, values, index) -> Scripted:
+    """The fixation point held, so the search shows, and no answer: each trial ends unanswered."""
+    return Scripted({}, inside={frame: "fix" for frame in range(1, 400)})
+
+
 @pytest.mark.parametrize("calibration", ["srgb", "narrow"])
 def test_a_reader_rebuilds_each_lights_xyz_from_the_record_alone(tmp_path, calibration):
-    """wl-preproc's formula (the ask's group 3), from the start row and each trial line alone:
-    `xy = apex + saturation × (realized xy − apex)`, `L = fraction × luminance`, and with
-    `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)` -- equal to the rig's own
-    light (`colorset_xyz`) to 1e-9, on the standard and on a panel that desaturates the set."""
+    """wl-preproc's rule (accepted 2026-11-18, the PI's CAM16-UCS answer), from each trial line and
+    the start row alone: with `u = (x/y, 1, (1 − x − y)/y)` from the look's `light_xy`, `L =
+    fraction × luminance` and the realization's `macaque_row`, `XYZ = u × L / (macaque_row · u)` --
+    equal to the rig's own light (`colorset_xyz`) to 1e-9 for each of the search's objects, on the
+    standard and on a panel that desaturates the set. The search's own entry and the fixation
+    point, drawn in no color set's light, write `light_xy` null."""
     from _calibrations import measured
 
     panel = SRGB if calibration == "srgb" else measured(green=photometry.xyY(0.30, 0.45, 140.0))
@@ -418,29 +426,37 @@ def test_a_reader_rebuilds_each_lights_xyz_from_the_record_alone(tmp_path, calib
     values = {"target_saturation": 0.4, "distractor_saturation": 0.7, "distractor_fraction": 0.6,
               "color_luminance": 12.0}
     session = _session(tmp_path, link, trials=2, values=values, calibration=panel)
+    session.world = _fixating
 
     session.run()
 
     (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
     defined = start["color_sets"]["isohue"]
     task = session._task
-    for line in _rows(session, "trials.jsonl"):
+    lines = _rows(session, "trials.jsonl")
+    read = 0
+    for line in lines:
         params = line["params"]
-        for name in ("target_appearance", "distractor_appearance"):
+        stimuli = {entry["name"]: entry for entry in line["stimuli"]}
+        assert stimuli["fix"]["light_xy"] is None and stimuli["search"]["light_xy"] is None
+        target = stimuli["search"]["target"]
+        for index, entry in enumerate(stimuli["search"]["objects"]):
+            name = "target_appearance" if index == target else "distractor_appearance"
             fields = params[name]["fields"]["color"]["fields"]
             luminance = _bound(fields["luminance"], params)
             (realization,) = [each for each in defined["realized"]
                               if each["luminance_cd_m2"] == luminance]
             s, f = _bound(fields["saturation"], params), _bound(fields["fraction"], params)
-            (ax, ay), (rx, ry) = defined["apex"], realization["xy"][fields["color"]]
-            x, y = ax + s * (rx - ax), ay + s * (ry - ay)
+            x, y = entry["light_xy"]
             u = (x / y, 1.0, (1.0 - x - y) / y)
             per = sum(r * v for r, v in zip(realization["macaque_row"], u))
-            read = tuple(v * f * luminance / per for v in u)
+            rebuilt = tuple(v * f * luminance / per for v in u)
 
             declared = next(choice for choice in _param(task, name).choices
                             if choice.color.color == fields["color"]).color
             rig = colorset_xyz(photometry.ColorSetLight(
                 declared.colorset, declared.color, fraction=f, luminance=luminance,
                 saturation=s), panel)
-            assert read == pytest.approx(rig, abs=1e-9), (name, fields["color"])
+            assert rebuilt == pytest.approx(rig, abs=1e-9), (name, fields["color"])
+            read += 1
+    assert read == 4 * len(lines) and len(lines) == 2

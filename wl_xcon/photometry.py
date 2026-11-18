@@ -879,15 +879,23 @@ class ColorSetLight(Color):
     **`saturation`, how far it stands from the set's apex** (the console settings design's §6; the
     PI, 2026-11-16: salience "Both, as two choices", a saturation level, gray to full, its
     luminance held): a fraction from 0 to 1, a number or a setting (`P`), hard at both ends (a
-    fraction is at most 1, and below 0 it cannot be). **Its chromaticity is apex + s × (realized
-    xy − apex)**, the realized xy its color's as the set is realized at its luminance
-    (`realize`), and **its macaque luminance, `fraction` times `at()`, is held** (`colorset_xyz`):
-    at 0 it is the set's gray whatever its hue, at 1 the color as the set is shown. **Every
-    saturation of a realizable set is realizable**: the lights of one macaque luminance form a
-    plane in CIE XYZ, a line in xy is a line in that plane (a chromaticity is a ray from black,
-    and a plane of rays through a line meets the plane in a line), and the panel's gamut meets the
-    plane in a convex set, which holds the segment between the apex and the realized color since
-    it holds both ends. So no saturation asks the panel for more than its set already does."""
+    fraction is at most 1, and below 0 it cannot be). **It scales the color's CAM16-UCS chroma at
+    a fixed hue** (the PI, 2026-11-18: "Use CAM16-UCS chroma: saturation scales the color's CAM16
+    chroma at a fixed hue, matching your generator"; COL-39): its chromaticity is the realized
+    color's -- as the set is realized at its luminance (`realize`) -- with its CAM16-UCS (a', b')
+    taken toward the set's apex, the apex read at the same J', by `s` (`saturated_xy`), and **its
+    macaque luminance, `fraction` times `at()`, is held** (`colorset_xyz`): at 0 it is the set's
+    gray whatever its hue, at 1 the color as the set is shown, both exactly. **A saturation between
+    may ask for a light the panel cannot show**: the lights of one macaque luminance form a plane in
+    CIE XYZ and the panel's gamut meets it in a convex set, which holds the straight segment in xy
+    between the apex and the realized color (a chromaticity is a ray from black, and a plane of
+    rays through a line meets the plane in a line) -- but a CAM16-UCS hue line is no straight line
+    in xy, so a point on it between two lights the panel shows need not be one. **Such a light is
+    moved toward the apex in xy by the least share that brings it inside** (`colorset_xy`), as
+    `realize` moves a set's colors, its luminance held and none clipped, and `check` warns of it
+    (`color-set-desaturated`), at load and live. On the sRGB standard at 5, 15, 26 and 30 cd/m²,
+    and on the tests' narrow-green panel, no isohue light needs it at any saturation, read every
+    0.01 (computed 2026-11-18)."""
 
     colorset: ColorSet
     color: str
@@ -1038,23 +1046,106 @@ def realized(colorset: ColorSet, calibration: Calibration,
     return made
 
 
-def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float, float, float]:
-    """CIE XYZ, Y in cd/m², of a color-set light on `calibration`: its color as the set is realized
-    there at its luminance (`realized`, `ColorSetLight.at`), times its `fraction`, **moved toward
-    the set's apex by its `saturation`** (the console settings design's §6), each bound to a number
-    first (`screen.resolve`; `check` reads each value they can take). At saturation 1 the realized
-    light times the fraction, as it always was. Otherwise, as a reader of the record computes it
-    from the start row's realization alone (wl-preproc was told, 2026-11-17): the chromaticity
-    `xy = apex + s × (realized xy − apex)`, the macaque luminance `L = fraction × at()`, and with
-    `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)`, so its macaque luminance is
-    held whatever its saturation. Between trials or at load, never in a frame: the realization is
-    kept (`realized`)."""
-    fraction = light.fraction
-    if not _finite_number(fraction) or fraction < 0.0:
+#: **The CAM16-UCS lightness a light's saturation is read at in a set that declares no design**
+#: (`ColorSet.design`'s `gray_lightness` where it does): the PI's generator's reference gray, J' 65
+#: (wl-style's `02-color/isohue_spectrum/isohue.py`, its `J_REF = 65.0`, as isohue's `source` and
+#: COL-38 read it), so a set copied without its design reads its saturations as the set it copies
+#: does. The builder's call (COL-39).
+GRAY_LIGHTNESS = 65.0
+
+#: The bisection's count for the apex's light at a CAM16-UCS lightness (`_apex_ucs`), each halving
+#: its scale's bracket, which starts at most twice the white's: 60 halvings leave it far under
+#: 1e-12 of the white, colordef's own count for a hue angle's lightness.
+_LIGHTNESS_HALVINGS = 60
+
+#: Each chromaticity `saturated_xy` made, by the set's identity, the realized chromaticity and the
+#: saturation, holding the set: at most `_SATURATED_KEPT`, the oldest forgotten first, so a frame
+#: that binds a light (`screen.resolve`, a demo's page) reads one it was made at between trials.
+_SATURATED: dict = {}
+_SATURATED_KEPT = 256
+
+
+def _frame_light(xy, luminance: float) -> tuple[float, float, float]:
+    """The light of chromaticity `xy` at `luminance` of macaque luminance on the sRGB standard's
+    model (`SRGB_MACAQUE`), CIE XYZ relative to a white of Y 1, CAM16's frame (`cam16`)."""
+    x, y = xy
+    unit = (x / y, 1.0, (1.0 - x - y) / y)
+    per = sum(r * u for r, u in zip(SRGB_MACAQUE, unit))
+    if not per > 0.0:
+        raise ValueError(f"chromaticity ({x:g}, {y:g}) has no positive macaque luminance")
+    return tuple(u * luminance / per for u in unit)
+
+
+def _apex_ucs(apex, lightness: float) -> tuple[float, float, float]:
+    """**The apex's CAM16-UCS J', a' and b' at the lightness `lightness`**: the light of the apex's
+    chromaticity whose J' is `lightness`, found by bisection on its scale (J' rises with it)."""
+    from wl_xcon import cam16
+
+    x, y = apex
+    unit = (x / y, 1.0, (1.0 - x - y) / y)
+    low, high = 0.0, 2.0
+    while cam16.to_ucs(tuple(high * u for u in unit))[0] < lightness:
+        high *= 2.0
+        if high > 1e6:
+            raise ValueError(f"the apex ({x:g}, {y:g}) reaches no CAM16-UCS J' of {lightness:g}")
+    for _ in range(_LIGHTNESS_HALVINGS):
+        middle = (low + high) / 2.0
+        low, high = ((middle, high) if cam16.to_ucs(tuple(middle * u for u in unit))[0] < lightness
+                     else (low, middle))
+    return cam16.to_ucs(tuple((low + high) / 2.0 * u for u in unit))
+
+
+def saturated_xy(colorset: ColorSet, xy, saturation: float) -> tuple[float, float]:
+    """**The chromaticity of a light of `colorset` at `saturation`, its color realized at `xy`**
+    (the PI, 2026-11-18, "saturation scales the color's CAM16 chroma at a fixed hue"; COL-39):
+    the realized color in CAM16-UCS (`cam16`, colour-science 0.4.7's default viewing condition,
+    `cam16.VIEWING`), read in the set's design frame -- held at the macaque luminance of CAM16's
+    achromatic point at the frame's gray lightness (`design["gray_lightness"]`, or
+    `GRAY_LIGHTNESS`), on the sRGB standard's model, as `colordef.gray_ucs` finds the gray -- at
+    its J'; the apex at that same J' (`_apex_ucs`); and the color's (a', b') moved toward the
+    apex's by `saturation`, `(a', b') = apex + s × (color − apex)`, so its hue angle about the apex
+    is unchanged and its chroma is `s` times its own. Only the chromaticity is taken from it.
+    **`s = 1` is `xy` and `s = 0` the apex, exactly**, as the formula's own ends. Before any move
+    into a panel's gamut (`colorset_xy`). Kept (`_SATURATED`); between trials or at load."""
+    from wl_xcon import cam16
+
+    if saturation == 1.0:
+        return (float(xy[0]), float(xy[1]))
+    if saturation == 0.0:
+        return (float(colorset.apex[0]), float(colorset.apex[1]))
+    key = (id(colorset), float(xy[0]), float(xy[1]), float(saturation))
+    kept = _SATURATED.get(key)
+    if kept is not None and kept[0] is colorset:
+        return kept[1]
+    lightness = (GRAY_LIGHTNESS if colorset.design is None
+                 else colorset.design["gray_lightness"])
+    gray = sum(r * v for r, v in zip(SRGB_MACAQUE, cam16.from_ucs((lightness, 0.0, 0.0))))
+    J, a, b = cam16.to_ucs(_frame_light(xy, gray))
+    _, a0, b0 = _apex_ucs(colorset.apex, J)
+    X, Y, Z = cam16.from_ucs((J, a0 + saturation * (a - a0), b0 + saturation * (b - b0)))
+    total = X + Y + Z
+    if not (total > 0.0 and Y > 0.0):
         raise ValueError(
-            f"{light}'s fraction is {fraction!r}: a parameter is bound, or read at each value it "
-            f"can take, and a fraction of the set's luminance is a number, 0 or above"
+            f"color set {colorset.name!r}'s color at ({xy[0]:g}, {xy[1]:g}) at saturation "
+            f"{saturation:g} is no light in CAM16-UCS"
         )
+    made = (X / total, Y / total)
+    if len(_SATURATED) >= _SATURATED_KEPT:
+        _SATURATED.pop(next(iter(_SATURATED)))
+    _SATURATED[key] = (colorset, made)
+    return made
+
+
+def colorset_xy(light: ColorSetLight, calibration: Calibration) -> tuple[tuple[float, float], float]:
+    """**The chromaticity a color-set light is drawn at on `calibration`, and the share of its
+    distance from the apex it gave up there** (`ColorSetLight.saturation`; COL-39): its color as the
+    set is realized at its luminance (`realized`, `ColorSetLight.at`) at its saturation
+    (`saturated_xy`), and, **where that light is outside the panel's gamut at the set's luminance**,
+    moved toward the set's apex in CIE 1931 xy by the least share that brings it inside, found by
+    bisection to `DESATURATION_STEP`, as `realize` moves a set's colors -- its luminance held, none
+    clipped; the share is 0 where it fits, always at saturation 1 and 0. What the record writes as
+    each look's `light_xy` (`record._stimuli`). Each bound to a number first; between trials or at
+    load, never in a frame but a demo page's, which reads what was kept (`_SATURATED`)."""
     saturation = light.saturation
     if not _finite_number(saturation) or not 0.0 <= saturation <= 1.0:
         raise ValueError(
@@ -1062,19 +1153,66 @@ def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float,
             f"it can take, and a saturation is a fraction of the way from the set's apex, 0 to 1"
         )
     shown = realized(light.colorset, calibration, light.at())
+    realized_xy = shown.xy[light.color]
     if saturation == 1.0:
-        X, Y, Z = shown.xyz[light.color]
+        return realized_xy, 0.0
+    xy = saturated_xy(light.colorset, realized_xy, saturation)
+    row = macaque_row(calibration)
+
+    def fits(at) -> bool:
+        x, y = at
+        unit = (x / y, 1.0, (1.0 - x - y) / y)
+        per = sum(r * u for r, u in zip(row, unit))
+        if not per > 0.0:
+            return False
+        light_xyz = tuple(u * shown.luminance / per for u in unit)
+        return all(-TOLERANCE <= w <= 1.0 + TOLERANCE
+                   for w in calibration.weights_of(light_xyz))  # NaN fails closed
+
+    if fits(xy):
+        return xy, 0.0
+    (x, y), (ax, ay) = xy, light.colorset.apex
+
+    def toward(share: float) -> tuple[float, float]:
+        return (x + share * (ax - x), y + share * (ay - y))
+
+    low, high = 0.0, 1.0
+    while high - low > DESATURATION_STEP:
+        middle = (low + high) / 2.0
+        low, high = (low, middle) if fits(toward(middle)) else (middle, high)
+    return toward(high), high
+
+
+def colorset_xyz(light: ColorSetLight, calibration: Calibration) -> tuple[float, float, float]:
+    """CIE XYZ, Y in cd/m², of a color-set light on `calibration`: its color as the set is realized
+    there at its luminance (`realized`, `ColorSetLight.at`), times its `fraction`, **at its
+    `saturation`, its CAM16-UCS chroma scaled at a fixed hue** (the console settings design's §6;
+    the PI, 2026-11-18; COL-39), each bound to a number first (`screen.resolve`; `check` reads each
+    value they can take). At saturation 1 the realized light times the fraction, as it always was.
+    Otherwise its chromaticity is `colorset_xy`'s -- what each trial line writes as the look's
+    `light_xy`, accepted by wl-preproc 2026-11-18 -- and, as a reader computes it from that line
+    and the start row's realization alone, the macaque luminance `L = fraction × at()`, and with
+    `u = (x/y, 1, (1 − x − y)/y)`, `XYZ = u × L / (macaque_row · u)`, so its macaque luminance is
+    held whatever its saturation. Between trials or at load, never in a frame: the realization and
+    each chromaticity are kept (`realized`, `saturated_xy`)."""
+    fraction = light.fraction
+    if not _finite_number(fraction) or fraction < 0.0:
+        raise ValueError(
+            f"{light}'s fraction is {fraction!r}: a parameter is bound, or read at each value it "
+            f"can take, and a fraction of the set's luminance is a number, 0 or above"
+        )
+    xy, _ = colorset_xy(light, calibration)
+    if light.saturation == 1.0:
+        X, Y, Z = realized(light.colorset, calibration, light.at()).xyz[light.color]
         return (fraction * X, fraction * Y, fraction * Z)
-    (ax, ay), (rx, ry) = light.colorset.apex, shown.xy[light.color]
-    return _held_light((ax + saturation * (rx - ax), ay + saturation * (ry - ay)),
-                       fraction * light.at(), calibration)
+    return _held_light(xy, fraction * light.at(), calibration)
 
 
 def _held_light(xy, luminance: float, calibration: Calibration) -> tuple[float, float, float]:
     """The light of chromaticity `xy` at `luminance` cd/m² of macaque luminance on `calibration`
     (`macaque_row`), CIE XYZ in cd/m²: `u × L / (macaque_row · u)`, `u = (x/y, 1, (1 − x − y)/y)`,
-    as `realize` makes each color's. A chromaticity a realizable set's segment holds has a positive
-    macaque luminance per unit, since both its ends do and the row is linear in `y·u`."""
+    as `realize` makes each color's, and as a reader of the record makes a look's from its
+    `light_xy`. Raises `ValueError` for a chromaticity of no positive macaque luminance there."""
     x, y = xy
     unit = (x / y, 1.0, (1.0 - x - y) / y)
     per = sum(r * u for r, u in zip(macaque_row(calibration), unit))
