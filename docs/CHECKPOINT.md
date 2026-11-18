@@ -38,12 +38,13 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   2026-11-18**, built after it: frozen stops a training stage's clock, so on again picks up with the time it had left;
   a return from the full task picks the stage up where it was (its count, its windows, its time left); a light's
   saturation scales its CAM16-UCS chroma at a fixed hue (COL-39), each trial line writing each look's `light_xy`; and
-  the DKL default contrast stays the set's mean radius. **6407 passed**, none skipped. Its wl-xtasks half is the branch
+  the DKL default contrast stays the set's mean radius. A scoped re-review of both found every finding addressed
+  (its three small finds filed, XC-523 to XC-525). **6407 passed**, none skipped; the browser module in WebKit too. Its wl-xtasks half is the branch
   **`console-settings-2026-11-16`** (`da695de`, from wl-xtasks `64929fe`, not merged, not pushed), which the PI
   reviews. The ledger, git-ignored: the worktree's `.superpowers/sdd/2026-11-16-console-settings/`.
 - **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the pop-out's
   revision, designed with the PI and approved (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks,
-  ask XC-514, codes from 4139). Its counter text must say XC-523 (the next free) when it is built.
+  ask XC-514, codes from 4139). Its counter text must say XC-526 (the next free) when it is built.
 - **wl-preproc accepted XC-513 in full on 2026-11-18** (groups 1 to 4 and the addendum, no renames), and `light_xy`
   in place of the xy saturation formula, as named; the ask is marked answered in `docs/pending-wl-preproc-amendments.md`.
 
@@ -68,9 +69,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
 ## What is next (the PI, 2026-11-07, 2026-11-14 and 2026-11-16)
-1. **The console settings build to merge**, in this order: a scoped review of the fix wave and of the PI's-answers
-   build (from `3a110ad`); the PI's review of the wl-xtasks branch `console-settings-2026-11-16` (its training bounds,
-   XC-519); his Safari try-out (run `tests/test_page_browser.py` in WebKit first); push and CI (a sweep by hand on the
+1. **The console settings build to merge**, in this order (the scoped re-review of the fix wave and the PI's-answers build
+   is done, clean): the PI's review of the wl-xtasks branch `console-settings-2026-11-16` (its training bounds,
+   XC-519); his Safari try-out (the browser module passed in WebKit at `3c1075e`); push and CI (a sweep by hand on the
    branch); the merge on his yes by name. **Then the pop-out revision**, from `tryout-design-2026-11-17`.
 2. **The XC-505 warning**, a side build after demo mode (the PI, 2026-11-14: "Warn when settings allow it").
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.

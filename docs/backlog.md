@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-523.**
+**Next free ID: XC-526.**
 
 ## Brainstorms queued for the PI
 
@@ -238,6 +238,9 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-520** Preview a DKL color against what its save reads at the default contrast: the preview builds its frame from the hues the card offers (`serve._frame_sets`), the save from `stimuli/proposed/<set>.json` where one exists, else the set's own file (`service`), so once a first proposal is saved, or where a card offers fewer hues than its set, the mean radius differs and the previewed x, y are not the saved; a set on disk no card shows is previewed as a new set (D65 apex). Read the file the save would read, or say on the panel that the default contrast is the saved set's. — 2026-11-18, [console settings plan, Task 8](superpowers/plans/2026-11-16-console-settings.md#task-8-new-colors-three-ways-saved-as-a-sets-proposed-file-6) — waits on: nothing
 - **XC-521** Make `ParamRow.gives` read the open block's values, not the run's: where a condition sets `ring_radius`, the card can say "2.4° at 8° out" while the block draws at 6°. — 2026-11-18, [console settings plan, Task 6](superpowers/plans/2026-11-16-console-settings.md#task-6-sizes-scaled-by-eccentricity-windows-as-a-ratio-5) — waits on: nothing
 - **XC-522** Say on the Runtime tab that a suggestion is waiting: the confirm prompt moved to the Training tab as the design's §8 says, and only the feed states the suggestion; adding "· a suggestion waits" to `rt-shaping` (`web._runtime_shaping`) serves the design's "so nothing is hidden". — 2026-11-18, [console settings plan, Task 10](superpowers/plans/2026-11-16-console-settings.md#task-10-the-training-tab-and-its-three-position-switch-8) — waits on: nothing
+- **XC-523** Hold each tab's cards by its own edits: `busy()` and `rangeEdited()` (`web.py`'s script) are shared by the Task parameters and Training tabs, so a number typed and not sent on one tab stops the other tab's cards updating, with nothing on that tab saying why. Scope each to its tab's root, or say on the held tab that an edit elsewhere holds it. — 2026-11-18, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), its scoped re-review (N1) — waits on: nothing
+- **XC-524** Give the saturation gamut warning a code of its own: it reuses the luminance warning's code and set subject (`check.py`), and `Session._laid_out` counts a warning new only by code and subject, so while either is in force the other is not warned live (no natural case found). — 2026-11-18, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), its scoped re-review (N2) — waits on: nothing
+- **XC-525** Keep the CAM16 bisection out of a demo frame: `photometry.colorset_xy`'s docstring says a demo frame reads a cached value, but a saturation drawn at a fresh value runs the bisection inside that frame (bounded, demo only). Warm the cache between trials or correct the docstring. — 2026-11-18, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), its scoped re-review (N3) — waits on: nothing
 
 ## Debt
 
