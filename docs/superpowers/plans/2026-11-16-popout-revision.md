@@ -77,7 +77,7 @@
 
 ### Task 1: Tell wl-preproc the new record shapes and allocate the codes, before any is written (§7)
 
-**Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated section, `# OPEN — the pop-out's revision: each trial's kind, whether it stepped, the go, and seven codes (new, 2026-11-16)`, in the shape of XC-491's), `tasks/allocation.py`, `docs/backlog.md` (XC-514 in the waiting-on-another-repository section; Next free stays 515: XC-513 is the console plan's Task 1, and this plan's commit raised the counter past both); Test `tests/test_allocation_codes.py`.
+**Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated section, `# OPEN — the pop-out's revision: each trial's kind, whether it stepped, the go, and seven codes (new, 2026-11-16)`, in the shape of XC-491's), `tasks/allocation.py`, `docs/backlog.md` (XC-514 in the waiting-on-another-repository section; Next free stays 516: XC-513 is the console plan's Task 1, and main took XC-515 at demo mode's merge, 89f7b94); Test `tests/test_allocation_codes.py`.
 **Interfaces (the codes, wl-xtasks' to own, held in `tasks/allocation.py` until it publishes one, ADR-0007):**
 
 | Code | Name | Strobed |

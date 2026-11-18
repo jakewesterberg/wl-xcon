@@ -89,7 +89,7 @@
 
 ### Task 1: Tell wl-preproc the new record shapes, before any is written (§9)
 
-**Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated section, `# OPEN — the console settings: forms, scaled sizes, a light's saturation, the training switch (new, 2026-11-16)`, in the shape of XC-502's) and `docs/backlog.md` (XC-513, in the waiting-on-another-repository section; Next free 514).
+**Files:** Modify `docs/pending-wl-preproc-amendments.md` (a dated section, `# OPEN — the console settings: forms, scaled sizes, a light's saturation, the training switch (new, 2026-11-16)`, in the shape of XC-502's) and `docs/backlog.md` (XC-513, in the waiting-on-another-repository section; Next free stays 516: XC-514 is the pop-out plan's, and main took XC-515 at demo mode's merge).
 **Interfaces (the ask, exactly):**
 1. **A drawn or switched timing setting.**
    - `parameter_changes.jsonl` gains kind `form`, after `declined`. It **is strobed**: it carries `sequence`, and `STROBED` becomes set, hand_back, range, revert, form.
