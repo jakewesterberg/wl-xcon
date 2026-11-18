@@ -116,7 +116,8 @@ CONTROLS = "controls.jsonl"
 #: **Since the console settings build (2026-11-17), a person's form** (`form`: a timing setting
 #: switched to drawn on its card, `now` its draw every field, its `shape` beside; XC-513, the ask in
 #: `docs/pending-wl-preproc-amendments.md`), and **the training switch** (`shaping`, which the
-#: build's Task 10 writes; nothing writes it before that). **Appended only**: a reader keys on the
+#: build's Task 10 writes: `name` `"shaping"`, `was` and `now` its positions, `meaning` null, no
+#: `sequence`). **Appended only**: a reader keys on the
 #: names, and `STROBED` names its kinds.
 KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training", "suggested",
          "declined", "form", "shaping")
@@ -536,6 +537,7 @@ class SessionRecord:
         planned: dict | None = None,
         color_realized: dict | None = None,
         object_windows: tuple = (),
+        shaping: str = "on",
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -599,7 +601,11 @@ class SessionRecord:
         `position` is: a line written without it would say the trial showed nothing, and nothing
         would say so. Each with its size in degrees at its place, and each array object's its own
         and its object window's radius (`size_deg`, `window_deg`), from `object_windows`, the
-        trial's `ObjectWindows` (the console settings design's §5). **Returns the line's `stimuli`**, so the session can say on the changes feed
+        trial's `ObjectWindows` (the console settings design's §5). **And the training switch for
+        it** (`shaping`, one of `task.SHAPING`: `"on"`, `"frozen"` or `"full"`; the console
+        settings design's §8, XC-513's group 4), so a reader tells a frozen trial, which counted
+        toward no bar, and one of the full task from training as declared, its values the full
+        task gave each named `drawn: "full"`. **Returns the line's `stimuli`**, so the session can say on the changes feed
         that one could not be resolved (`taskd`, once a run).
         """
         stimuli = _stimuli(placed, params, object_windows)
@@ -634,6 +640,7 @@ class SessionRecord:
                     # not move, `planned` null outside a designed block.
                     "eased": list(eased),
                     "planned": planned,
+                    "shaping": shaping,
                     # The pop-out search build's fix round: each color set this trial drew at a
                     # luminance its run had not yet written, realized on the run's panel, by set
                     # name (`taskd.Session._realize`); null on every other line. Named

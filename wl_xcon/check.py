@@ -75,6 +75,7 @@ from wl_xcon.task import (
     Entered,
     Exited,
     Factorial,
+    FullTask,
     Hide,
     Hold,
     Listed,
@@ -252,6 +253,7 @@ def check_task(
         + _staircase_faults(task)
         + _unmade_steps(task)
         + _pool_faults(task)
+        + _full_task_faults(task)
         + _impossible_faults(task)
         + _found_by_faults(task)
         + _condition_spellings(task)
@@ -2318,6 +2320,47 @@ def _pool_faults(task: Task) -> list[Finding]:
                             f"staircase, and a pool's number has no order to step; take the "
                             f"staircase off it")
     return [Finding("bad-pool", sentence) for sentence in said]
+
+
+def _full_task_faults(task: Task) -> list[Finding]:
+    """**A plan's full task naming what the plan or the task lacks** (`task.FullTask`,
+    `Plan.full`; the console settings design's §8), **refused**, `bad-full-task`, each sentence
+    saying which plan and what to write: a block the plan has not, by name; a value for a setting
+    the task does not declare, or for a welfare-bounded one (a reward size is the subject's
+    bounded config's, never a task's version); a value outside the setting's declared limits, or
+    not among its choices; and a pool's value naming no pool (`unpooled`). Between trials and at
+    load, never in a frame."""
+    declared = {param.name: param for param in task.params}
+    pool = task.pool if isinstance(task.pool, Pool) else None
+    said: list[str] = []
+    for plan_name, plan in task.plans.items():
+        full = getattr(plan, "full", None)
+        if not isinstance(full, FullTask):
+            continue
+        where = f"plan {plan_name!r}'s full task"
+        names = [block.name for block in plan.blocks if isinstance(block, Block)]
+        if full.block not in names:
+            said.append(f"{where} plays block {full.block!r}, which the plan does not have; name "
+                        f"one of its blocks: {', '.join(map(repr, names)) or 'none'}")
+        for name, value in full.values.items():
+            param = declared.get(name)
+            if name in BOUNDED:
+                said.append(f"{where} gives {name!r}, a bounded setting, which the subject's "
+                            f"bounded config sets and no task's version does (welfare); take it "
+                            f"out")
+            elif param is None:
+                said.append(f"{where} gives {name!r}, which is no setting the task declares; "
+                            f"declare it or take it out")
+            elif param.choices and value not in param.choices:
+                said.append(f"{where} gives {name!r} {value!r}, which is none of its choices")
+            elif _outside(param, value):
+                low = "no lowest" if param.low is None else f"{param.low:g}"
+                high = "no highest" if param.high is None else f"{param.high:g}"
+                said.append(f"{where} gives {name!r} {value:g}, outside its limits ({low} to "
+                            f"{high}); give a value inside them")
+            elif pool is not None and name == pool.setting:
+                said += [f"{where}: {sentence}" for _, sentence in unpooled(task, {name: value})]
+    return [Finding("bad-full-task", sentence) for sentence in said]
 
 
 def unpooled(task: Task, values: dict) -> "list[tuple[str, str]]":

@@ -104,6 +104,10 @@ FALL_BACK = "fall_back"
 NEXT = "next"
 BACK = "back"
 RUN = "run"
+#: ... or the training switch took the run into its plan's full task or back out of it
+#: (`Scheduler.play_full`; `task.FullTask`; the console settings design's §8): the full task is a
+#: block of its own, and so is the stage it left as it reopens, `by` the person who switched.
+SHAPING = "shaping"
 
 #: **What the rig suggests** under a confirmed progression (`ByCriterion.confirm`; the pop-out
 #: search build, 2026-11-07; the PI, "Rig suggests, trainer confirms"): moving up a stage
@@ -474,6 +478,13 @@ class Scheduler:
     #: A designed block's trial to show again at once (`again_at_once`): `(condition, repeat_of,
     #: planned)`, or `None`.
     _again: tuple | None = field(init=False, default=None, repr=False)
+    #: **The training switch** (`task.SHAPING`; the console settings design's §8): whether training
+    #: is frozen (`freeze`) -- the stage held, no rule or fall-back judged, no suggestion, and each
+    #: trial counted toward no bar -- and, while the run plays its plan's full task
+    #: (`play_full`), the block type it plays, by index into `blocks`, its place in the run's
+    #: sequence (`_position`) left as it was, the stage it reopens at; `None` otherwise.
+    _frozen: bool = field(init=False, default=False, repr=False)
+    _full: int | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
@@ -666,8 +677,9 @@ class Scheduler:
         the criterion's proportion right with the margin's answers added; to move back, its window
         full and under the fall-back's proportion with the margin's answers taken away. A margin
         of 0 holds exactly where the bar is met (`suggestion`, `widening`). `False` under no
-        confirmed progression, and where the move has no stage to go to."""
-        if not self._confirming:
+        confirmed progression, where the move has no stage to go to, and while training is frozen
+        or the full task plays (`_still`)."""
+        if not self._confirming or self._still:
             return False
         margin = self._margin()
         if move == MOVE_BACK:
@@ -807,7 +819,8 @@ class Scheduler:
         the stage's criterion's proportion right -- else `None`, as under no confirmed
         progression, or in a stage with no criterion. Read on the widening's twin window for
         `MOVE_WIDEN` (`_widen`)."""
-        if not self._confirming or self.block.criterion is None or not self._up.maxlen:
+        if (not self._confirming or self._still or self.block.criterion is None
+                or not self._up.maxlen):
             return None
         criterion = self._criterion
         right, of, hardest = self.bar(move)
@@ -841,8 +854,9 @@ class Scheduler:
         rule before a fall-back. Live: a suggestion standing is withdrawn at the next boundary
         where its bar is missed by more than the plan's margin (`holds`; the plan's Review Focus
         2; the PI, 2026-11-08, "Stay up until 3 below"), and a person's move or hold starts its
-        window afresh (`advance`, `decline`)."""
-        if not self._confirming:
+        window afresh (`advance`, `decline`). **Nothing while training is frozen or the full task
+        plays** (`_still`; the console settings design's §8)."""
+        if not self._confirming or self._still:
             return None
         above = self._type_at(self._position + 1)
         met = self._met_up()
@@ -955,7 +969,7 @@ class Scheduler:
         below it. **Never under a confirmed progression**, whose fall-back the rig suggests
         instead (`suggestion`)."""
         if (not isinstance(self.order, ByCriterion) or self.order.fall_back is None
-                or self._confirming):
+                or self._confirming or self._held_in_place):
             return False
         proportion, window = self._fall_back
         recent = self._last(self._back, window)
@@ -977,7 +991,10 @@ class Scheduler:
         neither its rule nor its fall-back ends a stage: the rig suggests the move
         (`suggestion`) and a person makes it (`move`); a stage's time running out still moves it
         up, a time limit being the task author's declaration and no judgment of the animal."""
-        if self._drum is not None:
+        if self._drum is not None or self._held_in_place:
+            # **Nor while the full task plays, nor while a training progression is frozen** (the
+            # console settings design's §8: "no moves ... until it is on again"): no rule, no
+            # fall-back and no time moves it; the run's own time limit still ends the run.
             return None
         if self.finished and not self._top and not self._confirming:
             return RULE
@@ -1162,7 +1179,7 @@ class Scheduler:
         if self._designed:
             return False
         if (self.block.criterion is None and self.block.trials is None and not self._top
-                and not self._confirming):
+                and not self._confirming and not self._held_in_place):
             return False
         # The terms of `owed`, read from the counts: `owed` finds its condition by name.
         counts = self._counts
@@ -1482,9 +1499,15 @@ class Scheduler:
         self._reports.extend(self.block_report)
         self.close(reason, by)
         self.fell_back += reason == FALL_BACK
-        self._position, self._index = position, index
+        self._position = position
+        return self._open(index, reason)
+
+    def _open(self, index: int, reason: str) -> Block:
+        """**Block type `index` opened, started empty** (`advance`, `play_full`), the block before
+        it closed: its counts, its windows, its queue and its designed order afresh."""
+        self._index = index
         self.closed = False
-        if reason in (NEXT, BACK):
+        if reason in (NEXT, BACK, SHAPING):
             # **A person's move is not the plan spinning** (the engine C2b plan's engineering
             # review, I1): the progress check counts afresh from it, so a block moved to that owes
             # nothing cannot make a plan whose other blocks draw look stalled.
@@ -1552,6 +1575,56 @@ class Scheduler:
             )
         self.advance(step, by)
         return None
+
+    def freeze(self, on: bool) -> None:
+        """**Training frozen, or on again** (the training switch's `"frozen"`; `task.SHAPING`; the
+        console settings design's §8: "the stage, the staircase levels and the pairings stay
+        exactly as they are ... no moves, no suggestions and no staircase steps until it is on
+        again"; the PI, 2026-11-16, "They don't count"), between trials. While frozen **a training
+        progression's stage neither moves up nor falls back nor moves on its time** (`ends`), its
+        conditions drawn on past their targets (`past_targets`); **the rig suggests nothing**
+        (`suggestion`, `widening`, `holds`); and **each trial is counted toward no bar** -- not
+        the criterion's window, the fall-back's, a confirmed progression's bars nor the panel's
+        last answers -- and, in a training progression, neither its stage's number of trials nor
+        its targets, as an eased one is not (`record`). A person's own move still applies
+        (`move`). The staircase is the session's (`taskd.Session`), which steps none while
+        frozen."""
+        self._frozen = bool(on)
+
+    def play_full(self, index: int | None, by: object = None) -> Block:
+        """**Into the plan's full task, or back out of it** (the training switch's `"full"`;
+        `task.FullTask`; the console settings design's §8), between trials: with `index`, block
+        type `index` opens **as a block of its own**, the open block closed (`SHAPING`, `by` who
+        switched), and plays with no move -- no rule, fall-back or time ends it (`ends`), its
+        conditions drawn on past their targets, nothing suggested and no bar fed (`record`);
+        with `None`, **the stage the run left reopens**, its place in the run's sequence as it
+        was, started afresh as any block opened is. Returns the block open now."""
+        self._reports.extend(self.block_report)
+        self.close(SHAPING, by)
+        self._full = index
+        return self._open(self._type_at(self._position) if index is None else index, SHAPING)
+
+    @property
+    def full(self) -> bool:
+        """Whether the run plays its plan's full task now (`play_full`)."""
+        return self._full is not None
+
+    @property
+    def frozen(self) -> bool:
+        """Whether training is frozen now (`freeze`)."""
+        return self._frozen
+
+    @property
+    def _still(self) -> bool:
+        """**Whether trials now feed no bar and the rig suggests nothing**: training frozen, or the
+        plan's full task playing (`freeze`, `play_full`)."""
+        return self._frozen or self._full is not None
+
+    @property
+    def _held_in_place(self) -> bool:
+        """**Whether the open block moves on of itself at all now**: not while the full task plays,
+        nor while a training progression's stage is frozen (`ends`, `past_targets`)."""
+        return self._full is not None or (self._frozen and isinstance(self.order, ByCriterion))
 
     @property
     def drumming(self) -> str | None:
@@ -1819,7 +1892,11 @@ class Scheduler:
         kind = self._class(outcome, shown, condition)
         first_try = self.drawn is None or not self.drawn.drummed
         judged = self._answer(outcome, condition) or self._scored(outcome)
-        kept = eased and isinstance(self.order, ByCriterion)
+        # **A frozen trial, or one of the full task, counts toward no bar** (the console settings
+        # design's §8; the PI, 2026-11-16, "They don't count"): in a training progression it pays
+        # nothing toward its stage's number of trials or its targets, as an eased one does not.
+        still = self._still
+        kept = (eased or still) and isinstance(self.order, ByCriterion)
         # A try recorded: a presentation, and a trial unless a drum brought it back (the PI,
         # 2026-10-18, "200 trials; drummed repeats inside them"); an ordinary repeat, shown again a
         # few trials later, is a trial of its own. Counted as each try ends, so a trial that
@@ -1845,7 +1922,7 @@ class Scheduler:
         counts.right_first += first_try and outcome in RIGHT
         if first_try:
             self._answered = False
-        if judged and not eased and not (self._answered and self._first_answers):
+        if judged and not eased and not still and not (self._answered and self._first_answers):
             # **Every answer is judged** (the PI, 2026-10-18: a rule judges answers,
             # "whatever the counting says about paying", "until N correct" included): a trial with
             # no answer -- a break, no fixation, a lost tracker, a hang -- neither adds to nor
@@ -1862,7 +1939,7 @@ class Scheduler:
                 # Kept as long as the window can be (`_most`), read by its last answers now.
                 while len(self._window) > self._most(self.block.criterion):
                     self._window.popleft()
-        if judged and not self._answered:
+        if judged and not self._answered and not still:
             # **The fall-back rule judges each trial's first answer only** (the PI, 2026-10-19,
             # "First answer only": "so one stubborn trial can't demote a stage the animal is
             # otherwise doing well in"), whatever the stage's own rule is and however it counts
@@ -1871,7 +1948,7 @@ class Scheduler:
             # toward moving up ("Yes, the same").
             self._back.append(1 if outcome in RIGHT else 0)
         self._answered = self._answered or judged
-        if self._confirming:
+        if self._confirming and not still:
             self._bar(outcome, shown, first_try, eased, hardest)
         if kind != OWED:
             # **The trial is over, so its failed tries in a row start again** (the PI, 2026-10-18,

@@ -244,8 +244,16 @@ OTHER = "Other"
 
 #: **The section the Training tab gathers** (the console settings design's §8): a setting whose
 #: section is this, or under it (`"Training/stages"`), is shown there, not among the sections of
-#: the Task parameters tab. Declared here; the tab itself is Task 10's.
+#: the Task parameters tab (`web._training_params`).
 TRAINING_SECTION = "Training"
+
+#: **The training switch's three positions** (the console settings design's §8; the PI,
+#: 2026-11-16: "both, a freeze training option and a full task option"), as a `link.Shaping`
+#: names them and each change row and trial line writes them: `"on"`, training as declared;
+#: `"frozen"`, the stage, every staircase's level and the pool's pairings held as they are, no
+#: move, no suggestion and no step, and its trials counted toward no bar ("They don't count");
+#: `"full"`, the task's finished version (`Plan.full`). A run starts `"on"`.
+SHAPING = ("on", "frozen", "full")
 
 #: **The section a welfare ceiling's card sits in** (the console settings design's §7): a ceiling
 #: is no task `Param`, so no file names a section for it, and its unit (seconds, say) is no sign
@@ -2759,6 +2767,31 @@ def rule_at(rule: "tuple | None", values: "dict | None") -> "tuple[float, int] |
 
 
 @dataclass(frozen=True, slots=True)
+class FullTask:
+    """**A plan's finished version** (`Plan.full`; the console settings design's §8, "full task:
+    the task's finished version, which the task declares"; the PI, 2026-11-16): what the training
+    switch's `"full"` plays -- **its `block`**, one of the plan's own by name, as a block of its
+    own, with no move, no suggestion and no step; **every staircase held at its hardest level**,
+    its last; and **`values` over its conditions**, by setting, each trial's line marking each
+    value it gives `drawn: "full"`. A full task's value sits where a condition's own value would
+    (it replaces the block's conditions), under a person's value and a person's draw, since "the
+    experimenter needs free control" (the controller's ruling on the plan's pre-flight); a pool's
+    setting among them gives its pairings (`Pool`). Its shape is refused as it is built; what it
+    names is checked at load (`check.check_task`, `bad-full-task`): a block the plan has, settings
+    the task declares, each value inside its limits, a pool's value naming a pool."""
+
+    block: str
+    values: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.block, str) or not self.block:
+            raise ValueError(f"a full task names its block by text, not {self.block!r}")
+        if not isinstance(self.values, dict) or not all(
+                isinstance(name, str) and name for name in self.values):
+            raise ValueError("a full task's values are a dict of setting names to values")
+
+
+@dataclass(frozen=True, slots=True)
 class Plan:
     """One plan (engine spec §13.1): its block types (`blocks`), how they follow one another
     (`order`, `Fixed()` by default), and **a run time limit** (`time_limit_s`, in seconds of trials
@@ -2772,11 +2805,17 @@ class Plan:
     blocks: "list[Block]"
     order: BlockOrder = field(default_factory=Fixed)
     time_limit_s: "float | None" = None
+    #: **Its finished version** (`FullTask`; the console settings design's §8), which the training
+    #: switch's *full task* plays; `None`, none, and the switch offers no full task.
+    full: "FullTask | None" = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.blocks, list) or not all(
                 isinstance(block, Block) for block in self.blocks):
             raise ValueError("a plan's blocks are a list of Blocks")
+        if self.full is not None and not isinstance(self.full, FullTask):
+            raise ValueError(f"a plan's full task is a FullTask, or None, not "
+                             f"{type(self.full).__name__}")
         if not isinstance(self.order, BlockOrder):
             raise ValueError(
                 "a plan's order is a BlockOrder: Fixed(), Cyclic(), Balanced(), Random() or "

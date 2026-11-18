@@ -263,6 +263,9 @@ DEFAULTS = {
     },
     "FeatureAbove": {"source": REQUIRED, "threshold": REQUIRED},
     "Fixed": {},
+    # The console settings build's Task 10: a plan's full task (`task.FullTask`, `Plan.full`), new
+    # and at its default in every task written before it, so raising nothing.
+    "FullTask": {"block": REQUIRED, "values": {}},
     "Form": {},
     "Gabor": {
         "sf": 2.0,
@@ -329,7 +332,8 @@ DEFAULTS = {
         "section": "",
     },
     "Picture": {"asset": "", "size": 10.0},
-    "Plan": {"blocks": REQUIRED, "order": {"class": "Fixed", "fields": {}}, "time_limit_s": None},
+    "Plan": {"blocks": REQUIRED, "order": {"class": "Fixed", "fields": {}}, "time_limit_s": None,
+             "full": None},
     "Plaid": {
         "sf": 2.0,
         "orientation": 0.0,

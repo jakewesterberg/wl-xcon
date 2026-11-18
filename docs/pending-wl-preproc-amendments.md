@@ -1223,6 +1223,13 @@ saturation and a luminance a person may move.
 - **`drawn[name]` may be `"full"`**, a new source token beside `task`, `block`, `condition`, `staircase` and `pool`, for
   a value the task's full version gives.
 - **A run starts `"on"`.** Nothing is added to the start row.
+- **Added 2026-11-18 by the build's Task 10, not yet sent** (two shapes the switch needs that the
+  ask above did not name): a block end's **`ended` may be `"shaping"`**, beside `rule`, `time`,
+  `fall_back`, `next`, `back`, `run_time` and `run`, for the stage the full task's start closes and
+  for the full task's block as training is switched on again, `by` who switched (the full task is a
+  block of its own, and so is the stage it reopens); and **a revert that takes the switch back
+  writes a `shaping` row**, not a `revert` row, of the revert's `change` id, still strobing nothing
+  and with no `sequence`, **with the revert's `moment`** beside it, as a revert's rows name it.
 
 ## The ask
 

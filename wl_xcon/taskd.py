@@ -101,8 +101,8 @@ from wl_xcon.task import (
     size_at, size_settings, sized_places, staircase_verdict, section_of, CEILINGS,
 )
 from wl_xcon.task import (
-    EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
-    Factorial, Listed,
+    BY_CONDITIONS, EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, SHAPING,
+    Background, Distribution, Factorial, Listed,
 )
 from wl_xcon.variation import easier
 from wl_xcon.warnlist import PAUSE_UNMARKED, Entry, of_findings, sentence
@@ -696,7 +696,10 @@ class Pending:
     - **`form`, a person's draw** (kind `"form"`; the console settings build, its design §3):
       the distribution a setting is drawn from once it applies (`Session._form`, `_forms`), its
       row's `now` that draw every field; and on a hand-back of a setting a person's draw gives,
-      the draw it ends, its row's `was`."""
+      the draw it ends, its row's `was`.
+    - **A training switch** (kind `"shaping"`, `name` `"shaping"`; the console settings design's
+      §8): `was` and `now` positions of `task.SHAPING` (`Session._shaping`), applied with no
+      strobe and no `sequence` (`Session._apply_shaping`)."""
 
     kind: str
     name: str
@@ -736,6 +739,10 @@ class Moment:
     held: dict
     ranges: dict
     forms: dict = field(default_factory=dict)
+    #: **The training switch then** (`task.SHAPING`; the console settings design's §8: "a change of
+    #: the switch is staged to the next trial, recorded as a change row, and revertible"), `"on"`
+    #: at the run's start.
+    shaping: str = "on"
 
 
 #: **The source a trial's line names for a value its block's staircase gave** (`drawn`; wl-preproc's
@@ -748,6 +755,23 @@ STAIRCASE = "staircase"
 #: in `params` as two settings, each marked `drawn: "pool"`), and what each look's card says gives
 #: it (`Session._source`).
 POOL = "pool"
+
+#: **The source a trial's line names for a value its plan's full task gave** (`drawn`;
+#: `task.FullTask`; the console settings build's ask to wl-preproc, XC-513, its group 4: "a new
+#: source token beside `task`, `block`, `condition`, `staircase` and `pool`"), each of its
+#: `values` and its block's staircase held at its hardest level, and what each such card says
+#: gives it (`Session._source`).
+FULL = "full"
+
+#: **What a card says gives a setting while training is frozen** (`Session._source`; the console
+#: settings design's §8: "each frozen value shows on its card"): the open block's staircase's
+#: setting, at the level it stopped at, and the pool's setting, at the pairings it holds. A card's
+#: word only: a frozen trial's line names its staircase's value `"staircase"` as ever, and says
+#: `shaping` `"frozen"`.
+FROZEN = "frozen"
+
+#: The switch's positions as the changes feed and a refusal say them.
+_SWITCH_SAID = {"on": "on", "frozen": "frozen", "full": "the full task"}
 
 
 @dataclass
@@ -860,6 +884,10 @@ WITHDRAWN, DECLINED, CONFIRMED, LAPSED = "withdrawn", "declined", "confirmed", "
 #: once"): the trainer took the other half of its prompt, and it was offered again at once under a
 #: new id (`_Suggested.remade_as`), which an answer names instead.
 REMADE = "made again"
+#: **Withdrawn as training was frozen** (the training switch's `"frozen"`; the console settings
+#: design's §8: "no suggestions"; `Session._apply_shaping`), as `_lapse` withdraws one: an answer
+#: naming it is refused, saying so.
+FROZE = "withdrawn as training was frozen"
 
 
 def _pool_adds(pool, was: object, now: object) -> bool | None:
@@ -1068,6 +1096,11 @@ def went_on(task: Task, last) -> _WentOn | None:
                     current[name] = row["now"]
                 elif kind != "set":
                     current.pop(name, None)
+            continue
+        if row.get("shaping", "on") != "on":
+            # **A frozen trial, or one of the full task** (each line's `shaping`; the console
+            # settings design's §8): it stepped no staircase and fed no bar, and the full task is
+            # no stage a run goes on in -- the stage it left reopens.
             continue
         if row["block"] != state["stage"]:
             enter(row["block"])
@@ -2226,7 +2259,8 @@ class Session:
         return list(sets.values())
 
     def _possible(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
-                  ranges: dict | None = None, forms: dict | None = None) -> str | None:
+                  ranges: dict | None = None, forms: dict | None = None,
+                  shaping: str | None = None) -> str | None:
         """**Whether the run would still hold only trials an animal can get right after a change**
         (engine build C3's spec §9: live, "each change as offered (a value, range, hand-back or
         revert) against every condition of the run's blocks and the draws in force, refused at
@@ -2256,8 +2290,13 @@ class Session:
         says how to proceed -- clear the waiting trial, switch drumming off or pause, then make the
         change (the C3 plan's science review, M-3).
 
-        Called once per change (`_impossible`, `_hand_back`, `_range`, and `_revert` for the whole
-        of a revert at once): `check.impossible` judges each distinct combination once.
+        **And the full task, where the training switch will be at it** (`shaping`, else what all
+        offered leaves, `_shaping_ahead`; the console settings design's §8): its block as it plays
+        (`_full_judged`), beside the plan's, which the run goes back to.
+
+        Called once per change (`_impossible`, `_hand_back`, `_range`, `_shaping`, and `_revert`
+        for the whole of a revert at once): `check.impossible` judges each distinct combination
+        once.
         Returns the reason a change is refused -- the conditions it would make impossible, as
         `"block: condition"`, then for each the values and the fix -- or `None`. **It never raises**
         (the C3 plan's call 26, "the live refusal fails closed"): a check that raises, or no run's
@@ -2284,6 +2323,15 @@ class Session:
             blocks = [*self._played.blocks, *kept]
             found = impossible(self._task, self._played.blocks, values, held=frozenset(held),
                                ranges=drawn, forms=formed)
+            if (self._shaping_ahead() if shaping is None else shaping) == "full":
+                made = self._full_judged()
+                if made is not None:
+                    block, base = made
+                    found += [finding for finding in impossible(
+                        self._task, [block],
+                        {**values, **{n: v for n, v in base.items() if n not in held}},
+                        held=frozenset(held), ranges=drawn, forms=formed)
+                        if not _among(finding, found)]
             waiting = impossible(self._task, kept, values, held=frozenset(held), ranges=drawn,
                                  forms=formed)
             if self.paused_at is None:
@@ -2396,22 +2444,20 @@ class Session:
 
         Called from `_impossible` (a value, ahead of `set`), `_range`, `_form`, `_hand_back` and
         `_revert`, each after `_possible` passes, so a change refused as impossible writes no
-        layout warning; the console settings plan's Tasks 7 and 10 call it too. `shaping` is Task
-        10's (the three-position switch), which no caller passes before it is built; one given now
-        is refused. **Nothing but `Exceeded` leaves here**: a check that raises, or a warning that
+        layout warning; the console settings plan's Tasks 7 and 10 call it too. **`shaping`, the
+        training switch's position** (`_shaping`; the console settings design's §8), else what all
+        offered leaves (`_shaping_ahead`): at `"full"` the full task's block is laid out beside the
+        plan's (`_full_judged`). **Nothing but `Exceeded` leaves here**: a check that raises, or a warning that
         cannot be written, refuses the change. Between trials, never in a frame. Not
         welfare-critical: no reward size is a task setting, so none is laid out."""
         if self._task is None:
             return
         try:
-            if shaping is not None:
-                # Waits on the console settings plan's Task 10 (`Shaping`), which composes it.
-                raise Exceeded("a shaping switch is not built yet (the console settings plan's "
-                               "Task 10)")
             if self._laid is None:
                 self._laid = self._layouts(
                     dict(self.spec.values), set(self._edited),
-                    {key: draw for key, (draw, _) in self._ranges.items()}, dict(self._forms))
+                    {key: draw for key, (draw, _) in self._ranges.items()}, dict(self._forms),
+                    shaping=self._shaped)
             values, held, drawn, formed = self._ahead()
             for name in handed:
                 held.discard(name)
@@ -2428,7 +2474,8 @@ class Session:
                 formed[name] = form
                 held.discard(name)
             drawn.update(ranges or {})
-            found = self._layouts(values, held, drawn, formed)
+            found = self._layouts(values, held, drawn, formed,
+                                  shaping=self._shaping_ahead() if shaping is None else shaping)
             known = {(finding.code, subject) for finding in self._laid
                      for subject in finding.subjects}
             new = [finding for finding in found if not _among(finding, self._laid)
@@ -2457,7 +2504,8 @@ class Session:
         for entry in fresh:
             self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
 
-    def _layouts(self, values: dict, held: set, drawn: dict, formed: dict) -> list:
+    def _layouts(self, values: dict, held: set, drawn: dict, formed: dict,
+                 shaping: str = "on") -> list:
         """**The layout's findings over what a run holds** (`_laid_out`): `values` with, for each
         block and condition of the run's plan (`_played`; the session's own values alone before a
         run has one), its condition's values over them but where a person holds the setting or
@@ -2465,7 +2513,9 @@ class Session:
         (`variation.extremes`, a `(least, most)` span the checks reason over whole,
         `check.at_values`): the block's own draw or the task's, or the condition's own range, each
         as `drawn` changed it (`None` restoring the one declared); the block's staircase's levels
-        (`check._staircase_levels`); and a person's draw (`formed`), which beats them all. **Once per
+        (`check._staircase_levels`); and a person's draw (`formed`), which beats them all. **With
+        `shaping` `"full"`, the full task's block too** (`_full_judged`), its pool's value over
+        the values. **Once per
         distinct set of values**; a finding met in several places is listed once, naming the
         first. Before a run has a plan, the session's own values alone, naming none."""
         task, declared = self._task, self._declared
@@ -2488,12 +2538,19 @@ class Session:
         # The session's own values alone before a run has a plan; a run's trials each hold their
         # block's and condition's, so the places are those.
         places: list[tuple[dict, str]] = [(base, "")] if self._played is None else []
-        for block in (self._played.blocks if self._played is not None else ()):
+        judged = [(block, {}) for block in (self._played.blocks if self._played is not None
+                                            else ())]
+        if shaping == "full":
+            made = self._full_judged()
+            if made is not None:
+                judged.append(made)
+        for block, own in judged:
             draws = variation.in_force(task, block)
             staircase = block.staircase
             for condition in block.conditions:
-                given = {**base, **{n: v for n, v in condition.values.items()
-                                    if n not in held and n not in formed}}
+                given = {**base, **{n: v for n, v in own.items() if n not in held},
+                         **{n: v for n, v in condition.values.items()
+                            if n not in held and n not in formed}}
                 for name, (draw, key) in {**draws, **variation.own_ranges(condition)}.items():
                     if name in held or name in formed:
                         continue
@@ -2587,6 +2644,9 @@ class Session:
                     values[act.name] = self._run_values[act.name]
                 else:
                     values.pop(act.name, None)
+            elif act.kind == "shaping":
+                # The training switch moves no value (`_shaping_ahead` reads it).
+                continue
             else:
                 ranges[act.key] = act.draw
         return values, held, ranges, forms
@@ -2704,6 +2764,10 @@ class Session:
                              () if bounded else self._overrides(name), False, ""))
                 continue
             kind = offer.kind if act is None else "revert"
+            if offer.kind == "shaping":
+                # The training switch (the console settings design's §8): its two positions.
+                rows.append(("shaping", offer.was, offer.now, offer.by, False, kind, (), False, ""))
+                continue
             unit = self._declared[offer.name].unit if offer.name in self._declared else ""
             if offer.kind == "hand_back":
                 ended = forms.pop(offer.name, None)
@@ -2826,7 +2890,7 @@ class Session:
             # person holds it or gave its form, a range a person gave is in force, or the run was
             # given its value (`_source`), over the task's own.
             changed = source in ("person", "form", "range", "run")
-            declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
+            declared.append((p.name, p.unit, p.low, p.high, self._card_value(p.name, source), False,
                              p.choices, source, conditions, draw, numbers, switch, shape, profile,
                              why, gives, self._color_card(p, source), section_of(p), changed))
         ceilings = tuple(
@@ -2836,6 +2900,22 @@ class Session:
             if name != OUT_OF_CAGE
         )
         return tuple(declared) + ceilings
+
+    def _card_value(self, name: str, source: str | None) -> object:
+        """**The value a card shows**: the run's (`spec.values`), but **where the training switch
+        gives it** (the console settings design's §8: "each frozen value shows on its card") the
+        full task's value, or its staircase's hardest level (`FULL`), and the frozen staircase's
+        level (`FROZEN`)."""
+        if source == FULL:
+            full = self._played.full
+            if name in full.values:
+                return full.values[name]
+            return self._hardest(self._scheduler.block.staircase)
+        if source == FROZEN and self._steps(name):
+            row = self.staircase
+            if row is not None:
+                return row[1][row[2]]
+        return self.spec.values.get(name)
 
     def _color_card(self, declared: Param, source: str | None) -> dict | None:
         """**A color setting's card** (`link.ParamRow.color`; the console settings design's §6: a set,
@@ -2985,15 +3065,23 @@ class Session:
         2026-11-07), under a person's value and over every other source, as the trial loop takes
         it. **`"form"` where a person's draw gives it** (`_forms`; the console settings build),
         under a person's value, which ends it, and over every other source, as `_draw` takes
-        it."""
+        it. **The training switch** (the console settings design's §8): `"full"` where the full
+        task gives it (`_full_gives`), under a person's value and draw; `"frozen"` for the
+        staircase's setting and the pool's while training is frozen, each at what it stopped
+        at."""
         if name in self._edited:
             return "person"
         if name in self._forms:
             return "form"
+        if self._full_gives(name):
+            return FULL
         if self._steps(name):
-            return STAIRCASE
+            return FROZEN if self._scheduler.frozen else STAIRCASE
         if self._pools(name):
             return POOL
+        pool = self._task.pool
+        if self._scheduler.frozen and pool is not None and name == pool.setting:
+            return FROZEN
         if self._own_range(name):
             return "conditions"
         if name in in_force:
@@ -3080,6 +3168,9 @@ class Session:
         which a revert refuses."""
         restored, handed, drawn, formed = self._undone(then, values, held, ranges, forms)
         said = [f"{name} handed back" for name in handed]
+        if then.shaping != self._shaping_ahead():
+            # The training switch then (`Moment.shaping`), first, as the revert offers it.
+            said.insert(0, f"training → {_SWITCH_SAID[then.shaping]}")
         for key, draw in drawn.items():
             declared = self._declared.get(key[-1])
             unit = "" if declared is None else declared.unit
@@ -3126,6 +3217,17 @@ class Session:
         staircase = self._scheduler.block.staircase
         if staircase is None:
             return None
+        if self._scheduler.full:
+            # **Held at its hardest level by the full task** (`task.FullTask`; the console settings
+            # design's §8).
+            try:
+                staircase = staircase.at(self.spec.values,
+                                         whole=staircase.setting in _whole_numbers(self._task))
+            except ValueError:
+                return None
+            return (staircase.setting, tuple(staircase.levels), len(staircase.levels) - 1,
+                    staircase.setting in self._edited or staircase.setting in self._forms,
+                    staircase.down, staircase.up, staircase.hardest)
         climb = self._climb if self._climb_block == len(self._scheduler.ended) else None
         if climb is None:
             try:
@@ -3586,6 +3688,185 @@ class Session:
         self._logged("training", command.setting, was, command.on, command.by, at,
                      setting=command.setting)
 
+    def _shapeable(self) -> bool:
+        """**Whether the run in progress has training to switch** (the console settings design's
+        §8): a training progression (`task.ByCriterion`), a staircase in any of its plan's blocks,
+        or the task's pool of pairings. A run with none of them has no switch (`_shaping`,
+        `shaping`)."""
+        plan, task = self._played, self._task
+        if plan is None or task is None:
+            return False
+        return (isinstance(plan.order, ByCriterion) or task.pool is not None
+                or any(block.staircase is not None for block in plan.blocks))
+
+    def _shaping_ahead(self) -> str:
+        """**The training switch once every change offered applies** (`_pending`, in its order):
+        the last switch offered, else the one in force (`_shaped`). What a switch offered now is
+        judged over, and what a revert goes back from."""
+        now = self._shaped
+        for act in self._pending:
+            if act.kind == "shaping":
+                now = act.now
+        return now
+
+    def _hardest(self, staircase: Staircase) -> object:
+        """**A staircase's hardest level as the run's values make it now** (`task.Staircase.at`):
+        its last, which a full task holds it at (`task.FullTask`); `None` where a setting it reads
+        has no number."""
+        try:
+            now = staircase.at(self.spec.values,
+                               whole=staircase.setting in _whole_numbers(self._task))
+        except ValueError:
+            return None
+        return now.levels[-1]
+
+    def _full_judged(self) -> "tuple[Block, dict] | None":
+        """**The run's full task as a block the checks can judge** (`task.FullTask`; `_possible`,
+        `_layouts`): its block with its `values` over every condition's own -- where a condition's
+        own value would sit -- and its staircase held at its hardest level (`_hardest`), as a
+        condition's value, unless its values give that setting; a setting the block or the task
+        draws that they give marked given by the conditions (`task.BY_CONDITIONS`); and, apart,
+        the pool's setting's value, which no condition gives (`task.Pool`). `None` for a plan
+        declaring none. Between trials, never in a frame."""
+        plan = self._played
+        full = None if plan is None else plan.full
+        block = None if full is None else next(
+            (block for block in plan.blocks if block.name == full.block), None)
+        if block is None:
+            return None
+        pool = self._task.pool
+        given = {name: value for name, value in full.values.items()
+                 if pool is None or name != pool.setting}
+        base = {name: value for name, value in full.values.items()
+                if pool is not None and name == pool.setting}
+        staircase = block.staircase
+        if staircase is not None and staircase.setting not in given:
+            hardest = self._hardest(staircase)
+            if hardest is not None:
+                given[staircase.setting] = hardest
+        drawn = variation.in_force(self._task, block)
+        draws = {**block.draws, **{name: BY_CONDITIONS for name in given if name in drawn}}
+        return dataclasses.replace(
+            block, staircase=None, draws=draws, factorial=None,
+            conditions=[dataclasses.replace(condition, values={**condition.values, **given})
+                        for condition in block.conditions]), base
+
+    def _shaping(self, command, index: int) -> None:
+        """**The training switch** (`link.Shaping`; the console settings design's §8; the PI,
+        2026-11-16: "both, a freeze training option and a full task option"), offered between
+        trials or while paused and staged to the next boundary (`Pending`, kind `"shaping"`), where
+        it applies (`_apply_shaping`), recorded as a `shaping` change row and revertible
+        (`Moment.shaping`, `_revert`). **Refused, with the sentence and nothing staged**: a
+        position that is none of `task.SHAPING`; a run with no training progression, no staircase
+        and no pool, which has no training to switch (`_shapeable`); the position already set, or
+        already offered; the full task for a plan declaring none (`Plan.full`); a full task that
+        would leave trials no animal can get right (`_possible`); and one whose layout refuses it
+        (`_laid_out`), its new layout warnings otherwise accepted by who sent it. `index`, the
+        trial about to run, is every branch's.
+
+        **It never raises** (the C3 plan's call 20): it runs beside the pause, outside `_command`'s
+        listed `try`, so a check that raises refuses the switch, saying it could not be checked,
+        and the session runs on. It passes through no `set` and moves no reward size, no session
+        duration and no fluid: a full task's values are task settings (`check`'s `bad-full-task`
+        refuses a bounded one at load). Between trials, never in a frame."""
+        position = command.position
+        try:
+            if position not in SHAPING:
+                raise Exceeded(f"a training switch is {', '.join(SHAPING)}, and {position!r} is "
+                               f"none of them")
+            if not self._shapeable():
+                raise Exceeded("this run has no training progression, no staircase and no pool, "
+                               "so there is no training to switch")
+            ahead = self._shaping_ahead()
+            if position == ahead:
+                staged = " once what is staged applies" if ahead != self._shaped else ""
+                raise Exceeded(f"training is already {_SWITCH_SAID[ahead]}{staged}, so nothing "
+                               f"changed")
+            if position == "full" and self._played.full is None:
+                raise Exceeded("this run's plan declares no full task (its Plan.full), so there "
+                               "is none to play")
+            why = self._possible(shaping=position)
+            if why is not None:
+                raise Exceeded(why)
+            self._laid_out(shaping=position, by=command.by)
+            self._pending.append(Pending("shaping", "shaping", was=ahead, now=position,
+                                         by=command.by, after=len(self._staged)))
+        except Exceeded as refused:
+            self._refuse("shaping", command.by,
+                         f"the training switch is not moved to {position!r}: {refused}")
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse("shaping", command.by, (
+                f"the training switch could not be checked ({type(broken).__name__}: {broken}), "
+                f"so it is refused and the session runs on"))
+
+    def _apply_shaping(self, act: Pending, trial_number: int, index: int,
+                       moment: int | None) -> None:
+        """**The training switch applied at the boundary** (`_apply_staged`, whose change id it is
+        given; the console settings design's §8), between trials:
+
+        - **frozen**: the scheduler holds the stage (`Scheduler.freeze`), and a suggestion standing
+          is withdrawn as `_lapse` withdraws one; no staircase steps from the next trial (`run`);
+        - **full**: the stage left keeps its staircase's level (`_leave`), a suggestion standing
+          lapses, and the run enters its plan's full task's block as a block of its own
+          (`Scheduler.play_full`), closing the open one in the stream (`BLOCK_END`) as a move does;
+        - **on again from the full task**: the stage left reopens as a block of its own, its
+          staircase at the level it was left at (`_rejoin`, `_resumed`; the PI's "Pick up where it
+          left").
+
+        Then its `shaping` change row, **strobing nothing, with no `sequence`** (XC-513's group 4),
+        `name` `"shaping"`, `was` and `now` positions and `meaning` null -- a revert's naming the
+        moment it goes back to (`moment`) -- and its line on the changes feed."""
+        scheduler = self._scheduler
+        was, now = self._shaped, act.now
+        opened = None
+        if was == "full":
+            scheduler.play_full(None, act.by)
+            self._rejoin = scheduler.block.name
+            opened = f"; block {scheduler.block.name} reopens where it was left"
+        if now == "full":
+            self._leave()
+            self._lapse()
+            full = self._played.full
+            at = next(place for place, block in enumerate(scheduler.blocks)
+                      if block.name == full.block)
+            scheduler.play_full(at, act.by)
+            opened = f"; the run plays its full task, block {scheduler.block.name}"
+        if opened is not None:
+            if self._levels.end_block():
+                self.card.emit(BLOCK_END)
+            self.blocks_run.append(scheduler.block.name)
+            self._block_from = self._elapsed
+        scheduler.freeze(now == "frozen")
+        if now == "frozen":
+            self._lapse(FROZE)
+        self._shaped = now
+        at = self.wall_now()
+        if self._record is not None:
+            self._record.change(
+                change=self._change, kind="shaping", name="shaping", was=was, now=now, by=act.by,
+                at=at, trial_number=trial_number, run=self.run_index, meaning=None,
+                event_code=None, **({} if moment is None else {"moment": moment}),
+            )
+        back = "" if moment is None else f", reverting to {_back_to(moment)}"
+        self._feed("shaping", act.by, at,
+                   f"{self._pending_said(act)}{back}, from trial {index}{opened or ''}")
+
+    @property
+    def shaping(self) -> str:
+        """**The training switch, for a console** (telemetry schema 22; the console settings
+        design's §8): `"on"`, `"frozen"` or `"full"` while a run with training to switch goes
+        (`_shapeable`), else `""`, a run with no switch, and between runs. Read between trials."""
+        if self.phase != "running" or not self._shapeable():
+            return ""
+        return self._shaped
+
+    @property
+    def full_task(self) -> bool:
+        """**Whether the run's plan declares a full task** (`task.Plan.full`; telemetry schema 22),
+        which the switch's *full task* plays; `False` between runs."""
+        return (self.phase == "running" and self._played is not None
+                and self._played.full is not None)
+
     def _move(self, command, index: int, step: str) -> None:
         """**A person moves the run on to its next block, or back one** (`link.NextBlock`,
         `link.BackBlock`; engine build C2b; the PI, 2026-10-19, "'Next' and 'back one'": "Both
@@ -3612,6 +3893,13 @@ class Session:
             self._refuse(command.KIND, command.by, (
                 "a plain run is one block, so there is no block to move to; a run of one of the "
                 "task's plans moves between its blocks"))
+            return
+        if scheduler.full:
+            # **The full task has no moves** (the console settings design's §8): the stage it left
+            # reopens as training is switched on again.
+            self._refuse(command.KIND, command.by, (
+                f"the run plays its full task, block {scheduler.block.name}, which has no moves; "
+                f"switch training on, and the stage it left reopens"))
             return
         answered = command.suggestion
         if answered is not None:
@@ -3758,7 +4046,13 @@ class Session:
         however long its bar stays met.
 
         **Then the pool's widening** (`_suggest_widening`; the pop-out search build's Task 5): one
-        window meeting both bars, one prompt offers both, the stage's first (the design's §3.4)."""
+        window meeting both bars, one prompt offers both, the stage's first (the design's §3.4).
+
+        **Nothing while training is frozen or the full task plays** (the console settings design's
+        §8: "no suggestions"; `Scheduler.freeze`, `play_full`): the switch withdrew any standing
+        (`_apply_shaping`)."""
+        if self._scheduler.frozen or self._scheduler.full:
+            return
         self._suggest_stage()
         self._suggest_widening()
 
@@ -3804,16 +4098,16 @@ class Session:
                    f"the rig suggests moving {now.move} from {now.block} to {now.to}: {bar}; "
                    f"confirm with {answer}, or hold")
 
-    def _lapse(self) -> None:
+    def _lapse(self, fate: str = LAPSED) -> None:
         """**A suggestion standing lapses as the run leaves its stage otherwise** -- a person's
         move naming none, or the stage's time (the pop-out search build): an answer naming it is
         refused, saying so (`_unanswerable`). Nothing is said or recorded: the move's own line
         and row say where the run went. **So does a widening of the pool offered in that stage**
         (the pop-out search build's Task 5): the pool carries into the next stage, where the bar
-        is judged afresh."""
+        is judged afresh. **`fate` `FROZE`** as training is frozen (`_apply_shaping`)."""
         for offered in (self._suggested, self._widening):
             if offered is not None:
-                offered.fate = LAPSED
+                offered.fate = fate
         self._suggested = self._widening = None
 
     def _remake_widening(self, beside: "_Suggested", bar: tuple) -> None:
@@ -4333,6 +4627,9 @@ class Session:
         the change log's table) and the wire carries (`link._destination`), each trial's line
         naming the staircase (`STAIRCASE`)."""
         block = self._scheduler.block
+        if self._full_gives(name):
+            # The full task's value sits where a condition's own would (`task.FullTask`).
+            return "conditions"
         return ("draw" if self._steps(name) or self._pools(name)
                 else "conditions" if self._own_range(name)
                 else "draw" if name in variation.in_force(self._task, block)
@@ -4390,6 +4687,9 @@ class Session:
             return None
         if name in self._forms:
             return "form"
+        if self._full_gives(name):
+            # Where a condition's own value would sit (`task.FullTask`).
+            return "full task"
         if self._steps(name, block):
             return STAIRCASE
         if self._pools(name):
@@ -4465,18 +4765,28 @@ class Session:
             then = next(moment for moment in reversed(self._moments) if moment.change <= change)
             values, held, ranges, forms = self._ahead()
             restored, handed, drawn, formed = self._undone(then, values, held, ranges, forms)
-            if not (restored or handed or drawn or formed):
+            # **And the training switch then** (`Moment.shaping`; the console settings design's
+            # §8: "revertible"), where it differs from what all offered leaves.
+            switched_from = self._shaping_ahead()
+            switched = None if then.shaping == switched_from else then.shaping
+            if not (restored or handed or drawn or formed or switched):
                 raise Exceeded(
                     "the run holds now what it held then, so there is nothing to revert")
-            why = self._possible(restored, handed=frozenset(handed), ranges=drawn, forms=formed)
+            why = self._possible(restored, handed=frozenset(handed), ranges=drawn, forms=formed,
+                                 shaping=then.shaping)
             if why is not None:
                 raise Exceeded(why)
             # And the layout it leaves, the whole revert at once (`_laid_out`; the console settings
             # design's §4).
             self._laid_out(restored, handed=frozenset(handed), ranges=drawn, forms=formed,
-                           by=command.by)
+                           shaping=then.shaping, by=command.by)
             self._act += 1
             act = self._act
+            if switched is not None:
+                # First of the revert's changes, so the block its hand-backs read is the one the
+                # switch leaves open (`_to`, read as each applies).
+                self._pending.append(Pending("shaping", "shaping", was=switched_from,
+                                             now=switched, by=command.by, after=staged, act=act))
             for name in handed:
                 to = self._to(name)
                 ended = forms.get(name)
@@ -4950,6 +5260,9 @@ class Session:
         if isinstance(command, _link.SetRange):
             self._range(command, index)
             return
+        if isinstance(command, _link.Shaping):
+            self._shaping(command, index)
+            return
         if isinstance(command, _link.SetForm):
             self._form(command, index)
             return
@@ -5117,13 +5430,36 @@ class Session:
         repooling = None if pool is None else max(
             (place for place, (offer, _) in enumerate(offered) if moves_pool(offer)), default=None)
         for place, (offer, act) in enumerate(offered):
+            closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
+            moment = None if act is None else self._act_moments[act]
+            if isinstance(offer, Pending) and offer.kind == "shaping":
+                # **The training switch strobes nothing and takes no `sequence`** (XC-513's group
+                # 4: "not strobed"), so it is applied before the strobed kinds' count moves.
+                if act is None:
+                    # On its own, judged again at the boundary it applies at (`_possible`,
+                    # `_laid_out`), the values in force then: refused, it is dropped, said.
+                    why = self._possible(shaping=offer.now)
+                    try:
+                        if why is not None:
+                            raise Exceeded(why)
+                        self._laid_out(shaping=offer.now, by=offer.by)
+                    except Exceeded as refused:
+                        self._refuse("shaping", offer.by, (
+                            f"{self._pending_said(offer)} is not applied, and training stays "
+                            f"{_SWITCH_SAID[self._shaped]}: {refused}"))
+                        continue
+                if act is None or place == 0 or offered[place - 1][1] != act:
+                    self._change += 1
+                self._apply_shaping(offer, trial_number, index, moment)
+                if closes:
+                    self._keep_moment(self._pending_said(offer) if moment is None
+                                      else f"reverted to {_back_to(moment)}")
+                continue
             self._sequence += 1
             # One change id for each act: a change offered on its own, or all of one revert's,
             # which stand together (`_offered_acts`); a moment kept as each act closes.
             if act is None or place == 0 or offered[place - 1][1] != act:
                 self._change += 1
-            closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
-            moment = None if act is None else self._act_moments[act]
             if isinstance(offer, Pending):
                 applied = self._apply_pending(offer, code, trial_number, index,
                                               repools=place == repooling)
@@ -5330,6 +5666,9 @@ class Session:
         dropped (`_after_service_run`): the setting and the person's value, handed back to what
         takes it back in the open block; or which draw takes which numbers, in the rig's words
         (`variation.words`), or "as declared" where it goes back to the declared one."""
+        if act.kind == "shaping":
+            return (f"training {_SWITCH_SAID.get(act.was, act.was)} → "
+                    f"{_SWITCH_SAID.get(act.now, act.now)}")
         declared = self._declared.get(act.name)
         unit = "" if declared is None else declared.unit
         choices = () if declared is None else declared.choices
@@ -5365,6 +5704,7 @@ class Session:
             {name: self.spec.values.get(name) for name in sorted(self._edited)},
             {key: self._ranges[key][0] for key in sorted(self._ranges)},
             {name: self._forms[name] for name in sorted(self._forms)},
+            self._shaped,
         ))
 
     def _meaning(self, name: str, was: object, now: object) -> dict | None:
@@ -5503,6 +5843,13 @@ class Session:
     #: training progression at the level a stage returned to was left at (`_resumed`); dropped as
     #: the run leaves the stage (`_leave`). `None` as each run starts.
     _climb: _Climb | None = field(init=False, default=None, repr=False)
+    #: **The training switch** (`task.SHAPING`; `_shaping`; the console settings design's §8):
+    #: `"on"`, `"frozen"` or `"full"` in the run in progress, `"on"` as each run starts; and **the
+    #: stage a return from the full task reopened**, by name, whose staircase resumes at the level
+    #: it was left at as its first trial opens it, whatever the plan's order (`_resumed`), `None`
+    #: once it has.
+    _shaped: str = field(init=False, default="on", repr=False)
+    _rejoin: str | None = field(init=False, default=None, repr=False)
     #: **The run's color-set lights and each set's luminances it has realized and written**, as
     #: `(set name, cd/m²)` (`_realize`; the pop-out search build's fix round): the start row's,
     #: then each a line writes first.
@@ -5621,6 +5968,8 @@ class Session:
                 self._climb = _Climb.started(
                     staircase, self.spec.values, self._resumed(stage, self._first_level),
                     whole=staircase.setting in _whole_numbers(self._task))
+            # A stage rejoined from the full task is opened now (`_resumed`).
+            self._rejoin = None
         # Its counts and its step as the run's values make them now (`_Climb.restep`).
         if self._climb is not None:
             self._climb.restep(self.spec.values)
@@ -5694,7 +6043,11 @@ class Session:
         was at then (`_left`; the PI, 2026-11-08, "Pick up where it left", "Pick up there too");
         else as `otherwise` gives it. A function of the staircase, as `_Climb.started` takes."""
         left = self._left.get(stage)
-        if left is None or not isinstance(getattr(self._scheduler, "order", None), ByCriterion):
+        if left is None or not (isinstance(getattr(self._scheduler, "order", None), ByCriterion)
+                                or stage == self._rejoin):
+            # **And the stage a return from the full task reopened** (`_rejoin`; the console
+            # settings design's §8: "on again, the stage left reopens at its staircase's level"),
+            # whatever the plan's order.
             return otherwise
 
         def level(staircase: Staircase) -> int:
@@ -5712,6 +6065,16 @@ class Session:
             start = staircase.nearest(self._run_values.get(staircase.setting))
         return 0 if start is None else start
 
+    def _full_gives(self, name: str) -> bool:
+        """**Whether the full task playing gives `name`** (`task.FullTask`): one of its values, or
+        its block's staircase's setting, held at its hardest level; never while it does not
+        play."""
+        if self._scheduler is None or not self._scheduler.full or self._played.full is None:
+            return False
+        staircase = self._scheduler.block.staircase
+        return (name in self._played.full.values
+                or (staircase is not None and staircase.setting == name))
+
     def _steps(self, name: str, block=None) -> bool:
         """Whether `block`'s staircase steps `name` (`Block.staircase`), the open block's where
         none is given: what gives the setting each trial while no person holds it, as a card
@@ -5727,7 +6090,7 @@ class Session:
         pool = self._task.pool if self._task is not None else None
         return pool is not None and name in (pool.odd, pool.distractor)
 
-    def _pairing(self, task: Task, draw: Draw) -> tuple | None:
+    def _pairing(self, task: Task, draw: Draw, pooled: object = None) -> tuple | None:
         """**One trial's pairing** (`task.Pool`; the pop-out search build's Task 5), between
         trials, never in a frame: **one of the pairings the pool's setting holds now, each as
         likely** -- the place its run's seed, the trial's number in the run and the setting give
@@ -5736,13 +6099,15 @@ class Session:
         trial again, "so the drum teaches the problem"; the PI's "Follow same/fresh"), kept while
         a repeat of it waits (`_paired`). `None` for a task with no pool. The pool names a pairing
         here: the run's start, every live change and the loop's backstop see to it
-        (`check.unpooled`)."""
+        (`check.unpooled`). **`pooled`, the full task's value of the pool's setting**, where it
+        gives one (`task.FullTask`), over the run's."""
         pool = task.pool
         if pool is None:
             return None
         kept = None if draw.repeat_of is None else self._paired.get(draw.repeat_of)
         if kept is None:
-            pooled = pool.pairings(self.spec.values.get(pool.setting))
+            pooled = pool.pairings(self.spec.values.get(pool.setting) if pooled is None
+                                   else pooled)
             share = variation.unit(self._run.seed, draw.number, pool.setting, 0)
             kept = pooled[min(int(share * len(pooled)), len(pooled) - 1)]
         self._paired[draw.number] = kept
@@ -6568,6 +6933,9 @@ class Session:
         self._climb = self._climb_block = self._climb_stage = None
         self._left, self._handed = {}, {}
         self._suggested, self._suggestions = None, {}
+        # Training on, as every run starts (the console settings design's §8; XC-513's "a run
+        # starts on"), with no stage to rejoin from a full task.
+        self._shaped, self._rejoin = "on", None
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
         # Each color set's luminances realized and written in this run (`_realize`).
@@ -6949,9 +7317,26 @@ class Session:
                 # person holds its setting** (TSK-32: "a live value on its parameter holds it"),
                 # whose value then plays and leaves the staircase where it is, however the trial
                 # ends; a hand-back resumes it (`_apply_pending`).
-                climb = self._climbing()
-                stepping = (climb is not None and climb.staircase.setting not in self._edited
-                            and climb.staircase.setting not in self._forms)
+                full = self._played.full if scheduler.full else None
+                if full is None:
+                    climb = self._climbing()
+                    stepping = (climb is not None and climb.staircase.setting not in self._edited
+                                and climb.staircase.setting not in self._forms)
+                else:
+                    # **The full task** (`task.FullTask`; the console settings design's §8): its
+                    # values where a condition's own would sit, under a person's value and draw,
+                    # and its block's staircase held at its hardest level, each named `FULL` on
+                    # the line; no staircase runs, so none steps.
+                    climb, stepping = None, False
+                    for name, value in full.values.items():
+                        if name not in self._edited and name not in self._forms:
+                            taken[name], sources[name] = value, FULL
+                    staircase = scheduler.block.staircase
+                    if (staircase is not None and staircase.setting not in self._edited
+                            and staircase.setting not in self._forms
+                            and staircase.setting not in full.values):
+                        taken[staircase.setting] = self._hardest(staircase)
+                        sources[staircase.setting] = FULL
                 if stepping:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
@@ -6960,7 +7345,9 @@ class Session:
                 # likely, a repeat the pairing of the trial it repeats, into the odd one's look
                 # and the distractors', each marked on its line (`POOL`) -- **but a look a person
                 # holds**, whose value plays instead, as over any draw.
-                paired = self._pairing(task, drawn)
+                paired = self._pairing(
+                    task, drawn, None if task.pool is None or sources.get(task.pool.setting) != FULL
+                    else taken[task.pool.setting])
                 if paired is not None:
                     for name, look in zip((task.pool.odd, task.pool.distractor), paired):
                         if name not in self._edited and name not in self._forms:
@@ -7090,9 +7477,10 @@ class Session:
                 written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown,
                                            eased=bool(eased), hardest=hardest)
-                if stepping:
+                if stepping and not scheduler.frozen:
                     # **Stepped by how the trial ended** (`task.staircase_verdict`; TSK-33),
-                    # between trials, for the next: one whose value a person held moves nothing.
+                    # between trials, for the next: one whose value a person held moves nothing,
+                    # and none while training is frozen (the console settings design's §8).
                     climb.step(result.outcome, shown)
                 # **What the rig suggests** under a confirmed progression (the pop-out search
                 # build): made, or withdrawn as its bar stops holding (`Scheduler.holds`),
@@ -7156,6 +7544,8 @@ class Session:
                     # it out of moving up (engine build C3).
                     drawn=sources,
                     live=tuple(sorted(self._edited)),
+                    # The training switch for this trial (XC-513's group 4).
+                    shaping=self._shaped,
                     eased=eased,
                     # Its place in a designed block's plan, which a drum's try and a trial again
                     # at once share with the trial they show again (engine build C3's spec §5).

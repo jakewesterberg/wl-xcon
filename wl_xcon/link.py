@@ -57,7 +57,7 @@ from wl_xcon.actor import Actor
 from wl_xcon.findings import SESSION_KINDS
 from wl_xcon.geometry import Housing
 from wl_xcon.scheduler import DRUM_SCOPES, TRAINING
-from wl_xcon.task import SHAPES
+from wl_xcon.task import SHAPES, SHAPING
 from wl_xcon.viewport import Viewport
 from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 
@@ -272,6 +272,11 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: build's Task 8): a `define_color` command on the wire (`DefineColor`), taken by the service in
 #: any phase, and `Idle.controls`, the service's own changes-feed rows while no session is open.
 #: **Sections** (the design's §7; the build's Task 9): `ParamRow.section` and `ParamRow.changed`.
+#: **The training switch** (the design's §8; the build's Task 10): `Telemetry.shaping`, `"on"`,
+#: `"frozen"` or `"full"` in a run with training to switch, `""` otherwise; `Telemetry.full_task`,
+#: whether the run's plan declares a full task; `ParamRow.source` `"frozen"` and `"full"`, the
+#: value then what the switch holds; a staged row of kind `shaping`; and a `shaping` command on the
+#: wire (`Shaping`).
 #: The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
 SCHEMA = 22
@@ -1320,6 +1325,12 @@ class Telemetry:
     #: console` says DEMO on it. `False` by default, a real session's; `Telemetry.of` reads it from
     #: the session's spec (`taskd.SessionSpec.demo`).
     demo: bool = False
+    #: **The training switch** (schema 22; the console settings design's §8; `taskd.Session.shaping`):
+    #: `"on"`, `"frozen"` or `"full"` while a run with a training progression, a staircase or a
+    #: pool goes, else `""`, which no switch is offered for; and **whether the run's plan declares
+    #: a full task** (`task.Plan.full`), the switch's *full task* grayed where it does not.
+    shaping: str = ""
+    full_task: bool = False
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1559,6 +1570,9 @@ class Telemetry:
             # Schema 21 (demo mode §3.7): a demo session's spec carries what it is (`taskd.Demo`),
             # and no other's does. Read as a plain attribute, as the spec's other fields are.
             demo=session.spec.demo is not None,
+            # The console settings build's Task 10 (schema 22): the training switch.
+            shaping=session.shaping,
+            full_task=session.full_task,
         )
 
 
@@ -2001,6 +2015,9 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         ),
         # Demo mode (schema 21): on every frame.
         "demo": telemetry.demo,
+        # The training switch (schema 22; the console settings build's Task 10).
+        "shaping": telemetry.shaping,
+        "full_task": telemetry.full_task,
     }
 
 
@@ -2376,6 +2393,8 @@ def _telemetry_from(data: dict) -> Telemetry:
         bars=_bars_in(data["bars"]),
         pool=_pooled_in(data["pool"]),
         demo=_flag(data["demo"]),
+        shaping=_word_of(data["shaping"]),
+        full_task=_flag(data["full_task"]),
     )
 
 
@@ -2655,6 +2674,21 @@ class Training:
 
 
 @dataclass(frozen=True, slots=True)
+class Shaping:
+    """**Move the training switch** (the console settings design's §8; the PI, 2026-11-16: "both, a
+    freeze training option and a full task option"): `position` one of `task.SHAPING` -- `"on"`,
+    training as declared; `"frozen"`, the stage, the staircases' levels and the pool's pairings
+    held, no move, no suggestion and no step, its trials counted toward no bar; `"full"`, the
+    plan's full task (`task.Plan.full`) -- staged to the next trial, recorded as a `shaping` change
+    row and revertible (`taskd.Session._shaping`). Recorded with who moved it."""
+
+    KIND: ClassVar[str] = "shaping"
+
+    position: str
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
 class NextBlock:
     """**Move the run on to its next block** (engine build C2b; the PI, 2026-10-19, "'Next' and
     'back one'": "Both directions by hand, each recorded with who"): the block its plan's order
@@ -2842,6 +2876,7 @@ Command = (
     | ClearOwed
     | Drum
     | Training
+    | Shaping
     | NextBlock
     | BackBlock
     | HandBack
@@ -3009,6 +3044,8 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, Training):
         payload = {"kind": "training", "by": actors.to_map(command.by), "setting": command.setting,
                    "on": command.on}
+    elif isinstance(command, Shaping):
+        payload = {"kind": "shaping", "by": actors.to_map(command.by), "position": command.position}
     elif isinstance(command, HandBack):
         payload = {"kind": "hand_back", "by": actors.to_map(command.by), "name": command.name}
     elif isinstance(command, SetRange):
@@ -3512,6 +3549,15 @@ def _command_from(data: dict) -> Command:
                 f"neither, so it is refused",
             )
         return Training(setting=data["setting"], on=data["on"], by=by)
+    if kind == "shaping":
+        by = _actor(data.get("by"), kind)
+        if data.get("position") not in SHAPING:
+            raise CommandRefused(
+                "shaping", by,
+                f"the training switch is {', '.join(SHAPING[:-1])} or {SHAPING[-1]}, and "
+                f"{_quoted(data.get('position'))} is none of them, so it is refused",
+            )
+        return Shaping(position=data["position"], by=by)
     if kind == "hand_back":
         by = _actor(data.get("by"), kind)
         return HandBack(name=_word(data, "name", kind, by), by=by)
@@ -3813,6 +3859,7 @@ _COMMAND_EXPOSURE = {
     "clear": ("both", "clear trials from a condition's count"),
     "drum": ("both", "switch drumming"),
     "training": ("both", "switch a training setting"),
+    "shaping": ("both", "switch training on, frozen or to the plan's full task"),
     "next_block": ("both", "move the run on a block"),
     "back_block": ("both", "move the run back a block"),
     "decline": ("both", "hold a stage move or a widening the rig suggests"),

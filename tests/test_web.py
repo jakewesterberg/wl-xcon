@@ -1105,7 +1105,8 @@ def test_the_page_writes_only_by_posting_json_to_commands():
     assert 'method: "POST"' in _SCRIPT
     assert "var headers = { \"Content-Type\": \"application/json\" };" in _SCRIPT
     radios = re.findall(r'<input type="radio"[^>]*>', document)
-    assert len(radios) == 5
+    # Six tabs since the console settings build's Task 10 added Training (its design's §8).
+    assert len(radios) == 6
 
 
 def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
@@ -1134,9 +1135,10 @@ def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
     # would have slipped past a pin that only read the trailing word -- and allow
     # only the fragment renderer's own two forms. No other way to write markup -- but a demo's
     # drawing and its key list (demo mode's Task 9), each rendered by `wlx serve` too
-    # (`demoscreen.render`, `web.demo_keys`) and sent as its own event, `drawn`.
+    # (`demoscreen.render`, `web.demo_keys`) and sent as its own event, `drawn`. The Training tab's
+    # cards held while typed in (the console settings build's Task 10) are a fragment it rendered.
     assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == [
-        "html", "heldParams", "heldMoments", "payload.keys", "payload.svg"]
+        "html", "heldParams", "heldTraining", "heldMoments", "payload.keys", "payload.svg"]
     assert "outerHTML" not in _SCRIPT
     assert "insertAdjacentHTML" not in _SCRIPT
     assert "document.write" not in _SCRIPT
@@ -4566,3 +4568,81 @@ def test_the_color_card_offers_set_hue_and_two_levels_and_says_approximate():
     assert all(card.count(" disabled") >= 4 for name, card in lan.items()
                if name in ("distractor_appearance", "target_appearance"))
     assert "data-colorset" not in cards["distractor_saturation"]
+
+
+# --- the Training tab (the console settings design's §8; the build's Task 10) -----------------
+
+
+def _tab(document: str, tab: str) -> str:
+    """The inner HTML of tab panel `tab`, up to the next tab panel or the end of the panels."""
+    start = document.index(f'<div class="tabpanel" id="{tab}">')
+    end = document.find('<div class="tabpanel"', start + 1)
+    return document[start:end if end != -1 else len(document)]
+
+
+def test_the_training_tab_holds_the_switch_the_panel_and_the_training_sections():
+    """**A Training tab of its own** (§8; the PI, 2026-11-16: "the training parameters should be in
+    a whole different tab ... and easily toggleable"): its label beside the others, its panel
+    holding the switch -- *on · frozen · full task*, the position in force pressed, each sending
+    `shaping` with its position, *full task* grayed with why where the plan declares none -- the
+    trainer's panel (`rt-train`), moved from the Runtime tab, and the cards of every section under
+    `Training`, which the Task parameters tab no longer holds."""
+    rows = (ParamRow.of("fix_hold", "s", 0.0, 10.0, 0.3, False, section="Timing"),
+            ParamRow.of("fade_step", "cd/m2", 0.0, 10.0, 2.0, False, section="Training/stages"),
+            ParamRow.of("bar", "answers", 1.0, 50.0, 40.0, False, section="Training"))
+    shown = frame(params=rows, phase="running", shaping="frozen", full_task=False,
+                  plan="train", block="Crowd", next_block=None,
+                  staircase=StaircaseRow("set_size", (4, 6, 8), 1, False, 3, 1))
+    parts = fragments(shown, view(can_write=True))
+    document = page(parts, stale_after_s=30.0, nonce="n0nce", can_write=True)
+
+    assert '<label class="tab" for="t-training">Training</label>' in document
+    assert '<input type="radio" name="tab" id="t-training">' in document
+    training = _tab(document, "tp-training")
+    assert 'id="rt-train"' in training and 'id="rt-train"' not in _tab(document, "tp-runtime")
+    assert 'id="shaping"' in training and 'id="training-params"' in training
+    switch = parts["shaping"]
+    assert re.findall(r'data-cmd="shaping" data-position="(\w+)" aria-pressed="(\w+)"', switch) == [
+        ("on", "false"), ("frozen", "true"), ("full", "false")]
+    full = re.search(r'<button[^>]*data-position="full"[^>]*>', switch).group(0)
+    assert " disabled" in full and html.escape(web.NO_FULL_TASK, quote=True) in full
+    assert f"full task: {html.escape(web.NO_FULL_TASK, quote=True)}" in switch
+    assert ">on</button>" in switch and ">full task</button>" in switch
+    assert "fade_step" in parts["training-params"] and "bar" in parts["training-params"]
+    assert "fade_step" not in parts["params"] and "fix_hold" in parts["params"]
+    assert "Training" not in re.findall(r'data-sec="([^"]+)"', parts["params"])
+    assert "fix_hold" not in parts["training-params"]
+    declared = fragments(replace(shown, full_task=True), view(can_write=True))["shaping"]
+    assert " disabled" not in re.search(r'<button[^>]*data-position="full"[^>]*>',
+                                        declared).group(0)
+    assert "full task:" not in declared
+    # A run with no switch, and between runs, each says why there is none.
+    assert "no training to switch" in fragments(replace(shown, shaping=""), view())["shaping"]
+    assert "no run in progress" in fragments(replace(shown, phase="between_runs"), view())["shaping"]
+    # And the page's script sends the switch's position.
+    assert 'kind: "shaping", position: button.getAttribute("data-position")' in _SCRIPT
+
+
+def test_runtime_says_the_switch_in_one_line():
+    """**The Runtime tab keeps one line** (`rt-shaping`; §8), so nothing the Training tab holds is
+    hidden: `training frozen · stage Crowd · Training tab`, the last a link to the tab; `full
+    task` while it plays; none for a run with no switch, nor between runs. A card the switch holds
+    says what it holds it at."""
+    shown = frame(phase="running", shaping="frozen", block="Crowd")
+    line = fragments(shown, view())["rt-shaping"]
+    text = re.sub(r"<[^>]+>", "", line)
+
+    assert text == "training frozen · stage Crowd · Training tab"
+    assert '<label for="t-training"' in line
+    assert re.sub(r"<[^>]+>", "", fragments(replace(shown, shaping="full"), view())[
+        "rt-shaping"]) == "full task · stage Crowd · Training tab"
+    assert fragments(replace(shown, shaping=""), view())["rt-shaping"] == ""
+    assert fragments(replace(shown, phase="between_runs"), view())["rt-shaping"] == ""
+    document = page(fragments(shown, view()), stale_after_s=30.0, nonce="n0nce")
+    assert 'id="rt-shaping"' in _tab(document, "tp-runtime")
+    cards = fragments(replace(shown, params=(
+        ParamRow.of("set_size", "objects", 1.0, 12.0, 6, False, source="frozen"),
+        ParamRow.of("fix_luminance", "cd/m2", 0.0, 80.0, 40.0, False, source="full"))),
+        view())["params"]
+    assert "frozen at 6.00 " in cards and "training frozen" in cards
+    assert "full task at 40.00 " in cards and "given by the full task" in cards

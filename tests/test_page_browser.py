@@ -45,7 +45,7 @@ from wl_xcon import screen as screens  # noqa: E402
 from wl_xcon.findings import SESSION_KINDS  # noqa: E402
 from wl_xcon.link import (  # noqa: E402
     SCHEMA, BackBlock, CheckRun, ClearOwed, Decline, Drawn, Drum, ManualReward, NextBlock,
-    OpenSession, Pause, Pooled, PoolRow, Preflight, PreflightItem, SetParameter, StageRow,
+    OpenSession, Pause, Pooled, PoolRow, Preflight, PreflightItem, SetParameter, Shaping, StageRow,
     StaircaseRow, StartRun, Suggestion, Training, WarningRow,
 )
 from wl_xcon.photometry import SRGB, Gray  # noqa: E402
@@ -1759,6 +1759,9 @@ def test_a_suggestion_is_answered_from_the_trainers_panel(rig):
     rig.hub.offer(frame(**_TRAINING))
     page = rig.browser_page()
     _sign_in(page)
+    # The trainer's panel is the Training tab's since the console settings build's Task 10 (its
+    # design's §8).
+    page.click('label[for="t-training"]')
 
     page.click('#rt-train [data-cmd="confirm"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
@@ -1790,6 +1793,33 @@ def test_a_suggestion_is_answered_from_the_trainers_panel(rig):
     assert kept is True
     assert (type(widened), widened.name, widened.value) == (SetParameter, "pairings", 13)
     assert (type(back), back.suggestion) == (BackBlock, 9)
+
+
+def test_freezing_from_the_training_tab_sends_shaping(rig):
+    """**The training switch, from its own tab** (the console settings design's §8; the PI,
+    2026-11-16: "a whole different tab ... easily toggleable"): the Runtime tab's one line names the
+    switch and opens the Training tab; there *frozen* sends `shaping` `frozen` as the member signed
+    in, staged to the next trial; and once the rig says it is frozen the switch shows it pressed,
+    *full task* grayed where the plan declares none. Run in Chromium, and in WebKit
+    (`WLX_BROWSER=webkit`), the engine of the PI's Safari."""
+    rig.hub.offer(frame(**_TRAINING, shaping="on", full_task=True))
+    page = rig.browser_page()
+    _sign_in(page)
+
+    page.locator("#rt-shaping", has_text="training on · stage Fade-in").wait_for()
+    page.click('#rt-shaping label[for="t-training"]')
+    opened = page.is_checked("#t-training")
+    page.click('#shaping [data-cmd="shaping"][data-position="frozen"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+    rig.hub.offer(frame(**_TRAINING, shaping="frozen", full_task=False))
+    page.locator('#shaping [data-position="frozen"][aria-pressed="true"]').wait_for()
+    page.locator('#shaping [data-position="full"][disabled]').wait_for(state="attached")
+    page.locator("#rt-shaping", has_text="training frozen").wait_for(state="attached")
+
+    (switched,) = rig.dispatch.seen
+    assert opened is True
+    assert (type(switched), switched.position, switched.by.name) == (
+        Shaping, "frozen", "Jake Westerberg")
 
 
 def test_the_pairings_are_picked_by_their_colors_names_at_the_start_and_on_the_panel(rig):
@@ -1826,7 +1856,8 @@ def test_the_pairings_are_picked_by_their_colors_names_at_the_start_and_on_the_p
     rig.wait_for(lambda: any(isinstance(seen, StartRun) for seen in rig.dispatch.seen))
     rig.hub.offer(frame(**{**_TRAINING, "suggestion": None,
                            "pool": Pooled("pairings", names, 3)}))
-    page.click('label[for="t-runtime"]')
+    # The trainer's panel is the Training tab's since the console settings build's Task 10.
+    page.click('label[for="t-training"]')
     page.locator("#rt-train", has_text="pairings on blue among red, red among blue").wait_for()
     page.get_by_label("add pairing purple among red", exact=True).check()
     page.click('#rt-train [data-cmd="widen"]')

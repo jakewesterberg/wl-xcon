@@ -42,6 +42,7 @@ posted to `/gaze` by the script; and the New session dialog's demo choice (`_dn_
 from __future__ import annotations
 
 import html
+import dataclasses
 import math
 import time
 from dataclasses import dataclass
@@ -55,7 +56,7 @@ from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
-from wl_xcon.task import BELOW_ZERO, OTHER, Family, Outcome, at_hardest
+from wl_xcon.task import BELOW_ZERO, OTHER, TRAINING_SECTION, Family, Outcome, at_hardest
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
@@ -141,13 +142,16 @@ FRAGMENT_IDS = (
     "controls",
     "rt-trials",
     "rt-work",
-    "rt-train",
+    "rt-shaping",
     "rt-need",
     "rt-wrong",
     "rt-health",
     "rt-changes",
     "params",
     "moments",
+    "shaping",
+    "rt-train",
+    "training-params",
     "pf-sum",
     "preflight",
     "setup",
@@ -1938,6 +1942,17 @@ _SOURCES = {
     "task": "from the task's start",
     "run": "given by this run",
     "person": "held by a person",
+    # The training switch (the console settings design's §8; telemetry schema 22).
+    "frozen": "training frozen",
+    "full": "given by the full task",
+}
+#: **What the training switch holds a card at** (`Telemetry.shaping`; the console settings
+#: design's §8: "each frozen value shows on its card"): its value led by these words -- `frozen at
+#: 0.6` -- and what its field to set a value over it is for. A person's value still applies ("the
+#: experimenter needs free control").
+_HELD_BY = {
+    "frozen": ("frozen at", "a value over the frozen training"),
+    "full": ("full task at", "a value over the full task"),
 }
 #: The sources that give each trial a value of its own -- its conditions, or its draw -- whose
 #: words stand in the value's place on the card, the run's value being one no trial of the open
@@ -2357,7 +2372,7 @@ def _whence(row, view: View, over: str = "") -> str:
     return "".join(parts)
 
 
-def _params(frame: Telemetry | None, view: View) -> str:
+def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     """One card per `ParamRow`: value, unit, range, the ceiling flag, a staged
     marker, and -- P4d-2b b2a -- the input and arrows that set it and the last
     refusal of it with its sentence (spec §5.2: "A refusal shows on the card and in
@@ -2418,7 +2433,12 @@ def _params(frame: Telemetry | None, view: View) -> str:
                   and row.shape.get("shape") == "scaled")
         if scaled and row.source == "form":
             per_trial = _SCALED
-        if per_trial is not None:
+        held_by = _HELD_BY.get(row.source)
+        if held_by is not None:
+            label = (f'<span class="pv">{held_by[0]} {_e(_num(row.value))} '
+                     f'<span class="unit">{_e(row.unit)}</span></span>')
+            entry = _over(row, held_by[1], view) if settable and row.position is None else ""
+        elif per_trial is not None:
             label = f'<span class="pv">{per_trial[0]}</span>'
             entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
         elif row.position is not None:
@@ -2459,7 +2479,81 @@ def _params(frame: Telemetry | None, view: View) -> str:
             f'<span class="range">{_range(row)}</span>'
             f"{_whence(row, view, _beneath(row, frame))}{mark}{said}</div>"
         )))
-    return _sections(frame.task, cards)
+    return _sections(frame.task, [card for card in cards if _training(card[0]) == training])
+
+
+def _training(section: str) -> bool:
+    """**Whether a section is the Training tab's** (`task.TRAINING_SECTION`, or one under it; the
+    console settings design's §8: "the tab gathers everything a task declares as training"), and
+    so not the Task parameters tab's."""
+    return section.partition("/")[0] == TRAINING_SECTION
+
+
+def _training_params(frame: Telemetry | None, view: View) -> str:
+    """**The cards of every section under Training** (`_training`; the console settings design's
+    §8), in their sections as the Task parameters tab lays its own out (`_sections`), each card as
+    `_params` makes it; a line saying none where the task declares none."""
+    if frame is None:
+        return _NONE
+    if not any(_training(row.section or OTHER) for row in frame.params):
+        return '<span class="nm">this task declares no Training section</span>'
+    whole = _params(dataclasses.replace(frame, params=tuple(
+        row for row in frame.params if _training(row.section or OTHER))), view, training=True)
+    return whole
+
+
+#: **The training switch's positions as the Training tab offers them** (`link.Shaping`;
+#: `task.SHAPING`), each with its label.
+_SWITCHES = (("on", "on"), ("frozen", "frozen"), ("full", "full task"))
+
+#: **Why *full task* is grayed** where the run's plan declares none (`Telemetry.full_task`; the
+#: console settings design's §8).
+NO_FULL_TASK = "this run's plan declares no full task, so there is none to play"
+
+
+def _shaping(frame: Telemetry | None, view: View) -> str:
+    """**The training switch** (`Telemetry.shaping`; the console settings design's §8; the PI,
+    2026-11-16: "both, a freeze training option and a full task option"): *on · frozen · full
+    task*, the position in force pressed, each sending `shaping` with its position (`link.Shaping`),
+    staged to the next trial; *full task* grayed, saying why, where the plan declares none
+    (`Telemetry.full_task`); a switch staged said beside it. A line saying why there is none for a
+    run with no training progression, staircase or pool, and between runs."""
+    if frame is None:
+        return _NONE
+    if frame.phase != "running":
+        return '<span class="nm">no run in progress: no training to switch</span>'
+    if not frame.shaping:
+        return ('<span class="nm">this run has no training progression, no staircase and no pool, '
+                'so there is no training to switch</span>')
+    buttons = []
+    for position, label in _SWITCHES:
+        other = ""
+        if position == "full" and not frame.full_task:
+            other = f' disabled title="{_e(NO_FULL_TASK)}"'
+        pressed = "true" if position == frame.shaping else "false"
+        buttons.append(f'<button type="button" class="btn small" data-cmd="shaping" '
+                       f'data-position="{position}" aria-pressed="{pressed}"'
+                       f'{_gate(view, other)}>{label}</button>')
+    staged = next((change for change in frame.staged if change.name == "shaping"), None)
+    said = ("" if staged is None else
+            f'<span class="stg">staged → {_e(dict(_SWITCHES).get(staged.now, staged.now))} by '
+            f'{_who(staged.by)}</span>')
+    why = ("" if frame.full_task
+           else f'<span class="nm">full task: {_e(NO_FULL_TASK)}</span>')
+    return (f'<div class="kv"><span>training</span><span class="selrow" role="group" '
+            f'aria-label="training switch">{"".join(buttons)}</span></div>{said}{why}')
+
+
+def _runtime_shaping(frame: Telemetry | None) -> str:
+    """**The Runtime tab's one line for the training switch** (`rt-shaping`; the console settings
+    design's §8), so nothing the Training tab holds is hidden: `training frozen · stage Crowd ·
+    Training tab`; empty where the run has no switch, and between runs."""
+    if frame is None or frame.phase != "running" or not frame.shaping:
+        return ""
+    state = {"on": "training on", "frozen": "training frozen", "full": "full task"}.get(
+        frame.shaping, frame.shaping)
+    return (f'<span class="nm">{_e(state)} · stage <b>{_e(frame.block)}</b> · '
+            f'<label for="t-training" class="lnk">Training tab</label></span>')
 
 
 def _count(settings: int, changed: int) -> str:
@@ -2956,13 +3050,16 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
         "controls": _controls(frame, view),
         "rt-trials": _trials(frame),
         "rt-work": _work(frame),
-        "rt-train": _trainer(frame, view),
+        "rt-shaping": _runtime_shaping(frame),
         "rt-need": _need(frame, view),
         "rt-wrong": _wrong(frame),
         "rt-health": _health_pane(frame, view),
         "rt-changes": _changes(frame),
         "params": _params(frame, view),
         "moments": _moments(frame, view),
+        "shaping": _shaping(frame, view),
+        "rt-train": _trainer(frame, view),
+        "training-params": _training_params(frame, view),
         "pf-sum": _pf_sum(frame),
         "preflight": _preflight_pane(frame, view),
         "setup": _setup(frame),
@@ -3136,10 +3233,10 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .main > input { position: absolute; opacity: 0; pointer-events: none; }
 .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--rule); }
 .tab { border: 1px solid transparent; border-bottom: 0; padding: 7px 12px 6px; cursor: pointer; font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12.5px; color: var(--muted); border-radius: 6px 6px 0 0; margin-bottom: -1px; }
-#t-runtime:checked ~ .tabs [for="t-runtime"], #t-task:checked ~ .tabs [for="t-task"], #t-setup:checked ~ .tabs [for="t-setup"], #t-warn:checked ~ .tabs [for="t-warn"], #t-end:checked ~ .tabs [for="t-end"] { background: var(--surface); border-color: var(--edge); color: var(--ink); }
-#t-runtime:focus-visible ~ .tabs [for="t-runtime"], #t-task:focus-visible ~ .tabs [for="t-task"], #t-setup:focus-visible ~ .tabs [for="t-setup"], #t-warn:focus-visible ~ .tabs [for="t-warn"], #t-end:focus-visible ~ .tabs [for="t-end"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+#t-runtime:checked ~ .tabs [for="t-runtime"], #t-task:checked ~ .tabs [for="t-task"], #t-training:checked ~ .tabs [for="t-training"], #t-setup:checked ~ .tabs [for="t-setup"], #t-warn:checked ~ .tabs [for="t-warn"], #t-end:checked ~ .tabs [for="t-end"] { background: var(--surface); border-color: var(--edge); color: var(--ink); }
+#t-runtime:focus-visible ~ .tabs [for="t-runtime"], #t-task:focus-visible ~ .tabs [for="t-task"], #t-training:focus-visible ~ .tabs [for="t-training"], #t-setup:focus-visible ~ .tabs [for="t-setup"], #t-warn:focus-visible ~ .tabs [for="t-warn"], #t-end:focus-visible ~ .tabs [for="t-end"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tabpanel { display: none; flex-direction: column; gap: 10px; }
-#t-runtime:checked ~ .panels #tp-runtime, #t-task:checked ~ .panels #tp-task, #t-setup:checked ~ .panels #tp-setup, #t-warn:checked ~ .panels #tp-warn, #t-end:checked ~ .panels #tp-end { display: flex; }
+#t-runtime:checked ~ .panels #tp-runtime, #t-task:checked ~ .panels #tp-task, #t-training:checked ~ .panels #tp-training, #t-setup:checked ~ .panels #tp-setup, #t-warn:checked ~ .panels #tp-warn, #t-end:checked ~ .panels #tp-end { display: flex; }
 .cols { display: grid; gap: 10px; align-items: stretch; }
 .cols.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .cols.c3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -3288,6 +3385,8 @@ button.pill { border: 0; cursor: pointer; }
 .st.pass { background: var(--ok); } .st.warn { background: var(--warn); } .st.fail { background: var(--crit); } .st.untested { box-shadow: inset 0 0 0 1.5px var(--muted); }
 .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 #rt-train:empty { display: none; }
+#rt-shaping:empty { display: none; }
+[data-cmd="shaping"][aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
 .prompt { border-radius: 6px; padding: 8px 12px; background: var(--ok-soft); border-left: 4px solid var(--ok); display: grid; gap: 6px; font-size: 13.5px; }
 .prompt.back { background: var(--warn-soft); border-left-color: var(--warn); }
 .prompt .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -3862,6 +3961,14 @@ _SCRIPT = """
   var timers = {};
   var heldParams = null;
   var heldMoments = null;
+  // The Training tab's cards (the console settings build's Task 10), held while a field of theirs
+  // is typed in, as the Task parameters tab's are.
+  var heldTraining = null;
+  function typingTraining() {
+    var focused = document.activeElement;
+    return Boolean(focused && focused.matches &&
+      focused.matches("#training-params input, #training-params select"));
+  }
   var pressedAt = null;
   var PRESS_MS = 10000;
   var rangeOut = {};
@@ -4188,6 +4295,8 @@ _SCRIPT = """
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
     if (id === "moments" && pressing()) { heldMoments = html; return; }
+    if (id === "training-params" && typingTraining()) { heldTraining = html; return; }
+    if (id === "training-params") { heldTraining = null; }
     // A frame shown is the newest: an older one held meanwhile must never be written back over
     // it by a later release (fix round 3 of the C3 plan's Task 18).
     if (id === "params") { heldParams = null; }
@@ -4213,6 +4322,11 @@ _SCRIPT = """
       el("params").innerHTML = heldParams;
       heldParams = null;
       restoreSides();
+      applySignIn();
+    }
+    if (heldTraining !== null && !typingTraining()) {
+      el("training-params").innerHTML = heldTraining;
+      heldTraining = null;
       applySignIn();
     }
     if (heldMoments !== null && !pressing()) {
@@ -5212,6 +5326,11 @@ _SCRIPT = """
                on: button.getAttribute("data-on") === "1" });
         return;
       }
+      // The console settings build's Task 10 (the design's §8): the training switch's position.
+      if (cmd === "shaping") {
+        post({ kind: "shaping", position: button.getAttribute("data-position") });
+        return;
+      }
       // Engine build C3 (the PI, 2026-10-30, Q7a and Q7b; TSK-43): a setting handed back, a drawn
       // range changed live, and the run taken back to a moment, each naming what it is for; a
       // double click is one act, as a clear's is.
@@ -5634,12 +5753,14 @@ def page(
     <div class="main">
       <input type="radio" name="tab" id="t-runtime" checked>
       <input type="radio" name="tab" id="t-task">
+      <input type="radio" name="tab" id="t-training">
       <input type="radio" name="tab" id="t-setup">
       <input type="radio" name="tab" id="t-warn">
       <input type="radio" name="tab" id="t-end">
       <div class="tabs" aria-label="console sections">
         <label class="tab" for="t-runtime">Runtime</label>
         <label class="tab" for="t-task">Task parameters</label>
+        <label class="tab" for="t-training">Training</label>
         <label class="tab" for="t-setup">Setup</label>
         <label class="tab" for="t-warn">Warnings</label>
         <label class="tab" for="t-end">End of session</label>
@@ -5648,7 +5769,7 @@ def page(
         <div class="tabpanel" id="tp-runtime">
           <section class="panel glass"><div class="top"><h2>Trials</h2></div><div id="rt-trials">{p['rt-trials']}</div></section>
           <section class="panel glass"><div class="top"><h2>This run</h2></div><div id="rt-work">{p['rt-work']}</div></section>
-          <section class="panel glass train" id="rt-train" aria-label="training">{p['rt-train']}</section>
+          <div class="panel glass" id="rt-shaping">{p['rt-shaping']}</div>
           <div class="cols c3">
             <div class="stack">
               <section class="panel glass"><div class="top"><h2>Still needed</h2></div><div id="rt-need">{p['rt-need']}</div></section>
@@ -5662,6 +5783,11 @@ def page(
           <section class="panel glass"><div class="top"><h2>Moments of this run</h2>
             <span class="sub">a revert takes the task's settings and drawn ranges back to one</span>
             </div><div id="moments">{p['moments']}</div></section></div>
+        <div class="tabpanel" id="tp-training">
+          <section class="panel glass"><div class="top"><h2>Training</h2><span class="sub">on, frozen or the full task, staged until the next trial</span></div><div id="shaping">{p['shaping']}</div></section>
+          <section class="panel glass train" id="rt-train" aria-label="training">{p['rt-train']}</section>
+          <section class="panel glass"><div class="top"><h2>Training settings</h2><span class="sub">staged until the next trial</span></div><div class="params" id="training-params">{p['training-params']}</div></section>
+        </div>
         <div class="tabpanel" id="tp-setup">
           <section class="panel glass" id="pf-panel"><div class="top"><h2>Pre-flight</h2><span id="pf-sum">{p['pf-sum']}</span></div><div id="preflight">{p['preflight']}</div></section>
           <section class="panel glass"><div class="top"><h2>Session</h2></div><div id="setup">{p['setup']}</div></section>

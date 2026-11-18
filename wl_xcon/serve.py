@@ -777,6 +777,9 @@ _SHAPES = {
     "drum": frozenset({"scope"}),
     # The PI, 2026-10-18: the training aid *clear* and the percentage setting, switched.
     "training": frozenset({"setting", "on"}),
+    # The console settings build's Task 10 (the design's §8): the training switch, on, frozen or
+    # the plan's full task (`link.Shaping`).
+    "shaping": frozenset({"position"}),
     # Engine build C2b (the PI, 2026-10-19): a run moved on a block, or back one, by hand; since
     # the pop-out search build (2026-11-07) naming the rig's suggestion it confirms, where it
     # answers one, and the trainer's hold of one (`decline`; "Rig suggests, trainer confirms").
@@ -807,12 +810,12 @@ _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
 #: `training`, since C3 its `hand_back`, `range` and `revert`, and since the pop-out search build
 #: `next_block`, `back_block` and `decline`, whose `suggestion` the wire checks
 #: (`link._suggestion`), which go to the run as any control does, and since the console settings
-#: build `form`, `color` and `define_color`. A range's numbers, a form's numbers, values and weights,
+#: build `form`, `color`, `define_color` and `shaping`. A range's numbers, a form's numbers, values and weights,
 #: and a new color's numbers, are decoded there by `link._setting`, as a setting's value is; a
 #: color's set and hue are words (`link._word`).
 _WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training", "hand_back", "range", "revert",
                                 "next_block", "back_block", "decline", "form", "color",
-                                "define_color"}
+                                "define_color", "shaping"}
 
 
 def _finite(value: int | float) -> bool:

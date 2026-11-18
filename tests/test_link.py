@@ -244,6 +244,10 @@ def _session_with(
         staircase=None,
         bars=None,
         pooled=None,
+        # `Session.shaping` and `.full_task` (schema 22, the console settings build's Task 10): a
+        # run with no training to switch.
+        shaping="",
+        full_task=False,
     )
 
 

@@ -1564,8 +1564,9 @@ def main(argv: list[str] | None = None) -> int:
         "command the link accepts: `set` (change a setting, a reward volume among "
         "them), `stop`, `pause`, `resume`, `reward` (a manual reward, "
         "while paused), `schedule` and `cancel` (a scheduled stop), `mark` (a mark's "
-        "note), `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, `form`, `color`, and `revert` (the run's counts, blocks, settings and draws), and the "
+        "note), `clear`, `drum`, `training`, `shaping`, `next_block`, `back_block`, `decline`, "
+        "`hand_back`, `range`, `form`, `color`, and `revert` (the run's counts, blocks, settings and "
+        "draws), and the "
         "six only `wlx taskd` acts on, which a `wlx run` session refuses: `open` (open "
         "a session, recording the departure time and the fluid the animal has already "
         "had today, and accepting warnings), `check`, `start` (start a run, "
@@ -1771,8 +1772,8 @@ def main(argv: list[str] | None = None) -> int:
         "file beside the tasks folder), and `wlx run`'s as well: `set` (a reward volume among the "
         "settings), `stop` and `pause` (of the run), `resume`, `reward` (a manual "
         "reward, also while the animal's return is awaited), `schedule`, `cancel`, "
-        "`mark`, `clear`, `drum`, `training`, `next_block`, `back_block`, `decline`, `hand_back`, "
-        "`range`, `form`, `color`, and `revert`; see `wlx run "
+        "`mark`, `clear`, `drum`, `training`, `shaping`, `next_block`, `back_block`, `decline`, "
+        "`hand_back`, `range`, `form`, `color`, and `revert`; see `wlx run "
         "--link-allow-remote` for the rest of what it exposes",
     )
 
