@@ -268,8 +268,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: its saturation and luminance levels, each `{"setting", "value", "cd_m2"}` -- else `None`; and
 #: `ParamRow.words`, **a value that is an appearance or a color in the rig's words**
 #: (`review.appearance_words`; XC-420 closed), `value` `None` beside it, as a staged row's `was`
-#: and `now` carry one; and a `color` command on the wire (`SetColor`). The build's later tasks
-#: add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
+#: and `now` carry one; and a `color` command on the wire (`SetColor`). **New colors, three ways** (the design's §6; the
+#: build's Task 8): a `define_color` command on the wire (`DefineColor`), taken by the service in
+#: any phase, and `Idle.controls`, the service's own changes-feed rows while no session is open.
+#: The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
 SCHEMA = 22
 
@@ -922,6 +924,12 @@ class Idle:
     #: page offers its demo choice only where one can open. `False` by default; demo mode's Task 4
     #: sets it (`Service.publish`).
     gaze: bool = False
+    #: **What the service did itself while no session was open** (schema 22; the console settings
+    #: build's Task 8): `Control` rows for the changes feed, newest last, at most
+    #: `CONTROL_HISTORY` -- a new color saved as a set's proposed file (`define_color`), and a
+    #: `warning` of how a panel shows the set with it (`service.Service._define_color`). Cleared as a
+    #: session opens, as the idle refusals are. Empty by default.
+    controls: tuple = ()
 
     @classmethod
     def of(
@@ -939,6 +947,7 @@ class Idle:
         warnings=(),
         demo: bool = False,
         gaze: bool = False,
+        controls=(),
     ) -> "Idle":
         """One idle frame: the service's refusals and the link's, capped at
         `REFUSAL_HISTORY` and counted, as `Telemetry.of` caps a session's; and the last
@@ -960,6 +969,7 @@ class Idle:
             warnings=tuple(warnings),
             demo=demo,
             gaze=gaze,
+            controls=tuple(controls)[-CONTROL_HISTORY:],
         )
 
 
@@ -1772,6 +1782,13 @@ def encode(telemetry: Telemetry | Idle | Drawn) -> bytes:
                 # Demo mode (schema 21).
                 "demo": telemetry.demo,
                 "gaze": telemetry.gaze,
+                # The service's own acts with no session open (schema 22; the console settings
+                # build's Task 8).
+                "controls": [
+                    {"kind": c.kind, "by": actors.to_map_or_none(c.by), "at": c.at,
+                     "said": c.said}
+                    for c in telemetry.controls
+                ],
             },
             use_bin_type=True,
         )
@@ -2102,6 +2119,10 @@ def _idle_from(data: dict) -> Idle:
         warnings=_warnings_in(data["warnings"]),
         demo=_flag(data["demo"]),
         gaze=_flag(data["gaze"]),
+        controls=tuple(
+            Control(**{**c, "by": None if c["by"] is None else actors.from_map(c["by"])})
+            for c in data["controls"]
+        ),
     )
 
 
@@ -2739,6 +2760,29 @@ class SetColor:
     by: Actor
 
 
+@dataclass(frozen=True, slots=True)
+class DefineColor:
+    """**A person defines a new color from a color card's panel** (the console settings design's
+    §6; the PI, 2026-11-16: "1,2,or 3. you select an option and then enter the info", "Saved into a
+    color set file"; its plan's Task 8, "Proposed file first"): color `name` of set `colorset` --
+    a new set of that name where `new_set` -- by `method`, one of `colordef.METHODS`, its `numbers`
+    named (`colordef.NUMBERS`). **Taken by the service, never a run** (`service.Service
+    ._define_color`, in any phase): it writes the set's file with the color added under
+    `stimuli/proposed/` beside `--tasks`, for the PI to review and commit, and never the set's own
+    file. Its words are text of 1 to `TEXT_LIMIT` characters, its numbers decoded by `_setting` as a
+    range's are (`_numbers`, kind `define_color`); which numbers a method takes, and whether the
+    name is free in the set, are the service's to say."""
+
+    KIND: ClassVar[str] = "define_color"
+
+    colorset: str
+    new_set: bool
+    name: str
+    method: str
+    numbers: dict[str, float]
+    by: Actor
+
+
 #: **The shapes a `form` command may name on the wire**: the five a timing card draws
 #: (`task.SHAPES`) and a size's scaling (`task.Scaled`; the design's §5), which the session takes
 #: on a size setting alone (`taskd.Session._scale`).
@@ -2789,6 +2833,7 @@ Command = (
     | SetRange
     | SetForm
     | SetColor
+    | DefineColor
     | Revert
     | Decline
 )
@@ -2961,6 +3006,10 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, SetColor):
         payload = {"kind": "color", "by": actors.to_map(command.by), "name": command.name,
                    "colorset": command.colorset, "color": command.color}
+    elif isinstance(command, DefineColor):
+        payload = {"kind": "define_color", "by": actors.to_map(command.by),
+                   "colorset": command.colorset, "new_set": command.new_set, "name": command.name,
+                   "method": command.method, "numbers": dict(command.numbers)}
     elif isinstance(command, Revert):
         payload = {"kind": "revert", "by": actors.to_map(command.by), "change": command.change}
     else:
@@ -3156,7 +3205,7 @@ def _numbers(data: dict, name: str, by: Actor, *, kind: str = "range") -> dict[s
             f"a {kind!r} command's numbers are 1 to {NUMBERS_LIMIT} named numbers, and "
             f"{_quoted(numbers)} is not that, so it is refused",
         )
-    drawn = "drawn range" if kind == "range" else f"drawn {kind}"
+    drawn = {"range": "drawn range", "define_color": "new color"}.get(kind, f"drawn {kind}")
     checked = {}
     for key, value in numbers.items():
         if not isinstance(key, str) or not key or len(key) > TEXT_LIMIT:
@@ -3477,6 +3526,27 @@ def _command_from(data: dict) -> Command:
         return SetColor(name=_word(data, "name", kind, by),
                         colorset=_word(data, "colorset", kind, by),
                         color=_word(data, "color", kind, by), by=by)
+    if kind == "define_color":
+        by = _actor(data.get("by"), kind)
+        new_set = data.get("new_set")
+        if not isinstance(new_set, bool):
+            raise CommandRefused(
+                kind, by,
+                f"a 'define_color' command's new_set is true or false, and {_quoted(new_set)} is "
+                f"neither, so it is refused",
+            )
+        from wl_xcon.colordef import METHODS
+
+        method = data.get("method")
+        if not isinstance(method, str) or method not in METHODS:
+            raise CommandRefused(
+                kind, by,
+                f"a new color is defined by {', '.join(METHODS)}, and {_quoted(method)} is none of "
+                f"them, so it is refused",
+            )
+        name = _word(data, "name", kind, by)
+        return DefineColor(colorset=_word(data, "colorset", kind, by), new_set=new_set, name=name,
+                           method=method, numbers=_numbers(data, name, by, kind=kind), by=by)
     if kind == "revert":
         by = _actor(data.get("by"), kind)
         change = data.get("change")
@@ -3741,6 +3811,7 @@ _COMMAND_EXPOSURE = {
     "start": ("taskd", "start a run, acknowledging its unknown pre-flight items"),
     "end": ("taskd", "end a session, recording the animal's return time"),
     "resume_session": ("taskd", "resume a stranded session"),
+    "define_color": ("taskd", "write a new color as a color set's proposed file, in the stimuli folder beside its tasks folder"),
 }
 
 

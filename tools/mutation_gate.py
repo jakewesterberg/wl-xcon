@@ -97,6 +97,8 @@ RETURNS: dict[str, str] = {
     "viewport": "None",
     "warnlist": "None",
     "cones": "None",
+    "cam16": "None",
+    "colordef": "None",
     "declarations": "None",
     "variation": "None",
 }

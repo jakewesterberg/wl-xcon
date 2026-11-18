@@ -2156,6 +2156,63 @@ def _color_level(said: str, level: object, frame, view: View, note: str = "") ->
             f'<span class="unit">{_e(unit)}</span>{lit}{note}</label>')
 
 
+#: **What the New color panel says of where a color goes** (the console settings design's §6; its
+#: plan's Task 8, "Proposed file first"), the set's name between its two halves.
+NEW_COLOR_SAVED = ("saved to wl-xtasks/stimuli/proposed/", ".json for the PI to review and commit; "
+                   "a rig uses it once committed and pulled")
+
+#: Each method's fields as the panel offers them (`colordef.NUMBERS`, `OPTIONAL` and `FRAMING`):
+#: the field, its label's unit, and whether it is sent only for a new set.
+_NEW_COLOR_FIELDS = {
+    "hue_angle": (("hue_deg", "°", False), ("gray_lightness", "J′, a new set's frame", True),
+                  ("chroma", "a new set's frame", True)),
+    "dkl": (("azimuth_deg", "°", False), ("elevation_deg", "°", False),
+            ("contrast", "blank: the set's mean radius", False)),
+    "xy": (("x", "", False), ("y", "", False)),
+}
+
+
+def _new_color(row, sets: dict, chosen: str, view: View) -> str:
+    """**A color card's New color panel** (the console settings design's §6; the PI, 2026-11-16:
+    "1,2,or 3. you select an option and then enter the info", "Saved into a color set file"): the
+    method (`colordef.METHODS`, in its words, `colordef.SAID`), its fields, a name, and the set it
+    goes into -- one of the card's, or a new one by its name -- then *preview*, which asks `wlx
+    serve` (`GET /color-preview`) and writes nothing, so any viewer may, and *save as a proposal*,
+    which sends `define_color` (`link.DefineColor`), greyed away from the box. Then where it goes:
+    `NEW_COLOR_SAVED`, naming the set."""
+    from wl_xcon.colordef import METHODS, NAME_LIMIT, SAID
+
+    name, off = _e(row.name), _gate(view)
+    methods = "".join(f'<option value="{m}">{_e(SAID[m])}</option>' for m in METHODS)
+    fields = []
+    for method in METHODS:
+        inputs = "".join(
+            f'<label class="rn"{" data-newset-only" if only else ""}>{_e(field)} '
+            f'<input class="field mono" data-newc-num="{field}" inputmode="decimal" '
+            f'aria-label="{name}: new color {_e(field)}"><span class="unit">{_e(unit)}</span></label>'
+            for field, unit, only in _NEW_COLOR_FIELDS[method])
+        fields.append(f'<div class="nf" data-newc-fields="{method}"'
+                      f'{"" if method == METHODS[0] else " hidden"}>{inputs}</div>')
+    into = "".join(
+        f'<option value="{_e(named)}"{" selected" if named == chosen else ""}>{_e(named)}</option>'
+        for named in sets) + '<option value="">a new set</option>'
+    return (f'<details class="newc" data-newc="{name}"><summary>New color</summary>'
+            f'<label class="rn">by <select class="field" data-newc-method aria-label="{name}: '
+            f'new color method">{methods}</select></label>{"".join(fields)}'
+            f'<label class="rn">name <input class="field" data-newc-name maxlength="{NAME_LIMIT}" '
+            f'aria-label="{name}: new color name"></label>'
+            f'<label class="rn">into <select class="field" data-newc-into aria-label="{name}: '
+            f'new color set">{into}</select><input class="field" data-newc-set maxlength="'
+            f'{NAME_LIMIT}" placeholder="a name for the new set" aria-label="{name}: new set name" hidden>'
+            f'</label>'
+            f'<div class="newc-do"><button type="button" class="btn small" data-cmd="preview_color" '
+            f'data-name="{name}">preview</button><button type="button" class="btn small" '
+            f'data-cmd="define_color" data-name="{name}"{off}>save as a proposal</button></div>'
+            f'<span class="newc-out" aria-live="polite"></span>'
+            f'<span class="src">{_e(NEW_COLOR_SAVED[0])}<span data-newc-path>{_e(chosen)}</span>'
+            f'{_e(NEW_COLOR_SAVED[1])}</span></details>')
+
+
 def _color_card(row, frame, view: View) -> str:
     """**A color setting's card** (`ParamRow.color`; the console settings design's §6; the PI,
     2026-11-16: "you select a set, and then you have hue options from the set, then you have
@@ -2203,7 +2260,8 @@ def _color_card(row, frame, view: View) -> str:
             f'{"".join(groups)}'
             f'<div class="lvls">{_color_level("saturation", color.get("saturation"), frame, view)}'
             f'{_color_level("luminance", luminance, frame, view, every)}</div>'
-            f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span></div>')
+            f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span>'
+            f'{_new_color(row, sets, chosen, view)}</div>')
 
 
 def _beneath(row, frame) -> str:
@@ -3159,6 +3217,13 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .param .clr .chip.none { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--rule) 3px, var(--rule) 4px); }
 .param .clr .lvls { display: grid; gap: 4px; }
 .param .clr .lvl .field { width: 4.5em; border-radius: 3px; }
+.param .clr .newc { display: grid; gap: 4px; }
+.param .clr .newc > summary { cursor: pointer; }
+.param .clr .newc .nf { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.param .clr .newc .nf[hidden], .param .clr .newc [data-newset-only][hidden] { display: none; }
+.param .clr .newc .nf .field { width: 4.5em; border-radius: 3px; }
+.param .clr .newc .newc-do { display: flex; gap: 6px; }
+.param .clr .newc .newc-out { overflow-wrap: anywhere; }
 .field.over { width: 100%; border-radius: 3px; }
 #moments .rv { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px; overflow-wrap: anywhere; }
 .ev.ctl .kind { color: var(--accent); }
@@ -3766,6 +3831,10 @@ _SCRIPT = """
   // A color card's set a person chose to see the hues of (the design's §6), by setting, kept
   // across the frames that replace the cards until a hue of it is picked.
   var colorSets = {};
+  // A color card's New color panel (the console settings build's Task 8; the design's §6), by
+  // setting: open or not, its method, its set, what is typed and the last preview, kept across the
+  // frames that replace the cards.
+  var newColors = {};
   var markNo = null;
   var rewarding = false;
   var REWARD_LOST = "unknown: this page lost wlx serve's answer, so whether the reward was given is not known, and it was not sent again; check the session's fluid total before pressing again";
@@ -3880,6 +3949,112 @@ _SCRIPT = """
     Object.keys(colorSets).forEach(function (name) {
       var select = document.querySelector('#params select[data-colorset="' + CSS.escape(name) + '"]');
       if (select) { showHues(select, colorSets[name]); }
+    });
+    restoreNewColors();
+  }
+  function newColorKey(input) {
+    if (input.hasAttribute("data-newc-num")) {
+      return input.closest("[data-newc-fields]").getAttribute("data-newc-fields") + "/" +
+        input.getAttribute("data-newc-num");
+    }
+    return input.hasAttribute("data-newc-name") ? "name" : "set";
+  }
+  function newColorRead(panel) {
+    var kept = newColors[panel.getAttribute("data-newc")] || {};
+    var state = { open: panel.open, method: panel.querySelector("[data-newc-method]").value,
+                  into: panel.querySelector("[data-newc-into]").value, fields: {},
+                  out: kept.out || null };
+    Array.prototype.forEach.call(panel.querySelectorAll("input"), function (input) {
+      state.fields[newColorKey(input)] = input.value;
+    });
+    newColors[panel.getAttribute("data-newc")] = state;
+  }
+  function newColorShow(panel) {
+    var method = panel.querySelector("[data-newc-method]").value;
+    var into = panel.querySelector("[data-newc-into]").value;
+    var fresh = panel.querySelector("[data-newc-set]");
+    Array.prototype.forEach.call(panel.querySelectorAll("[data-newc-fields]"), function (group) {
+      group.hidden = group.getAttribute("data-newc-fields") !== method;
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll("[data-newset-only]"), function (label) {
+      label.hidden = into !== "";
+    });
+    fresh.hidden = into !== "";
+    panel.querySelector("[data-newc-path]").textContent = into !== "" ? into : fresh.value.trim();
+  }
+  function newColorOut(panel, answer) {
+    var out = panel.querySelector(".newc-out");
+    out.textContent = "";
+    if (!answer) { return; }
+    if (typeof answer.srgb === "string" && /^#[0-9a-f]{6}$/.test(answer.srgb)) {
+      var chip = document.createElement("span");
+      chip.className = "chip";
+      chip.style.background = answer.srgb;
+      out.appendChild(chip);
+      out.appendChild(document.createTextNode(" "));
+    }
+    out.appendChild(document.createTextNode(String(answer.said || "")));
+  }
+  function restoreNewColors() {
+    Object.keys(newColors).forEach(function (setting) {
+      var panel = document.querySelector('#params [data-newc="' + CSS.escape(setting) + '"]');
+      if (!panel) { return; }
+      var state = newColors[setting];
+      panel.open = state.open;
+      panel.querySelector("[data-newc-method]").value = state.method;
+      choose(panel.querySelector("[data-newc-into]"), state.into);
+      Array.prototype.forEach.call(panel.querySelectorAll("input"), function (input) {
+        var typed = state.fields[newColorKey(input)];
+        if (typed !== undefined) { input.value = typed; }
+      });
+      newColorOut(panel, state.out);
+      newColorShow(panel);
+    });
+  }
+  // The New color panel's command as typed, or null with the page told what is missing: the set
+  // chosen, or a new one by its name; the method's fields, a new set's frame only for a new set, a
+  // blank contrast left to the set's mean radius.
+  function newColorCommand(panel) {
+    var method = panel.querySelector("[data-newc-method]").value;
+    var into = panel.querySelector("[data-newc-into]").value;
+    var fresh = into === "";
+    var colorset = fresh ? panel.querySelector("[data-newc-set]").value.trim() : into;
+    var numbers = {};
+    var bad = null;
+    var group = panel.querySelector('[data-newc-fields="' + CSS.escape(method) + '"]');
+    Array.prototype.forEach.call(group.querySelectorAll("input[data-newc-num]"), function (input) {
+      var field = input.getAttribute("data-newc-num");
+      var raw = input.value.trim();
+      if (input.closest("[data-newset-only]") && !fresh) { return; }
+      if (field === "contrast" && raw === "") { return; }
+      var value = Number(raw);
+      if (raw === "" || !isFinite(value)) { bad = bad || field; }
+      numbers[field] = value;
+    });
+    if (bad !== null) { tell("not sent: the new color's " + bad + " needs a number", "crit"); return null; }
+    if (!colorset) { tell("not sent: a new set needs its name", "crit"); return null; }
+    return { colorset: colorset, new_set: fresh, method: method, numbers: numbers,
+             name: panel.querySelector("[data-newc-name]").value.trim() };
+  }
+  function previewColor(button) {
+    var panel = button.closest("[data-newc]");
+    var asked = newColorCommand(panel);
+    if (!asked) { return; }
+    var query = new URLSearchParams();
+    query.set("set", asked.colorset);
+    query.set("method", asked.method);
+    Object.keys(asked.numbers).forEach(function (field) {
+      query.set(field, String(asked.numbers[field]));
+    });
+    fetch("/color-preview?" + query.toString(), { cache: "no-store" }).then(function (response) {
+      return response.json();
+    }).then(function (answer) {
+      var shown = document.querySelector('#params [data-newc="' + CSS.escape(panel.getAttribute("data-newc")) + '"]') || panel;
+      newColorRead(shown);
+      newColors[shown.getAttribute("data-newc")].out = { said: answer.said, srgb: answer.srgb };
+      newColorOut(shown, newColors[shown.getAttribute("data-newc")].out);
+    }).catch(function () {
+      newColorOut(panel, { said: "not previewed: this page could not reach wlx serve", srgb: null });
     });
   }
   function showHues(select, named) {
@@ -4959,6 +5134,18 @@ _SCRIPT = """
       // A color setting's hue picked by its set (the console settings build; the design's §6):
       // the set and the hue its swatch names, staged by the rig until the next trial. A double
       // click is one pick, as a clear's is.
+      // A new color (the console settings build's Task 8): *preview* asks wlx serve and writes
+      // nothing; *save as a proposal* sends it to the rig, which writes the set's proposed file. A
+      // double click is one save, as a clear's is.
+      if (cmd === "preview_color") { previewColor(button); return; }
+      if (cmd === "define_color") {
+        var panel = button.closest("[data-newc]");
+        var defined = newColorCommand(panel);
+        if (!defined || !clearAllowed(e.detail, "define_color/" + panel.getAttribute("data-newc"))) { return; }
+        defined.kind = "define_color";
+        post(defined);
+        return;
+      }
       if (cmd === "color") {
         var hueOf = button.getAttribute("data-name");
         if (!clearAllowed(e.detail, "color/" + hueOf)) { return; }
@@ -5021,6 +5208,11 @@ _SCRIPT = """
       colorSets[e.target.getAttribute("data-colorset")] = e.target.value;
       showHues(e.target, e.target.value);
     }
+    else if (e.target.closest("[data-newc]")) {
+      var changed = e.target.closest("[data-newc]");
+      newColorShow(changed);
+      newColorRead(changed);
+    }
     else if (e.target.matches("input[data-ack]")) { acked[e.target.getAttribute("data-ack")] = e.target.checked; }
     else if (e.target.id === "start-block") {
       picked.block = e.target.value;
@@ -5059,7 +5251,14 @@ _SCRIPT = """
       markRanges();
       release();
     }
+    // What is typed in a New color panel is kept, so a frame replacing the cards keeps it.
+    var typing = e.target && e.target.closest && e.target.closest("[data-newc]");
+    if (typing) { newColorShow(typing); newColorRead(typing); }
   });
+  // A New color panel opened or closed stays so across frames (`toggle` does not bubble).
+  document.addEventListener("toggle", function (e) {
+    if (e.target && e.target.matches && e.target.matches("[data-newc]")) { newColorRead(e.target); }
+  }, true);
   // The primary button only; the hold ends with the press -- its pointer going up, cancelled,
   // a context menu or a drag taking it over, the window losing focus -- or, a release the page
   // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).

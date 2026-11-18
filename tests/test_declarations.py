@@ -229,7 +229,7 @@ DEFAULTS = {
     "Choice": {"objects": REQUIRED, "by": REQUIRED},
     "Color": {},
     "ColorSet": {"name": REQUIRED, "colors": REQUIRED, "apex": REQUIRED, "luminance_cd_m2": 15.0,
-                 "held": "macaque_2deg_LM1", "source": ""},
+                 "held": "macaque_2deg_LM1", "source": "", "design": None},
     "ColorSetLight": {"colorset": REQUIRED, "color": REQUIRED, "fraction": 1.0, "luminance": None,
                       "saturation": 1.0},
     "Condition": {"name": REQUIRED, "values": REQUIRED, "target": REQUIRED, "structure": None},

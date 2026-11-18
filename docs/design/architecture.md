@@ -346,7 +346,9 @@ a look draws its size by alone, so no reward size is ever scaled either. A fifth
 7) hands `SetColor` to `Session._color`, written beside them, off this list: it maps the set and hue
 picked to the one choice the setting declares, then calls `_impossible` and `set`, unchanged, as a
 revert sets a value, refusing with its sentence and never raising; no ceiling has choices, so no
-reward size is picked.
+reward size is picked. A new color (`DefineColor`, the build's Task 8) never reaches `_command`:
+`Service._route` and `_Routed.drain`, neither listed, take it to `Service._define_color`, which
+writes a proposed color-set file beside `--tasks` and sets nothing.
 Since engine build C3 a third branch beside the pause hands `Revert` to `Session._revert`, off this
 list (the C3 spec's §14 items 1 and 3, approved by the PI for the design, "Approve all four",
 2026-10-30). **Revert is on the welfare summary**: it takes the run back to an earlier moment of
@@ -966,11 +968,20 @@ a realizable set is realizable, a line in xy being a line in the light's equal-l
 checks read each light at its own saturation: one at 0 is its set's apex whatever its hue, so it adds
 no `color-set-desaturated`, and two lights alike but for a hue are alike when both are at 0 (an odd
 one is then odd no longer, `impossible-trial`). The record writes each light's `saturation`, each
-realization's `macaque_row` and each set's `design` (null until a set declares one), told to
+realization's `macaque_row` and each set's `design` (its file's, or null), told to
 wl-preproc before any was written (XC-513), so a reader computes every light from the record alone.
 A setting whose choices each show a color-set light is picked by set and hue on its card
-(`task.color_choices`; two choices of one set's one hue warn `ambiguous-color-choice` at load). Cone colors
-still convert through the lab observer and hold V_F,10.
+(`task.color_choices`; two choices of one set's one hue warn `ambiguous-color-choice` at load). **A new
+color is defined from its card three ways** (the console settings build's Task 8; the design's §6;
+COL-38; `wl_xcon/colordef.py`): a hue angle in its set's CAM16-UCS design frame (`ColorSet.design`,
+the file's optional `design`), CAM16 computed in the standard library's `math` (`wl_xcon/cam16.py`)
+under the viewing condition the PI's generator used, colour-science 0.4.7's defaults, which a test
+holds to isohue's own colors; a DKL direction about the set's gray in the set's 2° observer on the
+sRGB standard; or CIE x, y. `wlx serve` previews it (`GET /color-preview`, writing nothing), and
+`wlx taskd` saves it in any phase (`link.DefineColor`, `Service._define_color`, outside every listed
+item) as its set's whole file with the color added under `stimuli/proposed/` beside `--tasks`, never
+the set's own file, for the PI to review and commit; how the panel in use shows the set with it is a
+warning on the changes feed. Cone colors still convert through the lab observer and hold V_F,10.
 
 ## Neural plane and stimulation
 

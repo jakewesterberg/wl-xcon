@@ -731,7 +731,13 @@ def _chromaticity(value: object, what: str) -> tuple[float, float]:
 COLORSET_LIMIT = 64 * 1024
 #: A color-set file's fields: these always, and `COLORSET_OPTIONAL` when given; no other.
 COLORSET_FIELDS = ("name", "colors", "apex")
-COLORSET_OPTIONAL = ("luminance_cd_m2", "held", "source")
+COLORSET_OPTIONAL = ("luminance_cd_m2", "held", "source", "design")
+#: **The one design frame a color set may declare** (`ColorSet.design`; the console settings
+#: design's §6): the uniform space its hues were made in, CAM16-UCS [@li2017comprehensive], as the
+#: PI's generator made `isohue` (wl-style's `isohue.py`).
+DESIGN_SPACE = "CAM16-UCS"
+#: A design frame's fields, each required and no other.
+DESIGN_FIELDS = ("space", "gray_lightness", "chroma")
 
 
 @dataclass(frozen=True, slots=True)
@@ -752,6 +758,14 @@ class ColorSet:
     luminance_cd_m2: float = 15.0
     held: str = MACAQUE_2DEG_LM1
     source: str = ""
+    #: **How its hues were made, where the file says** (the console settings design's §6; its
+    #: plan's Task 8): `{"space": "CAM16-UCS", "gray_lightness": J', "chroma": C}` -- the
+    #: CAM16-UCS lightness of the achromatic point whose macaque luminance the set's gray has, and
+    #: the chroma of each hue about that gray, as wl-style's `isohue.py` makes a sector
+    #: (`colordef`'s hue-angle method defines a new color in it). `None` for a set that does not
+    #: say; anything else refused (`_design`). A plain dict, as `colors` is, so the task's content
+    #: hash reads it (`declarations.canonical`).
+    design: Mapping | None = field(default=None, hash=False)
 
     def __post_init__(self) -> None:
         if not (isinstance(self.name, str) and self.name.strip() and self.name.isprintable()):
@@ -779,6 +793,8 @@ class ColorSet:
             )
         if not isinstance(self.source, str):
             raise ValueError(f"color set {self.name!r}'s source is text")
+        if self.design is not None:
+            object.__setattr__(self, "design", _design(self.design, self.name))
 
     def __repr__(self) -> str:
         return f"ColorSet({self.name!r}, {', '.join(self.colors)})"
@@ -787,7 +803,7 @@ class ColorSet:
     def load(cls, path) -> "ColorSet":
         """A color set from its plain-data file, JSON (Task 9's `stimuli/isohue.json` in wl-xtasks):
         `name`, `colors` (each name's `[x, y]`) and `apex` (`[x, y]`), and `luminance_cd_m2`,
-        `held` and `source` where given. **Fills in nothing else**: a missing field, one a color
+        `held`, `source` and `design` where given. **Fills in nothing else**: a missing field, one a color
         set does not have or one given twice raises `ValueError` naming it, as does a value that is
         not what its field holds. Only a regular file is read, opened without waiting, as
         `read_calibration` reads a record; one that cannot be read raises `OSError`. Read at load,
@@ -820,6 +836,29 @@ class ColorSet:
         if not isinstance(data["colors"], dict):
             raise ValueError(f"{path}'s colors are a JSON object, each name's [x, y]")
         return cls(**data)
+
+
+def _design(value: object, name: str) -> dict:
+    """A color set's `design` (`ColorSet.design`): exactly `DESIGN_FIELDS`, its space
+    `DESIGN_SPACE`, its gray's lightness a number above 0 and at most 100 (J' is 100 at the
+    white) and its chroma a number above 0. Refused otherwise, naming what is wrong."""
+    said = f"color set {name!r}'s design"
+    if not isinstance(value, Mapping) or set(value) != set(DESIGN_FIELDS):
+        raise ValueError(
+            f"{said} is {value!r}; a design is "
+            f'{{"space": "{DESIGN_SPACE}", "gray_lightness": J′, "chroma": C}}, those three '
+            f"fields and no other"
+        )
+    if value["space"] != DESIGN_SPACE:
+        raise ValueError(f"{said}'s space is {value['space']!r}; the one space a set's design "
+                         f"names is {DESIGN_SPACE!r}")
+    lightness, chroma = value["gray_lightness"], value["chroma"]
+    if not (_finite_number(lightness) and 0.0 < lightness <= 100.0):
+        raise ValueError(f"{said}'s gray_lightness is {lightness!r}; it is a CAM16-UCS J' above 0 "
+                         f"and at most 100, the white's")
+    if not (_finite_number(chroma) and chroma > 0.0):
+        raise ValueError(f"{said}'s chroma is {chroma!r}; it is a CAM16-UCS chroma above 0")
+    return {"space": DESIGN_SPACE, "gray_lightness": float(lightness), "chroma": float(chroma)}
 
 
 @dataclass(frozen=True, slots=True)

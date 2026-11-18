@@ -984,7 +984,7 @@ def test_the_link_allow_remote_help_says_every_command_a_host_could_send(capsys)
     """XC-172: `wlx run`'s help listed some of the commands and `wlx taskd`'s named
     opening and ending sessions but not starting runs or acknowledging. Each now names
     every kind the link accepts (read from `Command`, so one added later fails here) --
-    `wlx run`'s all of them with the five only `wlx taskd` acts on said to be refused by
+    `wlx run`'s all of them with the six only `wlx taskd` acts on said to be refused by
     a `wlx run` session, and `wlx taskd`'s the same list."""
     run_help = _help_of(capsys, "run")
     taskd_help = _help_of(capsys, "taskd")

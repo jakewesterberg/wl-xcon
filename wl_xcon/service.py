@@ -468,6 +468,11 @@ _SERVICE_COMMANDS = (
     _link.OpenSession, _link.CheckRun, _link.StartRun, _link.EndSession, _link.ResumeSession,
 )
 
+#: **The service's commands taken in any phase** (the console settings build's Task 8): never a
+#: run's, and never refused for a run in progress -- a new color is saved as its set's proposed
+#: file between runs and at a run's boundary alike (`Service._define_color`).
+_ANY_PHASE = (_link.DefineColor,)
+
 
 class _Routed:
     """The link a service session drains through (the b3a-1 plan, decision 18): the
@@ -530,6 +535,10 @@ class _Routed:
                     continue
                 service._ending = command
                 kept.append(_link.Stop(by=command.by))
+            elif isinstance(command, _ANY_PHASE):
+                # A new color is the service's in any phase, a run's never (the console settings
+                # build's Task 8): saved as its set's proposed file at this boundary, between trials.
+                service._define_color(command)
             elif isinstance(command, _SERVICE_COMMANDS):
                 service.session.refuse(
                     command.KIND,
@@ -663,6 +672,10 @@ class Service:
         #: The service's own refusals while no session is open, capped as a session's.
         self.refusals: list = []
         self.refusals_dropped = 0
+        #: **What the service did itself while no session is open** (`Idle.controls`; the console
+        #: settings build's Task 8): a new color saved, and how the panel shows its set, for the
+        #: changes feed; the last `link.CONTROL_HISTORY`, cleared as a session opens.
+        self.controls: list = []
         #: **The last closed session's final frame** (the b3a-2 final review, I2; spec
         #: §6.2: "The session then closes and the page shows its summary"), for the idle
         #: frames until the next session opens (`Idle.closed`). Set as the session
@@ -783,6 +796,7 @@ class Service:
                 offered_tasks=self._tasks(),
                 closed=self.closed,
                 warnings=self._idle_warnings(),
+                controls=self.controls,
                 # Schema 21 (demo mode §3.7): whether this is a demo service, and whether a demo
                 # can open here -- a gaze endpoint, and on a rig service a demo folder of its own.
                 demo=self.demo_service,
@@ -826,6 +840,7 @@ class Service:
                 # replaced by this session's** (the b3a-2 final review, I2).
                 self.refusals.clear()
                 self.refusals_dropped = 0
+                self.controls.clear()
                 self.closed = None
         elif isinstance(command, _link.EndSession):
             if self.session is None and self._demo_stranded(command.session_id) is not None:
@@ -848,7 +863,10 @@ class Service:
                 # As for an open: the idle feed and the last summary were about before.
                 self.refusals.clear()
                 self.refusals_dropped = 0
+                self.controls.clear()
                 self.closed = None
+        elif isinstance(command, _link.DefineColor):
+            self._define_color(command)
         elif self.session is not None:
             self.session.receive(command)
         elif isinstance(command, _link.ManualReward):
@@ -867,6 +885,120 @@ class Service:
                 "no session is open, so a command for a run is not applied; open a "
                 "session first",
             )
+
+    def _define_color(self, command: _link.DefineColor) -> None:
+        """**A new color saved as its set's proposed file** (`link.DefineColor`; the console settings
+        design's §6; its plan's Task 8; the PI, 2026-11-16: "Saved into a color set file", and for
+        this plan "Proposed file first"), in any phase, the service's and never a run's.
+
+        It reads `<--tasks>/../stimuli/<set>.json` -- or the proposal already made of it,
+        `stimuli/proposed/<set>.json`, which it extends -- defines the color by its method in that
+        set's frame (`colordef.chromaticity`), and writes the set's whole file with the color added
+        (`colordef.proposal`) to `stimuli/proposed/<set>.json`, atomically (a temporary file beside
+        it, then `os.replace`). **Never the set's own file** (the planner's call, COL-38): XC-150's
+        pull is not built, so a file in the checkout is read at the next load whether committed or
+        not, and a rig would use a color the PI had not reviewed; he commits it by moving it into
+        `stimuli/`. **A new set** (`new_set`) takes `colordef.new_set`'s apex, luminance and, by
+        hue angle, its design.
+
+        **Refused, writing nothing**, with the sentence on the feed: a `--tasks` with no `stimuli`
+        folder beside it, as wl-xtasks has; a set that is missing, unless new, or that exists, if
+        new; a set's name no file can have; and whatever the definition or the proposal refuses (a
+        name the set has, a number no color has). **Then said on the changes feed** -- the open
+        session's (`Session.say`), or the idle frame's (`controls`): where it was saved, and, as a
+        `warning`, how the session's panel shows the set with it, or with no session open the
+        rig's (the default where it names none): "adding it desaturates isohue by N% on
+        calibration X" (`photometry.realize`). Between trials or between runs, never in a frame."""
+        from wl_xcon import colordef
+        from wl_xcon.photometry import ColorSet, realize
+
+        by, kind = command.by, command.KIND
+        stimuli = self.tasks.parent / "stimuli"
+        if not stimuli.is_dir():
+            self._refuse(kind, by, (
+                f"--tasks {self.tasks} has no stimuli folder beside it, as wl-xtasks has, so "
+                f"there is no color set to add {command.name!r} to; nothing was written"))
+            return
+        try:
+            named = colordef.set_name(command.colorset)
+        except ValueError as refused:
+            self._refuse(kind, by, f"{refused}; nothing was written")
+            return
+        own, proposed = stimuli / f"{named}.json", stimuli / "proposed" / f"{named}.json"
+        if command.new_set and own.exists():
+            self._refuse(kind, by, (
+                f"color set {named!r} exists already ({own}); a new set takes a name no set has, "
+                f"so {command.name!r} was not saved"))
+            return
+        if not command.new_set and not own.is_file():
+            self._refuse(kind, by, (
+                f"there is no color set {named!r} under {stimuli}; a color goes into a set that is "
+                f"there, or a new one, so {command.name!r} was not saved"))
+            return
+        numbers = dict(command.numbers)
+        try:
+            if proposed.is_file():
+                within = colordef.frame(ColorSet.load(proposed))
+            elif command.new_set:
+                within = colordef.new_set(named, command.method, numbers)
+            else:
+                within = colordef.frame(ColorSet.load(own))
+            xy = colordef.chromaticity(within, command.method, numbers)
+            data = colordef.proposal(
+                within, command.name, xy, method=command.method, numbers=numbers, by=by,
+                rig=Path(self.rig_path).stem or "this rig",
+                on=date.fromtimestamp(self.wall_now()).isoformat())
+            added = ColorSet(**data)
+        except (ValueError, OSError) as refused:
+            self._refuse(kind, by, f"{command.name!r} was not saved: {refused}")
+            return
+        try:
+            proposed.parent.mkdir(exist_ok=True)
+            handle, temporary = tempfile.mkstemp(dir=proposed.parent, prefix=f".{named}.",
+                                                 suffix=".json")
+            try:
+                with os.fdopen(handle, "w", encoding="utf-8") as file:
+                    file.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+                    file.flush()
+                    os.fsync(file.fileno())
+                os.replace(temporary, proposed)
+            except BaseException:
+                Path(temporary).unlink(missing_ok=True)
+                raise
+        except OSError as failed:
+            self._refuse(kind, by, f"{command.name!r} was not saved: {proposed} could not be "
+                                   f"written ({failed})")
+            return
+        x, y = added.colors[command.name]
+        shown = f"{self.tasks.parent.name}/stimuli/proposed/{named}.json"
+        said = [(kind, (
+            f"{command.name} ({colordef.SAID[command.method]}: "
+            f"{colordef.numbers_words(command.method, numbers)}) at x {x:.5f}, y {y:.5f} saved "
+            f"to {shown} for the PI to review and commit; a rig uses it once committed and "
+            f"pulled"))]
+        calibration = self.calibration if self.session is None else self.session.spec.calibration
+        panel = calibration.id or calibration.measured_on
+        try:
+            before = 0.0 if not within.colors else realize(ColorSet(
+                name=within.name, colors=within.colors, apex=within.apex,
+                luminance_cd_m2=within.luminance_cd_m2), calibration).desaturation
+            after = realize(added, calibration).desaturation
+        except ValueError as unshown:
+            said.append(("warning", f"adding {command.name} to {named}: {unshown}"))
+        else:
+            if after > before + colordef.DESATURATED:
+                was = f", where without it the set gives up {100 * before:.1f}%" if before else ""
+                said.append(("warning", (
+                    f"adding {command.name} desaturates {named} by {100 * after:.1f}% on "
+                    f"calibration {panel}{was}: every color of the set gives up that share of its "
+                    f"distance from the apex so all fit, their luminance held")))
+        for row_kind, sentence in said:
+            if self.session is not None:
+                self.session.say(row_kind, by, sentence)
+            else:
+                self.controls.append(_link.Control(kind=row_kind, by=by, at=self.wall_now(),
+                                                   said=sentence))
+                del self.controls[: -_link.CONTROL_HISTORY]
 
     def _refuse(self, name: str, by: Actor | None, why: str) -> None:
         """Onto the open session's feed, or, with none open, the idle frame's."""

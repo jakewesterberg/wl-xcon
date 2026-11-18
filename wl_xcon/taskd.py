@@ -293,9 +293,9 @@ def _color_sets(task: Task, calibration: Calibration, values: dict) -> dict | No
             "luminance_cd_m2": colorset.luminance_cd_m2,
             "held": colorset.held,
             "source": colorset.source,
-            # How the set was generated, where it was (the console settings build's Task 8,
-            # `ColorSet.design`): null until then, written by hand.
-            "design": None,
+            # How the set was generated, where its file says (the console settings build's Task 8,
+            # `ColorSet.design`): its design frame, or null.
+            "design": None if colorset.design is None else dict(colorset.design),
             "realized": [_realization(realized(colorset, calibration, luminance), row)
                          for luminance in at.get(name, [colorset.luminance_cd_m2])],
         }
@@ -2837,7 +2837,7 @@ class Session:
         """**A color setting's card** (`link.ParamRow.color`; the console settings design's §6: a set,
         then its hues as swatches, then two levels): `None` unless every choice of `declared` shows
         a color-set light (`task.color_choices`). Each set its choices show, by name, with its apex,
-        its luminance, its `design` (null until the build's Task 8 gives a set one) and each hue
+        its luminance, its `design` (`photometry.ColorSet.design`, or null) and each hue
         the choices offer, its chromaticity as the set writes it and its swatch on the sRGB
         standard at the set's own luminance (`photometry.srgb_hex`; `None` where the standard
         cannot show it), `approximate` always: the rig's measured panel decides what is drawn.
@@ -2859,7 +2859,8 @@ class Session:
             colorset = set_light(choice).colorset
             entry = sets.setdefault(named, {
                 "apex": list(colorset.apex), "luminance_cd_m2": colorset.luminance_cd_m2,
-                "design": None, "hues": {}})
+                "design": None if colorset.design is None else dict(colorset.design),
+                "hues": {}})
             try:
                 swatch = srgb_hex(colorset_xyz(ColorSetLight(colorset, hue), SRGB))
             except ValueError:
@@ -6286,6 +6287,14 @@ class Session:
         """One refusal onto this session's feed from outside its trial loop: a console
         command `wlx taskd` could not act on. See `refusals`."""
         self._refuse(name, by, why)
+
+    def say(self, kind: str, by: Actor | None, said: str) -> None:
+        """**One row onto this session's changes feed for what the service did itself** (the console
+        settings build's Task 8): a new color saved as a set's proposed file (`define_color`), and a
+        `warning` of how this session's panel shows the set with it (`service.Service
+        ._define_color`). The feed alone: a proposal is a file for the PI to review, written under
+        wl-xtasks, and nothing of this session's record. Between trials, never in a frame."""
+        self._feed(kind, by, self.wall_now(), said)
 
     def receive(self, command) -> None:
         """A console command that reached this session outside a run (`wlx taskd`, between

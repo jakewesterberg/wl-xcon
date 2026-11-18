@@ -60,6 +60,19 @@ LMS_TO_XYZ_F10 = (
     (0.0, 0.0, 2.14687945),
 )
 
+#: **The CIE's transformation from the 2° cone fundamentals** (energy, each peaking at 1, the table
+#: `TABLE_2DEG` is) to its cone-fundamental-based tristimulus functions XYZ_F, row by row: x̄_F, ȳ_F,
+#: z̄_F. As printed in Stockman and Rider (2023), Eq. 14 [@stockman2023formulae] (read 2026-11-18 in
+#: its Europe PMC full text, PMC10946592); CIE 170-2:2015 itself was not opened. Used only by a new
+#: color defined by DKL direction about a color set's gray on the sRGB standard (`colordef`), the
+#: set's own 2° observer, inverted and applied to CIE 1931 XYZ as COL-18 applies the 10° one: a use
+#: outside the CIE's definition, since the sRGB standard has no spectra.
+LMS_TO_XYZ_F2 = (
+    (1.94735469, -1.41445123, 0.36476327),
+    (0.68990272, 0.34832189, 0.0),
+    (0.0, 0.0, 1.93485343),
+)
+
 #: V_F,10, the CIE's cone-based luminosity for a 10° field: this many of L and of M, and no S
 #: (A2's Q5). It is `LMS_TO_XYZ_F10`'s luminance row, and the CIE tabulates the same function
 #: as its own data set (DOI 10.25039/CIE.DS.8mrru44q; `CIE_cfb_sle_10deg.csv`, 1 nm, 390-830 nm,

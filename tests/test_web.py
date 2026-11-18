@@ -1085,14 +1085,18 @@ def test_the_page_writes_only_by_posting_json_to_commands():
     one goes through the script's one command `fetch` (`deliver`) -- a JSON `POST` to
     `/commands`; the other four are the sign-in's -- and never a form (the Content-Security-Policy's `form-action 'none'` refuses one
     anyway). Its radio inputs still only choose a tab. **And a demo's pointer** (demo mode §4.5,
-    its plan's Task 9): one more `fetch`, a JSON `POST` to `/gaze`, the demo's eye, no command."""
+    its plan's Task 9): one more `fetch`, a JSON `POST` to `/gaze`, the demo's eye, no command. **And
+    a new color's preview** (the console settings build's Task 8): a `GET` of `/color-preview`, which
+    writes nothing; its *save* is a command, through `/commands`."""
     document = _document()
 
     assert "<form" not in document and "<textarea" not in document
     # b2b spec §4: four are the sign-in's (the token endpoint, `/whoami`, `/signout`) and the
     # page's recheck, `POST /whoami` with no token (b2b-ready §4.6); one a demo's pointer
-    # reports and its release (`/gaze`); only `/commands` carries a command.
-    assert _SCRIPT.count("fetch(") == 6
+    # reports and its release (`/gaze`); one a new color's preview, a `GET` that writes nothing
+    # (`/color-preview`); only `/commands` carries a command.
+    assert _SCRIPT.count("fetch(") == 7
+    assert _SCRIPT.count('fetch("/color-preview?" + query.toString(), { cache: "no-store" })') == 1
     assert _SCRIPT.count('fetch("/whoami", {') == 2
     assert _SCRIPT.count('fetch("/commands", {') == 1
     assert _SCRIPT.count('fetch("/gaze", {') == 1

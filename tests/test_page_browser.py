@@ -3328,3 +3328,60 @@ def test_picking_a_hue_swatch_sends_color(rig):
     (sent,) = rig.dispatch.seen
     assert (type(sent), sent.name, sent.colorset, sent.color, sent.by.name) == (
         SetColor, "distractor_appearance", "isohue", "red", "Jake Westerberg")
+
+
+def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
+    """A color card's New color panel (the console settings design's §6; the PI, 2026-11-16: "1,2,or
+    3. you select an option and then enter the info", "Saved into a color set file"): by hue angle,
+    290°, named violet, into the card's set, a frame arriving meanwhile; *preview* shows what `wlx
+    serve` answers for it (`GET /color-preview`), its swatch and its sentence, and *save as a
+    proposal* sends a `define_color` of those numbers as the signed-in member's. The panel says
+    where it goes. Through the wire, in a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
+    from pathlib import Path
+
+    from wl_xcon.link import DefineColor, ParamRow, decode, encode
+    from wl_xcon.photometry import ColorSet
+    from wl_xcon.serve import color_preview
+    from wl_xcon.web import NEW_COLOR_SAVED
+
+    isohue = ColorSet.load(Path(__file__).parent / "fixtures" / "isohue_design.json")
+    color = {
+        "sets": {"isohue": {"apex": list(isohue.apex), "luminance_cd_m2": 15.0,
+                            "design": dict(isohue.design),
+                            "hues": {hue: {"xy": list(xy), "srgb": "#808080"}
+                                     for hue, xy in isohue.colors.items()}}},
+        "set": "isohue", "hue": "green", "approximate": True,
+        "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+        "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False},
+    }
+    rows = (ParamRow.of("distractor_appearance", "appearance", None, None, None, False,
+                        source="run", color=color),)
+    rig.hub.offer(decode(encode(frame(params=rows))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    panel = '[data-newc="distractor_appearance"]'
+    page.click(f"{panel} > summary")
+    page.fill(f'{panel} [data-newc-fields="hue_angle"] input[data-newc-num="hue_deg"]', "290")
+    page.fill(f"{panel} input[data-newc-name]", "violet")
+    assert page.inner_text(f"{panel} .src") == f"{NEW_COLOR_SAVED[0]}isohue{NEW_COLOR_SAVED[1]}"
+    rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
+
+    page.click(f'{panel} [data-cmd="preview_color"]')
+    _, expected = color_preview(rig.hub.snapshot(on_box=False, stale_after_s=5.0)[0],
+                                {"set": ["isohue"], "method": ["hue_angle"], "hue_deg": ["290"]})
+    page.wait_for_function(
+        "said => (document.querySelector('[data-newc=\"distractor_appearance\"] .newc-out') || "
+        "{}).textContent.trim() === said", arg=expected["said"])
+    shown = page.eval_on_selector(f"{panel} .newc-out .chip", "chip => chip.style.background")
+    rgb = tuple(int(expected["srgb"][i:i + 2], 16) for i in (1, 3, 5))
+    assert shown in (expected["srgb"], "rgb({}, {}, {})".format(*rgb)), shown
+    assert expected["in_srgb"] is True and expected["x"] is not None
+    page.click(f'{panel} [data-cmd="define_color"]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.colorset, sent.new_set, sent.name, sent.method, dict(sent.numbers),
+            sent.by.name) == (DefineColor, "isohue", False, "violet", "hue_angle",
+                              {"hue_deg": 290.0}, "Jake Westerberg")
