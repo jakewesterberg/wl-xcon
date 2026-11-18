@@ -4049,3 +4049,22 @@ def test_a_card_carries_its_switch_and_the_shape_in_force_over_the_wire():
     assert SCHEMA == 22
     with pytest.raises(SchemaMismatch, match="carried schema 21 and this console reads schema 22"):
         decode(encode(replace(sent, schema=21)))
+
+
+def test_a_card_carries_its_profile_over_the_wire():
+    """Schema 22: a drawn card's profile crosses the wire whole, a fixed card's is none."""
+    from wl_xcon import variation
+    from wl_xcon.task import NonAging
+
+    wait = NonAging.between(0.75, 1.25)
+    shape = {**variation.shaped(wait), "by": "person"}
+    profile = variation.profile(wait).as_dict()
+    rows = (ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "form", (), None, None,
+                        "drawn", shape, profile),
+            ParamRow.of("fix_window", "deg", 0.5, 5.0, 2.0, False))
+
+    restored = decode(encode(_telemetry(params=rows)))
+
+    assert restored.params == rows
+    assert restored.params[0].profile == profile and len(profile["density"]) == 20
+    assert restored.params[1].profile is None

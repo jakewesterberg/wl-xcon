@@ -4355,3 +4355,81 @@ def test_a_form_card_names_the_staircase_it_holds_and_a_staged_form_says_drawn()
     assert "a person&#x27;s draw, over its staircase" in card
     assert "staged drawn → uniform from 0.2 s to 0.4 s" in card
     assert "drawn: fix_hold unset → uniform from 0.2 s to 0.4 s" in shown["rt-changes"]
+
+
+def _foreperiod_row(name: str = "wait", **over) -> ParamRow:
+    """A card drawn from the PI's foreperiod, its profile as the rig sends it."""
+    from wl_xcon import variation
+    from wl_xcon.task import NonAging
+
+    wait = NonAging.between(0.75, 1.25)
+    shape = {**variation.shaped(wait), "by": "person"}
+    return ParamRow.of(name, "s", 0.05, 2.0, 0.3, False, (), "form", (), None, None, "drawn",
+                       shape, variation.profile(wait).as_dict(), **over)
+
+
+def _svg(card: str) -> str:
+    return card[card.index("<svg"):card.index("</svg>") + len("</svg>")]
+
+
+def test_a_drawn_card_draws_its_histogram_and_hazard_against_flat():
+    """§3: a drawn card carries an inline SVG, a bar for each bin of the density and a line for the
+    hazard against a dashed line at 1, *flat*. The hazard's first point is 1 by construction, so
+    its line starts on the flat one; the bars follow the density (the first tallest, the last
+    shortest, for a wait that ends at a constant rate), and a fixed card draws none."""
+    rows = (_foreperiod_row(),
+            ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "task", (), None, None,
+                        "drawn"),
+            ParamRow.of("fix_window", "deg", 0.5, 5.0, 2.0, False))
+    cards = _cards(fragments(frame(params=rows), view())["params"])
+
+    assert "<svg" not in cards["fix_hold"] and "<svg" not in cards["fix_window"]
+    drawn = cards["wait"]
+    assert drawn.count("<svg") == 1
+    assert drawn.index('data-cmd="form"') < drawn.index("<svg"), "inside the drawn side"
+    svg = _svg(drawn)
+    bars = re.findall(r'<rect class="bar" x="[\d.]+" y="[\d.]+" width="[\d.]+" height="([\d.]+)"',
+                      svg)
+    assert len(bars) == 20
+    heights = [float(height) for height in bars]
+    assert heights[0] == max(heights) and heights[-1] == min(heights) > 0
+    flat = re.search(r'<line class="flat" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="([\d.]+)"'
+                     r'[^>]*stroke-dasharray', svg)
+    assert flat and flat.group(1) == flat.group(2)
+    line = re.search(r'<polyline class="haz" points="([^"]+)"', svg)
+    points = [tuple(map(float, point.split(","))) for point in line.group(1).split()]
+    assert len(points) == 20
+    assert points[0][1] == float(flat.group(1)), "the hazard starts on the flat line"
+    assert all(later[1] < earlier[1] for earlier, later in zip(points, points[1:])), (
+        "a rising hazard climbs the page (a smaller y)")
+    assert ">flat</text>" in svg
+    assert "0.75 s" in svg and "1.25 s" in svg
+
+
+def test_the_profile_says_it_is_the_declared_distribution():
+    """§3: the figure is arithmetic of what was declared, and says so in words on the card -- never
+    a measurement of the rig -- and it is plain inline SVG: no external reference, no font file."""
+    card = _cards(fragments(frame(params=(_foreperiod_row(),)), view())["params"])["wait"]
+    svg = _svg(card)
+
+    assert "the declared distribution, not a measurement" in svg
+    assert 'role="img"' in svg and "aria-label=" in svg
+    for forbidden in ("http", "url(", "@import", "@font-face", "<image", "<foreignObject",
+                      "xlink:href", "<style"):
+        assert forbidden not in svg, forbidden
+
+
+def test_a_lists_profile_is_drawn_one_bar_a_value():
+    """A list's card draws a bar for each value, the hazard a mark on each."""
+    from wl_xcon import variation
+    from wl_xcon.task import Listed
+
+    listed = Listed((0.3, 0.5, 0.9))
+    row = ParamRow.of("hold", "s", 0.05, 2.0, 0.3, False, (), "form", (), None, None, "drawn",
+                      {**variation.shaped(listed), "by": "person"},
+                      variation.profile(listed).as_dict())
+    svg = _svg(_cards(fragments(frame(params=(row,)), view())["params"])["hold"])
+
+    assert svg.count('<rect class="bar"') == 3
+    assert len(re.search(r'<polyline class="haz" points="([^"]+)"', svg).group(1).split()) == 3
+    assert "0.3 s" in svg and "0.9 s" in svg

@@ -2607,6 +2607,7 @@ class Session:
         declared = []
         for p in self._params().values():
             source, conditions, draw, numbers, switch, shape = None, (), None, None, None, None
+            profile, shown = None, None
             if running:
                 source, conditions = self._source(p.name, in_force), self._overrides(p.name)
                 switch = "drawn" if self._drawable(p) else None
@@ -2618,14 +2619,18 @@ class Session:
                         numbers = variation.numbers(drawn)
                         shape = variation.shaped(drawn, p)
                         shape = None if shape is None else {**shape, "by": key[0]}
+                        shown = drawn
                 if p.name in self._forms:
                     shape = variation.shaped(self._forms[p.name], p)
                     shape = None if shape is None else {**shape, "by": "person"}
+                    shown = self._forms[p.name]
+            if shape is not None:
+                profile = variation.profile(shown, p).as_dict()
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
-                             p.choices, source, conditions, draw, numbers, switch, shape))
+                             p.choices, source, conditions, draw, numbers, switch, shape, profile))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None)
+             None, None, None, None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )

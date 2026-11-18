@@ -706,6 +706,145 @@ def shaped(distribution: object, declared: Param | None = None) -> dict | None:
     return {"shape": shape, "numbers": numbers, "values": values, "weights": weights}
 
 
+#: **How many bars a continuous draw's histogram has** (the console settings design's §3): 20 bins
+#: across its range, an engineering default for a figure a card can hold -- fine enough to show a
+#: hazard climbing near the longest wait (the decay report's table is read at 1/4, 1/2, 2/3 and 9/10
+#: of a range), coarse enough that each bin holds a readable share. A list has a bar a value instead.
+PROFILE_BINS = 20
+
+#: A normal given no end, neither its own nor its setting's, is drawn over its mean plus and minus
+#: this many spreads, which holds all but 6 in 100,000 of its draws.
+_UNCUT = 4.0
+
+#: Profiles built so far, by distribution (`profile`): a few hundred at most, a card's draw
+#: being one of a handful, cleared whole past `_KEPT` so a long session never grows it unbounded.
+_PROFILES: dict = {}
+_KEPT = 256
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Profile:
+    """**A draw's histogram and its hazard** (`profile`): `edges`, the bins' ends (one more than
+    `density`) for a range, or the values themselves (as many as `density`) for a list or a
+    weighted set; `density`, each bin's or value's share of the draws, summing to 1; and `hazard`,
+    each one's chance of ending there given it has not, as a multiple of the first's, so a flat
+    hazard is 1 throughout."""
+
+    edges: tuple
+    density: tuple
+    hazard: tuple
+
+    def as_dict(self) -> dict:
+        """The profile as `link.ParamRow.profile` carries it."""
+        return {"edges": list(self.edges), "density": list(self.density),
+                "hazard": list(self.hazard)}
+
+
+def _hazards(density: tuple) -> tuple:
+    """Each bin's hazard as a multiple of the first with any chance's: `density[i]` over the share
+    of draws still to end at it, `sum(density[i:])`, 0 where none is left. The first bin with a
+    hazard above 0 is the one the rest are measured against (the first itself, unless it holds
+    nothing); all 0 where no bin holds any."""
+    left = 0.0
+    rates = []
+    for share in reversed(density):
+        left += share
+        rates.append(share / left if left > 0 else 0.0)
+    rates.reverse()
+    base = next((rate for rate in rates if rate > 0), 0.0)
+    return tuple(rate / base if base else 0.0 for rate in rates)
+
+
+def _build(kind: str, numbers: tuple, bins: int) -> Profile:
+    """`profile`'s arithmetic, once for each distinct `(kind, numbers, bins)`. `numbers` is what the
+    kind needs: a range's ends and its decay, a normal's mean, spread and cut, or a finite set's
+    values and weights."""
+    if kind in ("listed", "weighted"):
+        values, weights = numbers
+        share: dict = {}
+        for value, weight in zip(values, weights):
+            if weight > 0:
+                share[value] = share.get(value, 0.0) + weight
+        total = sum(share.values())
+        if not share or not total > 0:
+            return Profile((), (), ())
+        edges = tuple(sorted(share))
+        density = tuple(share[value] / total for value in edges)
+        return Profile(edges, density, _hazards(density))
+    low, high = numbers[0], numbers[1]
+    if not high > low:
+        return Profile((low,), (1.0,), (1.0,))
+    edges = tuple(low + (high - low) * place / bins for place in range(bins))
+    edges += (high,)
+    if kind == "non_aging":
+        scale = numbers[2]
+        span = high - low
+
+        def cdf(at: float) -> float:
+            return math.expm1(-(at - low) / scale) / math.expm1(-span / scale)
+    elif kind == "normal":
+        normal = NormalDist(numbers[2], numbers[3])
+        below = normal.cdf(low)
+
+        def cdf(at: float) -> float:
+            return (normal.cdf(at) - below) / (normal.cdf(high) - below)
+    else:
+        def cdf(at: float) -> float:
+            return (at - low) / (high - low)
+    cuts = [cdf(at) for at in edges]
+    density = tuple(max(cuts[place + 1] - cuts[place], 0.0) for place in range(bins))
+    total = sum(density)
+    density = tuple(share / total for share in density) if total > 0 else density
+    return Profile(edges, density, _hazards(density))
+
+
+def profile(distribution: Distribution, declared: Param | None = None, *,
+            bins: int = PROFILE_BINS) -> Profile:
+    """**What a card shows of a drawn setting's distribution** (the console settings design's §3;
+    the PI, 2026-11-16): its density as bars, each bin's share of the draws, and its hazard
+    *against flat*, each bin's chance of ending given it has not, as a multiple of the first bin's
+    (the decay report's columns), so a constant hazard is 1 and the foreperiod's rises to 3.67 in
+    the bin holding 9/10 of its range. A range is cut into `bins` equal bins, a normal cut as
+    `bounds_of` cuts it (an end neither it nor `declared` gives, `_UNCUT` spreads from its mean);
+    **a list or a weighted set has one bar for each value**, a value of weight 0 left out since it
+    is never drawn, a repeated value one bar, its hazard discrete, `P(v) / P(>= v)`. A distribution
+    of no width is one bar of every draw; one no draw can come from (an empty list, weights all 0)
+    has no bars, and so does one whose arithmetic fails (`check.undrawable` refuses it at load). **Arithmetic of the declared distribution, not a measurement of the rig.**
+    **Cached by distribution**, so `Session.parameters` -- read between trials for every drawn
+    card -- builds none twice, and never in a frame."""
+    if isinstance(distribution, (Listed, Weighted)):
+        values = values_of(distribution)
+        weights = (tuple(_items(distribution.weights)) if isinstance(distribution, Weighted)
+                   else (1.0,) * len(values))
+        kind, numbers = type(distribution).__name__.lower(), (values, weights)
+    elif isinstance(distribution, NonAging):
+        low, high = bounds_of(distribution)
+        kind, numbers = "non_aging", (low, high, distribution.mean - distribution.minimum)
+    elif isinstance(distribution, TruncatedNormal):
+        low, high = bounds_of(distribution, declared)
+        mean, sd = distribution.mean, distribution.sd
+        low = mean - _UNCUT * sd if low == -math.inf else low
+        high = mean + _UNCUT * sd if high == math.inf else high
+        kind, numbers = "normal", (low, high, mean, sd)
+    elif isinstance(distribution, Uniform):
+        kind, numbers = "uniform", (distribution.low, distribution.high)
+    else:
+        return Profile((), (), ())
+    key = (kind, numbers, bins)
+    built = _PROFILES.get(key)
+    if built is None:
+        if len(_PROFILES) >= _KEPT:
+            _PROFILES.clear()
+        try:
+            built = _build(*key)
+        except (ArithmeticError, ValueError):
+            # A spread of 0, a decay of 0: what the load refuses (`check.undrawable`), shown as no
+            # bars rather than raised between trials.
+            built = Profile((), (), ())
+        _PROFILES[key] = built
+    return built
+
+
 def _turned(value: object) -> object:
     """A direction's number from 0 to 360 (`geometry.shown_direction`); anything else as it is."""
     return shown_direction(value) if _number(value) else value

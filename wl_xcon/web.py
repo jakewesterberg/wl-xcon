@@ -2021,7 +2021,67 @@ def _drawn_side(row, view: View) -> str:
     return (f'<select class="field" data-shape="{name}" aria-label="{name}: shape"{off}>'
             f"{options}</select>{''.join(groups)}"
             f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
-            f"apply</button>")
+            f"apply</button>{_profile(row)}")
+
+
+#: **The profile's drawing, in the SVG's own units** (`_profile`): its width, each panel's left,
+#: right, top and base, and the words under it. Fixed here because they are a figure's geometry, not
+#: a setting; the figure scales to its card (`.prof` in the style).
+_PROFILE_W, _PROFILE_LEFT, _PROFILE_RIGHT = 240, 8, 232
+_PROFILE_PANELS = ((14, 54), (76, 116))
+_PROFILE_SAID = "the declared distribution, not a measurement"
+
+
+def _profile(row) -> str:
+    """**A drawn card's histogram and hazard** (`ParamRow.profile`; the console settings design's
+    §3; the PI, 2026-11-16): one inline SVG of two panels -- bars for the density, each bin's share
+    of the draws, scaled to the tallest; and a line for the hazard against a dashed line at 1,
+    *flat*, a rising line meaning the chance of the draw ending climbs -- under the words *the
+    declared distribution, not a measurement*, since it is arithmetic of what was declared. A range
+    has a bar a bin, a list a bar a value. Plain inline SVG, nothing outside it: no font file, no
+    link, no style of its own beyond the page's classes. Every word is rendered here, escaped; ""
+    where the rig sent none or an empty one."""
+    shown = row.profile
+    if not shown or not shown.get("density"):
+        return ""
+    edges, density, hazard = shown["edges"], shown["density"], shown["hazard"]
+    count = len(density)
+    discrete = len(edges) == count
+    slot = (_PROFILE_RIGHT - _PROFILE_LEFT) / count
+    width = slot * (0.6 if discrete else 1.0)
+    (top_a, base_a), (top_b, base_b) = _PROFILE_PANELS
+    tallest = max(density) or 1.0
+    ceiling = max(max(hazard), 1.0) or 1.0
+
+    def at(place: int) -> float:
+        return _PROFILE_LEFT + slot * (place + 0.5)
+
+    bars = "".join(
+        f'<rect class="bar" x="{at(place) - width / 2:.2f}" '
+        f'y="{base_a - (base_a - top_a) * share / tallest:.2f}" width="{width:.2f}" '
+        f'height="{(base_a - top_a) * share / tallest:.2f}"/>'
+        for place, share in enumerate(density))
+    rises = " ".join(f"{at(place):.2f},{base_b - (base_b - top_b) * rate / ceiling:.2f}"
+                     for place, rate in enumerate(hazard))
+    flat = base_b - (base_b - top_b) / ceiling
+    ends = (edges[0], edges[-1]) if count > 1 or not discrete else (edges[0],)
+    unit = f" {row.unit}" if row.unit else ""
+    sides = "".join(
+        f'<text class="ax" x="{x}" y="128" text-anchor="{anchor}">{_e(f"{end:.4g}{unit}")}</text>'
+        for (x, anchor), end in zip(((_PROFILE_LEFT, "start"), (_PROFILE_RIGHT, "end")), ends))
+    name = f"{row.name}: {_PROFILE_SAID}, its density and its hazard against flat"
+    return (
+        f'<svg class="prof" viewBox="0 0 {_PROFILE_W} 144" role="img" aria-label="{_e(name)}">'
+        f'<text class="ax" x="{_PROFILE_LEFT}" y="10">share of draws</text>{bars}'
+        f'<line class="base" x1="{_PROFILE_LEFT}" y1="{base_a}" x2="{_PROFILE_RIGHT}" '
+        f'y2="{base_a}"/>'
+        f'<text class="ax" x="{_PROFILE_LEFT}" y="72">chance it ends, given it has not, against flat'
+        f'</text>'
+        f'<line class="flat" x1="{_PROFILE_LEFT}" y1="{flat:.2f}" x2="{_PROFILE_RIGHT}" '
+        f'y2="{flat:.2f}" stroke-dasharray="4 3"/>'
+        f'<text class="ax" x="{_PROFILE_RIGHT}" y="{flat - 3:.2f}" text-anchor="end">flat</text>'
+        f'<polyline class="haz" points="{rises}"/>{sides}'
+        f'<text class="ax" x="{_PROFILE_LEFT}" y="141">{_PROFILE_SAID}</text></svg>')
 
 
 def _beneath(row, frame) -> str:
@@ -2935,6 +2995,12 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .param .sw .seg.on { background: var(--ink); color: var(--bg); }
 .param .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .param .side[hidden], .param .shp[hidden] { display: none; }
+.param .prof { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; }
+.param .prof .bar { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 0.6; }
+.param .prof .base { stroke: var(--rule); stroke-width: 1; }
+.param .prof .haz { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
+.param .prof .flat { stroke: var(--muted); stroke-width: 1; }
+.param .prof .ax { fill: var(--muted); font: 8px sans-serif; }
 .param .shp .rn .field[data-form="values"], .param .shp .rn .field[data-form="weights"] { width: 9em; }
 .param > .btn { justify-self: start; }
 .field.over { width: 100%; border-radius: 3px; }

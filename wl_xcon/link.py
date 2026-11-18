@@ -252,7 +252,9 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: draw -- a live setting in seconds -- else `None`; and `ParamRow.shape`, the shape in force, a
 #: person's draw or the open block's, as `{"shape", "numbers", "values", "weights", "by"}`, `by`
 #: one of `"person"`, `"block"` or `"task"`, `None` where the setting is fixed; and
-#: `ParamRow.source` `"form"`, a person's draw. A staged row may be of kind `form`, its `was` and
+#: `ParamRow.source` `"form"`, a person's draw; and `ParamRow.profile`, where `shape` is set, that draw's
+#: `{"edges", "density", "hazard"}` (`variation.profile`: a range's 20 bins or a list's values, each bin's
+#: share of the draws and its hazard against the first's), the declared distribution, not a measurement. A staged row may be of kind `form`, its `was` and
 #: `now` in the rig's words. And a `form` command on the wire (`SetForm`). The build's later
 #: tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
@@ -471,12 +473,18 @@ class ParamRow:
     #: as lists (`variation.shaped`). `None` where the setting is fixed, where every condition of
     #: the block draws it from its own range, and for a direction.
     shape: dict | None = None
+    #: **The histogram and hazard of that draw** (schema 22; the console settings design's §3):
+    #: `{"edges", "density", "hazard"}` (`variation.profile`) wherever `shape` is not `None` -- a
+    #: range's bins' ends (one more than `density`) or a list's values (as many), each bin's share
+    #: of the draws, and its hazard as a multiple of the first's. Arithmetic of the declared
+    #: distribution, not a measurement; built between trials, cached by distribution.
+    profile: dict | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
            bounded: bool, choices=(), source: str | None = None, conditions=(),
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
-           shape: dict | None = None) -> "ParamRow":
+           shape: dict | None = None, profile: dict | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -496,9 +504,9 @@ class ParamRow:
         words = position_words(value, choices)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape)
+                       numbers, more, switch, shape, profile)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape)
+                   more, switch, shape, profile)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1805,6 +1813,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "more": p.more,
                 "switch": p.switch,
                 "shape": p.shape,
+                "profile": p.profile,
             }
             for p in telemetry.params
         ],

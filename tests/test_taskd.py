@@ -3698,7 +3698,7 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
     assert [row[0] for row in rows[: len(declared)]] == [p.name for p in declared]
     fix_hold = next(p for p in declared if p.name == "fix_hold")
     # Before a run, no card says where its value comes from (schema 19), nor offers the timing
-    # switch (schema 22): `None`, `()`, `None`, `None`, `None`, `None`, as a ceiling's never does.
+    # switch (schema 22): `None`, `()`, `None`, `None`, `None`, `None`, `None`, as a ceiling's never does.
     assert by_name["fix_hold"] == (
         "fix_hold",
         fix_hold.unit,
@@ -3713,9 +3713,10 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         None,
         None,
         None,
+        None,
     )
     assert by_name["reward_correct"] == (
-        "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None, None, None)
+        "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None, None, None, None)
     # Each setting's choices, seventh (schema 18, XC-401's fix round, M2): a pair is shown as a
     # position only for a setting whose choices declare one.
     looks = next(p for p in declared if p.name == "target_appearance")
