@@ -1152,9 +1152,9 @@ build to these names.
 
 ## What changes on our side
 
-**1. A timing setting a person draws or scales, in the console.** A person may now give a setting a draw (a uniform, a
-normal, a non-aging wait, a list, weights) or a scaling of the task's value, where today a person gives a value, or
-changes the numbers of a draw the task declared.
+**1. A setting a person draws or scales, in the console.** A person may now give a timing setting a draw (a uniform, a
+normal, a non-aging wait, a list, weights), or a size setting a scaling by eccentricity, where today a person gives a
+value, or changes the numbers of a draw the task declared.
 
 - **`parameter_changes.jsonl` gains kind `form`**, appended after `declined` (`KINDS` is appended only). **It strobes
   `PARAM_CHANGED`, so it carries a `sequence`** as a `set`, `hand_back`, `range` and `revert` row does; `STROBED` becomes
@@ -1167,7 +1167,7 @@ changes the numbers of a draw the task declared.
   {"class": "NonAging", "fields": {"minimum": 0.75, "mean": 0.9166666666666666, "maximum": 1.25, "repeat": "fresh"}}
   ```
 
-  **A scaling** (a setting's value as a multiple of another's, for a size) is `{"class": "Scaled", "fields": {"factor":
+  **A scaling** (a size as a factor times each object's own eccentricity, its true angle from straight ahead) is `{"class": "Scaled", "fields": {"factor":
   0.3}}`.
 - **`was`** follows the rule every change row's `was` follows (`taskd.Session._given_by`): null where a draw, a staircase,
   a pool or the conditions gave the setting, since no single value was held; the person's value or earlier form where one
@@ -1186,8 +1186,8 @@ changes the numbers of a draw the task declared.
   - shortest) / 3, so `0.75` to `1.25` gives the `0.9166666666666666` above (a ratio of 3 between the range and the
   exponential's scale, `R/τ = 3.0`). A non-aging wait a task declares is written as declared, with the mean the task gave.
 
-**2. A scaled size and its window.** A look's size and an object window's radius may be derived from another setting's
-value; the record gives the result in degrees so a reader needs neither.
+**2. A scaled size and its window.** A look's size may be a factor times its own eccentricity, and an object window's
+radius a multiple of its object's radius; the record gives both in degrees, so a reader needs neither rule.
 
 - **Each `stimuli[]` entry of a trial line gains `size_deg`**: the look's size as drawn at its place, in degrees. Null for
   an array (its objects carry theirs) and for a look with no single `size`. (This entry's existing `drawn` is a boolean
