@@ -55,7 +55,7 @@ from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
-from wl_xcon.task import BELOW_ZERO, Family, Outcome, at_hardest
+from wl_xcon.task import BELOW_ZERO, OTHER, Family, Outcome, at_hardest
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
@@ -2453,13 +2453,49 @@ def _params(frame: Telemetry | None, view: View) -> str:
             # What it gives each object, in degrees, made by the rig (`ParamRow.gives`; the
             # console settings design's §5).
             shown += f'<span class="src gives">gives {_e(row.gives)}</span>'
-        cards.append(
+        cards.append((row.section or OTHER, row.changed, (
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
             f"{shown}"
             f'<span class="range">{_range(row)}</span>'
             f"{_whence(row, view, _beneath(row, frame))}{mark}{said}</div>"
-        )
-    return "".join(cards)
+        )))
+    return _sections(frame.task, cards)
+
+
+def _count(settings: int, changed: int) -> str:
+    """A section header's counts (`Timing · 7 settings · 2 changed`; the console settings design's
+    §7: "each header counts its settings and how many differ from the task's start")."""
+    return f"{settings} setting{'' if settings == 1 else 's'} · {changed} changed"
+
+
+def _sections(task: str, cards: list) -> str:
+    """**The cards in their sections** (the console settings design's §7; the PI, 2026-11-16:
+    "The task file names it", "As you last left them"): each `(section, changed, html)` under the
+    section its row names (`ParamRow.section`; a row naming none, one made by hand, under Other),
+    **in the order each section's first setting is declared**, a subsection (`"Stimuli/fixation
+    point"`) nested in its parent, which keeps its own settings first. Each is a `<details>`
+    headed by its name and `_count`, a parent's count taking in its subsections' -- all open as
+    sent: the page opens each as last left, per `task` (`data-task`), in `localStorage`
+    (`applySections`), which the rig never reads. A section with no setting is not made."""
+    tree: dict = {}
+    for named, changed, html in cards:
+        top, _, sub = named.partition("/")
+        node = tree.setdefault(top, {"own": [], "subs": {}})
+        (node["subs"].setdefault(sub, []) if sub else node["own"]).append((changed, html))
+
+    def block(name: str, own: list, counted: list, inside: str = "") -> str:
+        count = _count(len(counted), sum(1 for changed, _ in counted if changed))
+        label = name.rpartition("/")[2]
+        cards = f'<div class="cards">{"".join(html for _, html in own)}</div>' if own else ""
+        return (f'<details class="sec" data-sec="{_e(name)}" open>'
+                f"<summary>{_e(label)} · {count}</summary>{cards}{inside}</details>")
+
+    parts = []
+    for top, node in tree.items():
+        subs = "".join(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
+        every = node["own"] + [one for found in node["subs"].values() for one in found]
+        parts.append(block(top, node["own"], every, subs))
+    return f'<div class="secs" data-task="{_e(task)}">{"".join(parts)}</div>'
 
 
 def _reverting(changes: tuple) -> str:
@@ -3127,7 +3163,15 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }
 .kv > .btn { flex-shrink: 0; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
-.params { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.params { display: grid; gap: 8px; }
+.secs { display: grid; gap: 8px; }
+.sec { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px 8px; }
+.sec .sec { margin-top: 8px; }
+.sec > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; }
+.sec[open] > summary { margin-bottom: 6px; }
+.cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.nofind { display: none !important; }
+#pfind { max-width: 220px; }
 .param { border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; display: grid; gap: 2px; background: var(--surface-2); }
 .param .pn { font-family: var(--mono); font-size: 12.5px; font-weight: 500; display: flex; justify-content: space-between; gap: 6px; overflow-wrap: anywhere; }
 .param .ceil { font-family: var(--cond); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--warn); font-weight: 700; }
@@ -3936,8 +3980,55 @@ _SCRIPT = """
       group.hidden = group.getAttribute("data-fields") !== shape;
     });
   }
+  // **The sections of the Task parameters tab** (the console settings design's §7; the PI,
+  // 2026-11-16, "As you last left them"): each opens as it was last left, per task, in
+  // the browser's own storage under `wlx.sections.<task>` -- the names of those left closed. Every access is
+  // inside `try`: a store that throws (a private window, blocked site data) leaves every section
+  // open, and a click still opens and closes them. The find box filters the cards by name and
+  // opens the sections of those it finds, without touching what is kept.
+  var SECTIONS_KEY = "wlx.sections.";
+  function readSections(task) {
+    try {
+      var raw = window.localStorage.getItem(SECTIONS_KEY + task);
+      var kept = raw ? JSON.parse(raw) : null;
+      return kept && typeof kept === "object" && !Array.isArray(kept) ? kept : {};
+    } catch (e) { return {}; }
+  }
+  function writeSections(task, kept) {
+    try { window.localStorage.setItem(SECTIONS_KEY + task, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
+  }
+  function applySections() {
+    var root = document.querySelector("#params .secs");
+    if (!root) { return; }
+    var kept = readSections(root.getAttribute("data-task"));
+    var find = el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
+    Array.prototype.forEach.call(root.querySelectorAll(".param"), function (card) {
+      var name = card.querySelector(".pn span");
+      var found = find === "" || (name !== null && name.textContent.toLowerCase().indexOf(find) !== -1);
+      card.classList.toggle("nofind", !found);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
+      var matches = section.querySelector(".param:not(.nofind)") !== null;
+      section.classList.toggle("nofind", find !== "" && !matches);
+      section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
+    });
+  }
+  // A section a person opened or closed is kept (the click is on its summary, before it toggles).
+  function keepSection(e) {
+    var summary = e.target.closest("#params details.sec > summary");
+    if (!summary) { return; }
+    var section = summary.parentNode;
+    var root = section.closest(".secs");
+    var kept = readSections(root.getAttribute("data-task"));
+    if (section.open) { kept[section.getAttribute("data-sec")] = true; }
+    else { delete kept[section.getAttribute("data-sec")]; }
+    writeSections(root.getAttribute("data-task"), kept);
+  }
+  if (el("pfind")) { el("pfind").addEventListener("input", applySections); }
+  applySections();
   // After the cards are replaced: each timing card on the side and shape a person chose.
   function restoreSides() {
+    applySections();
     Object.keys(sides).forEach(function (name) {
       var card = cardOf(name);
       if (card) { showSide(card, sides[name]); }
@@ -5077,6 +5168,7 @@ _SCRIPT = """
   }
   document.addEventListener("click", function (e) {
     if (!e.target.closest) { return; }
+    keepSection(e);
     var answering = e.target.closest("[data-answer]");
     if (answering && !answering.disabled) { answerWarning(answering); return; }
     var resuming = e.target.closest("[data-resume]");
@@ -5566,7 +5658,7 @@ def page(
             <div class="stack"><section class="panel glass"><div class="top"><h2>Changes</h2></div><div class="feed" id="rt-changes">{p['rt-changes']}</div></section></div>
           </div>
         </div>
-        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top"><h2>Task parameters</h2><span class="sub">staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section>
+        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top"><h2>Task parameters</h2><span class="sub">staged until the next trial</span><input type="search" class="field" id="pfind" placeholder="find a setting" aria-label="find a setting"></div><div class="params" id="params">{p['params']}</div></section>
           <section class="panel glass"><div class="top"><h2>Moments of this run</h2>
             <span class="sub">a revert takes the task's settings and drawn ranges back to one</span>
             </div><div id="moments">{p['moments']}</div></section></div>

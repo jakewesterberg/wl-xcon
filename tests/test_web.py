@@ -2788,8 +2788,9 @@ def test_the_sign_in_script_uses_pkce_and_keeps_its_tokens_in_session_storage_on
     assert '"offline_access"' in _SCRIPT and '"S256"' in _SCRIPT
     assert 'credentials: "omit"' in _SCRIPT
     assert "sessionStorage" in _SCRIPT and "Authorization" in _SCRIPT
-    # The box's name keeps its `localStorage`; the sign-in never touches it.
-    assert _SCRIPT.count("localStorage") == 2
+    # The box's name keeps its `localStorage` (two uses), and so do the sections' last-left state
+    # (two more, the console settings design's §7); the sign-in never touches it.
+    assert _SCRIPT.count("localStorage") == 4
     assert "console.log" not in _SCRIPT
     # The authorization code leaves the address bar before anything else is done with it.
     assert _SCRIPT.index("history.replaceState") < _SCRIPT.index("tokenRequest({")

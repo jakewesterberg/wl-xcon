@@ -271,6 +271,7 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: and `now` carry one; and a `color` command on the wire (`SetColor`). **New colors, three ways** (the design's §6; the
 #: build's Task 8): a `define_color` command on the wire (`DefineColor`), taken by the service in
 #: any phase, and `Idle.controls`, the service's own changes-feed rows while no session is open.
+#: **Sections** (the design's §7; the build's Task 9): `ParamRow.section` and `ParamRow.changed`.
 #: The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
 SCHEMA = 22
@@ -526,6 +527,16 @@ class ParamRow:
     #: closed by the console settings build): `review.appearance_words`, `value` then `None`, as
     #: `position` is for a whole position; `None` for every other value.
     words: str | None = None
+    #: **The section of the Task parameters tab it sits in** (schema 22; the console settings design's
+    #: §7: "The task file names it"): `task.section_of` -- the task file's (`Param.section`, `/`
+    #: making a subsection), else Timing for a setting in seconds, else Other; a ceiling's is
+    #: `task.CEILINGS`. Empty for a row made by hand, which a console shows under Other.
+    section: str = ""
+    #: **Whether it differs from the task's start** (schema 22; the design's §7: each header counts
+    #: "how many differ"): true where a person holds it or gave its form, where a range a person
+    #: gave is in force, or where the run was given a value other than the task's (`source`
+    #: `"person"`, `"form"`, `"range"` or `"run"`). False for a ceiling and between runs.
+    changed: bool = False
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
@@ -533,7 +544,7 @@ class ParamRow:
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
            shape: dict | None = None, profile: dict | None = None,
            why: dict | None = None, gives: str | None = None,
-           color: dict | None = None) -> "ParamRow":
+           color: dict | None = None, section: str = "", changed: bool = False) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -556,12 +567,14 @@ class ParamRow:
         looks = appearance_words(value)
         if looks is not None:
             return cls(name, unit, low, high, None, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape, profile, why, gives, color, looks)
+                       numbers, more, switch, shape, profile, why, gives, color, looks,
+                       section, changed)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape, profile, why, gives, color)
+                       numbers, more, switch, shape, profile, why, gives, color, None, section,
+                       changed)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape, profile, why, gives, color)
+                   more, switch, shape, profile, why, gives, color, None, section, changed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1891,6 +1904,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "gives": p.gives,
                 "color": p.color,
                 "words": p.words,
+                "section": p.section,
+                "changed": p.changed,
             }
             for p in telemetry.params
         ],

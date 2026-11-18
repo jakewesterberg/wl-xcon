@@ -3385,3 +3385,118 @@ def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
     assert (type(sent), sent.colorset, sent.new_set, sent.name, sent.method, dict(sent.numbers),
             sent.by.name) == (DefineColor, "isohue", False, "violet", "hue_angle",
                               {"hue_deg": 290.0}, "Jake Westerberg")
+
+
+def _sectioned(rig, task="tasks/fixation_detection.py", **over):
+    """A frame whose cards sit in three sections: Timing, Gaze windows and, nested under Stimuli,
+    the fixation point; offered to the rig, through the wire."""
+    from wl_xcon.link import ParamRow, decode, encode
+
+    rows = (
+        ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, section="Timing"),
+        ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.0, False, section="Gaze windows",
+                    changed=True),
+        ParamRow.of("fix_size", "deg", 0.0, 9.0, 0.5, False, section="Stimuli/fixation point"),
+    )
+    rig.hub.offer(decode(encode(frame(params=rows, task=task, **over))))
+
+
+def _open_of(page, name: str) -> bool:
+    return page.evaluate(
+        "(n) => document.querySelector('#params details.sec[data-sec=\"' + n + '\"]').open", name)
+
+
+def _shown(page, name: str) -> bool:
+    return page.is_visible(f'#params .param:has(.pn span:text-is("{name}"))')
+
+
+def test_the_find_box_finds_a_setting_in_a_collapsed_section_and_opens_it(rig):
+    """The design's §7: a find box on top filters the cards by name and opens the sections of the
+    ones it finds -- a section a person closed too -- hiding the others and the sections with none,
+    then leaves them as they were last left once it is cleared. In a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    _sectioned(rig)
+    page = rig.browser_page()
+    page.click('label[for="t-task"]')
+    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
+    assert not _open_of(page, "Gaze windows") and not _shown(page, "fix_window")
+
+    page.fill("#pfind", "fix_w")
+
+    assert _open_of(page, "Gaze windows") and _shown(page, "fix_window")
+    assert not _shown(page, "fix_hold") and not _shown(page, "fix_size")
+    assert not page.is_visible('#params details.sec[data-sec="Timing"]')
+    assert not page.is_visible('#params details.sec[data-sec="Stimuli"]')
+    page.fill("#pfind", "FIX_S")
+    assert _shown(page, "fix_size") and not _shown(page, "fix_window")
+    assert _open_of(page, "Stimuli") and _open_of(page, "Stimuli/fixation point")
+
+    page.fill("#pfind", "")
+
+    assert _shown(page, "fix_hold") and _shown(page, "fix_size")
+    assert not _open_of(page, "Gaze windows"), "the section stays as it was last left"
+    assert page.text_content('#params details.sec[data-sec="Gaze windows"] > summary') == (
+        "Gaze windows · 1 setting · 1 changed")
+
+
+def test_sections_open_as_last_left_per_task(rig):
+    """The design's §7: a section a person closed stays closed across a frame, a reload and the
+    page being shown again, for that task alone, under `wlx.sections.<task>` in `localStorage`;
+    another task's sections open as they were, and the first's closed again on return."""
+    _sectioned(rig)
+    page = rig.browser_page()
+    page.click('label[for="t-task"]')
+    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
+    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
+    page.click('#params details.sec[data-sec="Stimuli/fixation point"] > summary')
+    page.click('#params details.sec[data-sec="Timing"] > summary')
+    page.click('#params details.sec[data-sec="Timing"] > summary')
+
+    _sectioned(rig, trial_index=41)
+    _until(page, "document.querySelector('#params .secs') !== null")
+    assert not _open_of(page, "Gaze windows") and not _open_of(page, "Stimuli/fixation point")
+    assert _open_of(page, "Timing") and _open_of(page, "Stimuli")
+    kept = page.evaluate("JSON.parse(window.localStorage.getItem('wlx.sections.tasks/"
+                         "fixation_detection.py'))")
+    assert kept == {"Gaze windows": True, "Stimuli/fixation point": True}
+
+    page.reload()
+    page.click('label[for="t-task"]')
+    assert not _open_of(page, "Gaze windows") and _open_of(page, "Timing")
+
+    _sectioned(rig, task="tasks/popout_search.py", trial_index=42)
+    _until(page, "document.querySelector('#params .secs').getAttribute('data-task')"
+                 " === 'tasks/popout_search.py'")
+    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
+    _sectioned(rig, trial_index=43)
+    _until(page, "document.querySelector('#params .secs').getAttribute('data-task')"
+                 " === 'tasks/fixation_detection.py'")
+    assert not _open_of(page, "Gaze windows")
+
+
+def test_a_store_that_throws_leaves_every_section_open(rig):
+    """The design's §7: `localStorage` failing -- a private window, blocked site data -- leaves
+    every section open, and a click still closes one for as long as the page is shown; nothing is
+    raised into the page. The store is made to throw on every read and write before the page
+    runs. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    _sectioned(rig)
+    page = rig.browser_page()
+    page.add_init_script(
+        "const boom = () => { throw new Error('storage is blocked'); };"
+        "Storage.prototype.getItem = boom; Storage.prototype.setItem = boom;"
+        "Storage.prototype.removeItem = boom;")
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.reload()
+    page.click('label[for="t-task"]')
+
+    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
+    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
+    assert not _open_of(page, "Gaze windows")
+    _sectioned(rig, trial_index=41)
+    _until(page, "document.querySelector('#params .secs') !== null")
+    page.reload()
+    page.click('label[for="t-task"]')
+
+    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
+    assert not [e for e in errors if "storage is blocked" in e], errors

@@ -98,7 +98,7 @@ from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, ObjectWindows, Outcome, P, Param,
     Plan, SaccadeTo, Scaled, Show, Staircase,
     Task, Trial, actions_of, at_hardest, color_choices, limit_reason, position_of, set_light,
-    size_at, size_settings, sized_places, staircase_verdict,
+    size_at, size_settings, sized_places, staircase_verdict, section_of, CEILINGS,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
@@ -2751,7 +2751,7 @@ class Session:
     def parameters(self) -> tuple:
         """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
         choices, source, conditions, draw, numbers, switch, shape, profile, why, gives, color)` --
-        `color` a color setting's card (`_color_card`; telemetry schema 22) -- the shape `link.Telemetry.of`
+        `color` a color setting's card (`_color_card`; telemetry schema 22), then `section` (`task.section_of`; a ceiling's is `CEILINGS`) and `changed` (differs from the task's start) -- the shape `link.Telemetry.of`
         builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it").
         `choices` is the setting's own, empty for a ceiling: they say whether a pair it holds is a
         position (schema 18, XC-401's fix round, M2; `review.declares_position`).
@@ -2822,12 +2822,16 @@ class Session:
             # why"), the same between runs as in one.
             why = (None if p.choices or (p.low is None and p.high is None)
                    else {"low": limit_reason(p, "low"), "high": limit_reason(p, "high")})
+            # Where it sits and whether it differs from the task's start (the design's §7): a
+            # person holds it or gave its form, a range a person gave is in force, or the run was
+            # given its value (`_source`), over the task's own.
+            changed = source in ("person", "form", "range", "run")
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
                              p.choices, source, conditions, draw, numbers, switch, shape, profile,
-                             why, gives, self._color_card(p, source)))
+                             why, gives, self._color_card(p, source), section_of(p), changed))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None, None, None, None, None)
+             None, None, None, None, None, None, None, CEILINGS, False)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )

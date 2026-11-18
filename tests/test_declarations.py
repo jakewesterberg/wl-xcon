@@ -326,6 +326,7 @@ DEFAULTS = {
         "live": True,
         "start": None,
         "why": "",
+        "section": "",
     },
     "Picture": {"asset": "", "size": 10.0},
     "Plan": {"blocks": REQUIRED, "order": {"class": "Fixed", "fields": {}}, "time_limit_s": None},

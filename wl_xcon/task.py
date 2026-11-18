@@ -166,8 +166,27 @@ class Param:
     #: 1); a bound with neither is warned at load (`check.UNEXPLAINED_LIMIT`). Printable text of
     #: `REASON_LIMIT` characters at most, refused otherwise as the setting is built.
     why: str = ""
+    #: **The section of the console's Task parameters tab it sits in** (the console settings design's
+    #: §7; the PI, 2026-11-16, "The task file names it"): a printable line of `SECTION_LIMIT`
+    #: characters at most, `/` making a subsection (`"Stimuli/fixation point"`), two levels at most,
+    #: refused otherwise as the setting is built. Empty, the default, names none: `section_of` then
+    #: gives `TIMING` for a setting in seconds, else `OTHER`. A section under `TRAINING_SECTION`
+    #: goes to the Training tab.
+    section: str = ""
 
     def __post_init__(self) -> None:
+        parts = self.section.split("/") if isinstance(self.section, str) else []
+        if not (
+            isinstance(self.section, str)
+            and self.section.isprintable()
+            and len(self.section) <= SECTION_LIMIT
+            and (self.section == "" or (len(parts) <= 2 and all(part.strip() for part in parts)))
+        ):
+            raise ValueError(
+                f"parameter {self.name!r}: its section is one printable line of {SECTION_LIMIT} "
+                f"characters at most, with no more than one '/' (two levels) and a name on each "
+                f"side of it, not {self.section!r}"
+            )
         if not (isinstance(self.why, str) and self.why.isprintable()
                 and len(self.why) <= REASON_LIMIT):
             raise ValueError(
@@ -213,6 +232,33 @@ class Param:
                 f"parameter {self.name!r}: its starting value {start!r} is {side} the "
                 f"range it declares, {declared}; a run would start outside it"
             )
+
+
+#: **The longest a section's name is** (`Param.section`), its `/` included: 60 characters.
+SECTION_LIMIT = 60
+
+#: **The sections a setting naming none falls into** (`section_of`; the console settings design's
+#: §7): `TIMING` where its unit is seconds, `OTHER` for the rest.
+TIMING = "Timing"
+OTHER = "Other"
+
+#: **The section the Training tab gathers** (the console settings design's §8): a setting whose
+#: section is this, or under it (`"Training/stages"`), is shown there, not among the sections of
+#: the Task parameters tab. Declared here; the tab itself is Task 10's.
+TRAINING_SECTION = "Training"
+
+#: **The section a welfare ceiling's card sits in** (the console settings design's §7): a ceiling
+#: is no task `Param`, so no file names a section for it, and its unit (seconds, say) is no sign
+#: it is a timing setting of the task; the builder's call, so it is not counted among them.
+CEILINGS = "Ceilings"
+
+
+def section_of(param: Param) -> str:
+    """**The section `param` sits in** (the console settings design's §7): the one the task file
+    names (`Param.section`), else `TIMING` for a setting in seconds, else `OTHER`."""
+    if param.section:
+        return param.section
+    return TIMING if param.unit == "s" else OTHER
 
 
 #: **The longest reason a limit is given in** (`Param.why`): one line on a card, as a staircase's
