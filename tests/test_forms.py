@@ -344,7 +344,7 @@ DEGENERATE = [
 def test_degenerate_shapes_are_refused_with_a_sentence(tmp_path):
     """Review Focus 2: a shortest at or past the longest, an SD at or below 0, an empty list,
     weights of another length, all zero or negative, a draw of one value, numbers its shape does
-    not take, a scaling (a size's, from the console settings plan's Task 6), a shape there is no
+    not take, a scaling of a timing setting (a size's alone, `tests/test_scaling.py`), a shape there is no
     such, a name the task does not declare and a reward size: each refused with its sentence,
     nothing staged and no row written, the session running on to its last trial. A word among the
     numbers and a list past `link.LISTED_LIMIT` never decode (`tests/test_link.py`)."""
@@ -356,7 +356,9 @@ def test_degenerate_shapes_are_refused_with_a_sentence(tmp_path):
     assert len(session.refusals) == len(DEGENERATE)
     for (name, by, why), (command, said) in zip(session.refusals, DEGENERATE):
         assert (name, by) == (command.name, JAKE)
-        assert why.startswith(f"{command.name!r} is not drawn as asked: "), why
+        # A scaling is refused as one (the console settings plan's Task 6: a size's alone).
+        how = "scaled" if command.shape == "scaled" else "drawn"
+        assert why.startswith(f"{command.name!r} is not {how} as asked: "), why
         assert said in why, (said, why)
     assert _changes(session) == [] and session._forms == {}
     assert len(_lines(session)) == 4

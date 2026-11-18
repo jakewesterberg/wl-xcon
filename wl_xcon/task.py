@@ -14,7 +14,7 @@ import math
 from enum import Enum
 from typing import NamedTuple
 
-from wl_xcon.geometry import on_circle_deg, polar_deg
+from wl_xcon.geometry import on_circle_deg, polar_deg, polar_of_deg
 from wl_xcon.photometry import Color, ColorSetLight, Contrast
 
 
@@ -1033,24 +1033,58 @@ class ObjectWindows:
     """
 
     of: str
-    radius: "float | P"
+    #: **The windows' radius in degrees**, every object's alike; or `None` where `scale` gives it.
+    radius: "float | P | None" = None
     eye: str = "both"
+    #: **Each window's radius as a multiple of its own object's radius** (the console settings
+    #: design's §5; the PI, 2026-11-16, "Grows in proportion"): `scale` times half the object's
+    #: size at its own place (STE-05: a size is the full width), so a disc twice as big gets a
+    #: window twice as big, and the ratio means the same whether the size is fixed or scaled by
+    #: eccentricity (`size_at`). 3.0 is a 1.5° window about a 1° disc. Exactly one of `radius`
+    #: and `scale` is declared, refused as built; a `scale` window on an array whose looks have
+    #: no single `size` is refused at load (`check`'s `unsized-window`).
+    scale: "float | P | None" = None
+
+    def __post_init__(self) -> None:
+        if (self.radius is None) == (self.scale is None):
+            given = "both" if self.radius is not None else "neither"
+            raise ValueError(
+                f"the object windows of {self.of!r} declare exactly one of radius, in degrees, "
+                f"and scale, a multiple of each object's radius; these declare {given}")
+
+    def radius_at(self, array: Array, index: int, at: "tuple[float, float]",
+                  values: dict) -> "float | P":
+        """**Object `index`'s window radius**, the object drawn at `at`: `radius` as declared (a
+        setting resolved where a window's is, `gaze`), or `scale` times half that object's own
+        size at its place (`size_at`; STE-05). Between trials, where the windows are built
+        (`expand`), never in a frame. `ValueError` for an object whose look has no single size,
+        which the load refuses (`unsized-window`)."""
+        if self.scale is None:
+            return self.radius
+        looks = _value(array.object_looks(index, values), values)
+        if not isinstance(looks, SIZED_LOOKS):
+            raise ValueError(
+                f"the object windows of {self.of!r} are a multiple of each object's radius, and "
+                f"object {index} is drawn as {type(looks).__name__}, which has no single size")
+        return float(_value(self.scale, values)) * size_at(_value(looks.size, values), at) / 2.0
 
     def expand(self, array: Array, values: dict, at: object = (0.0, 0.0)) -> "list[Window]":
         """Each object's window, centered where the object is drawn: on the array's true circle
         about `at`, the array stimulus's own position in any form (`position_of`; XC-397: each
-        window was on the ring about (0°, 0°) wherever the array was)."""
+        window was on the ring about (0°, 0°) wherever the array was), **each of its own radius**
+        (`radius_at`: by `scale`, each object's own size at its own place)."""
         at = array.positions(values, position_of(at, values))
         target = int(_value(array.target, values))
+        radii = [self.radius_at(array, i, xy, values) for i, xy in enumerate(at)]
         windows = [
-            Window(f"{self.of}.{i}", at=xy, radius=self.radius, on=self.of, eye=self.eye)
+            Window(f"{self.of}.{i}", at=xy, radius=radii[i], on=self.of, eye=self.eye)
             for i, xy in enumerate(at)
         ]
         windows.append(
             Window(
                 f"{self.of}.target",
                 at=at[target],
-                radius=self.radius,
+                radius=radii[target],
                 on=self.of,
                 eye=self.eye,
             )
@@ -1062,7 +1096,7 @@ class ObjectWindows:
                 # alias is judged by the objects it names, every one but the target (the loop's
                 # membership; `gaze.Tracked`'s for a saccade).
                 at=at[target],
-                radius=self.radius,
+                radius=radii[target],
                 on=self.of,
                 eye=self.eye,
             )
@@ -1956,12 +1990,125 @@ SHAPES = ("non_aging", "uniform", "normal", "list", "weights")
 @dataclass(frozen=True, slots=True)
 class Scaled:
     """**A size scaled by eccentricity**: `factor` times each object's own eccentricity, its true
-    angle from straight ahead (the console settings design's §5; the PI's 0.3 dva per dva,
-    [@westerberg2020priming]). A person's form for a size setting, as a draw is a timing
-    setting's; drawn by nothing. Offered from the console settings plan's Task 6, which binds it
-    where a fixed size is bound; until then `taskd.Session._form` refuses it with a sentence."""
+    angle from straight ahead (the console settings design's §5; the PI, 2026-11-16, "Size =
+    factor x eccentricity", 0.3 dva per dva as in his arrays [@westerberg2020priming]; STE-31). A
+    person's form for a size setting (`taskd.Session._form`, `size_settings`), as a draw is a
+    timing setting's: a trial's values carry it for its setting, and each object is drawn at
+    `size_at` its own place (`screen`, `ObjectWindows.radius_at`, `record`), never at a mean."""
 
     factor: float
+
+
+#: **The appearances drawn at one size**, a `size` field that is their full width (STE-05): what a
+#: size setting is (`size_settings`), what a `Scaled` size is bound on, and what an object window
+#: by `scale` reads its object's radius from.
+SIZED_LOOKS = (Disc, Square, Cross, Polygon)
+
+
+def size_at(value: object, at: "tuple[float, float]") -> float:
+    """**A size, in degrees, at the place `at` it is drawn** (the console settings design's §5): a
+    number as itself; a `Scaled` its factor times `at`'s true eccentricity from straight ahead,
+    `geometry.polar_of_deg` -- `atan(√(tan²x + tan²y))`, never `√(x² + y²)` (the PI, 2026-10-19,
+    no average ppd) -- measured from (0°, 0°), where every lab task fixates (the console settings
+    plan's call), so 0.3 at (8°, 0°) is 2.4° and at the center 0, which is not drawn
+    (`check`'s `scaled-small`)."""
+    if isinstance(value, Scaled):
+        return value.factor * polar_of_deg(float(at[0]), float(at[1]))[0]
+    return float(value)
+
+
+def _looks_of(trial: "Trial") -> "list[tuple[str, object]]":
+    """Every appearance a `Show` or an `Update` gives each stimulus, by the stimulus's name, as
+    written: a setting, an array, or a look."""
+    found: list[tuple[str, object]] = []
+    for _, action in actions_of(trial):
+        if isinstance(action, Show):
+            found.append((action.stimulus.name, action.stimulus.looks))
+        elif isinstance(action, Update) and "looks" in action.changes():
+            found.append((action.stimulus, action.looks))
+    return found
+
+
+def _sizes_in(looks: object, params: dict, inside: frozenset = frozenset()) -> "set[str]":
+    """The size settings `looks` draws by (`size_settings`): a sized look's `size` setting, each of
+    an array's two looks', and each choice's of a look setting, each setting read once."""
+    if isinstance(looks, P):
+        param = params.get(looks.name)
+        if param is None or looks.name in inside:
+            return set()
+        return {name for choice in param.choices
+                for name in _sizes_in(choice, params, inside | {looks.name})}
+    if isinstance(looks, Array):
+        return _sizes_in(looks.looks, params, inside) | _sizes_in(looks.among, params, inside)
+    if isinstance(looks, SIZED_LOOKS) and isinstance(looks.size, P):
+        return {looks.size.name}
+    return set()
+
+
+def size_settings(task: "Task") -> "frozenset[str]":
+    """**The settings a look's `size` names** (the console settings design's §5): each `Disc`'s,
+    `Square`'s, `Cross`'s and `Polygon`'s `size` that is a setting, in any appearance a `Show` or
+    an `Update` of any structure gives -- an array's looks and a look setting's choices among
+    them. What a person may scale by eccentricity on its card (`taskd.Session._form`'s
+    `scaled`), and nothing else."""
+    found: set[str] = set()
+    for structure in task.structures.values():
+        params = {param.name: param for param in structure.params}
+        for _, looks in _looks_of(structure):
+            found |= _sizes_in(looks, params)
+    return frozenset(found)
+
+
+def sized_places(trial: "Trial", values: dict, name: str) -> "list[tuple[str, tuple[float, float]]]":
+    """**Every place `trial` draws a look whose size is the setting `name`, at `values`**: each
+    stimulus a `Show` gives (an `Update` changing a stimulus's look, at the place its `Show`
+    gives), as `"stimulus 'fix'"`, and each object of an array as `"array 'search'"`, by the
+    look it draws there (`Array.object_looks`), each with its per-axis place in degrees
+    (`position_of`, `Array.positions`). A look setting `values` gives is read at its value, one
+    it does not at each of its choices; a stimulus a setting places that `values` does not give
+    is left out. What a scaled size is judged at (`check.laid_out`'s `scaled-small`) and a card
+    says it gives (`taskd.Session.parameters`). Between trials, never in a frame."""
+    params = {param.name: param for param in trial.params}
+    shown = {action.stimulus.name: action.stimulus for _, action in actions_of(trial)
+             if isinstance(action, Show)}
+
+    def options(looks: object, inside: frozenset = frozenset()) -> list:
+        if isinstance(looks, P):
+            if looks.name in values:
+                return [values[looks.name]]
+            param = params.get(looks.name)
+            if param is None or looks.name in inside:
+                return []
+            return [one for choice in param.choices
+                    for one in options(choice, inside | {looks.name})]
+        return [looks]
+
+    def sized(looks: object) -> bool:
+        return (isinstance(looks, SIZED_LOOKS) and isinstance(looks.size, P)
+                and looks.size.name == name)
+
+    found: list[tuple[str, tuple[float, float]]] = []
+    for stimulus_name, written in _looks_of(trial):
+        stimulus = shown.get(stimulus_name)
+        if stimulus is None:
+            continue
+        for looks in options(written):
+            try:
+                center = position_of(stimulus.at, values)
+                if isinstance(looks, Array):
+                    places = looks.positions(values, center)
+                    for index, place in enumerate(places):
+                        if any(sized(one) for one in options(looks.object_looks(index, values))):
+                            found.append((f"array {stimulus_name!r}", place))
+                elif sized(looks):
+                    found.append((f"stimulus {stimulus_name!r}", center))
+            except (KeyError, TypeError, ValueError, IndexError, ArithmeticError):
+                continue
+    unique: list[tuple[str, tuple[float, float]]] = []
+    for one in found:
+        if one not in unique:
+            unique.append(one)
+    return unique
 
 
 # --- Plans and blocks (engine spec §13.1, §13.3, §13.5, §13.8; engine build C2b) --------------

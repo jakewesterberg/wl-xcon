@@ -1961,11 +1961,16 @@ _PER_TRIAL = {
     "form": ("drawn each trial, from a person&#x27;s draw", "a value over this draw"),
 }
 
+#: A size a person scales by eccentricity (the console settings design's §5; `_params`): said in
+#: its value's place, each object having its own, with what its field to set one value over it is
+#: for.
+_SCALED = ("scaled by eccentricity, by a person", "a value over this scaling")
+
 #: **The shapes a timing card's drawn side offers, in the trainer's words** (`task.SHAPES`; the
 #: console settings design's §3, the PI, 2026-11-16), each with the fields its numbers are typed in,
 #: by the names a `form` command sends them under (`variation.FORM_NUMBERS`; a list's and a weighted
 #: list's typed as numbers between commas). A size's scaling is not offered here: a size's card
-#: takes it (the console settings plan's Task 6).
+#: takes it, *fixed* or *scaled* (`_scaled_side`; the design's §5).
 _SHAPES = (
     ("non_aging", "non-aging", ("shortest", "longest")),
     ("uniform", "uniform", ("low", "high")),
@@ -1985,11 +1990,12 @@ def _typed(value: object) -> str:
     return str(value)
 
 
-def _switch(row, view: View, drawn: bool) -> str:
+def _switch(row, view: View, drawn: bool, other: str = "drawn") -> str:
     """**A timing card's switch, *fixed* or *drawn*** (`ParamRow.switch`; the console settings
-    design's §3: "every timing setting gets the switch on its card"): two buttons, the side open
-    pressed. Pressing one opens its side on the page alone; nothing is sent until the fixed side's
-    value or the drawn side's *apply*. Greyed away from the box."""
+    design's §3: "every timing setting gets the switch on its card"), **or a size's, *fixed* or
+    *scaled*** (`other`; the design's §5): two buttons, the side open pressed. Pressing one opens
+    its side on the page alone; nothing is sent until the fixed side's value or the other side's
+    *apply*. Greyed away from the box."""
     name, off = _e(row.name), _gate(view)
 
     def side(which: str, on: bool) -> str:
@@ -1997,8 +2003,25 @@ def _switch(row, view: View, drawn: bool) -> str:
                 f'data-switch="{which}" data-name="{name}" '
                 f'aria-pressed="{"true" if on else "false"}"{off}>{which}</button>')
 
-    return (f'<div class="sw" role="group" aria-label="{name}: fixed or drawn">'
-            f'{side("fixed", not drawn)}{side("drawn", drawn)}</div>')
+    return (f'<div class="sw" role="group" aria-label="{name}: fixed or {other}">'
+            f'{side("fixed", not drawn)}{side(other, drawn)}</div>')
+
+
+def _scaled_side(row, view: View) -> str:
+    """**A size card's scaled side** (the console settings design's §5; the PI, 2026-11-16, "Size =
+    factor x eccentricity"): its factor, filled from the scaling in force (`ParamRow.shape`), and
+    *apply*, which sends `form` with shape `scaled` (`link.SetForm`), staged until the next trial:
+    each object is then drawn at the factor times its own eccentricity. Greyed away from the
+    box."""
+    off, name = _gate(view), _e(row.name)
+    shape = row.shape or {}
+    factor = (shape.get("numbers") or {}).get("factor") if shape.get("shape") == "scaled" else None
+    return (f'<div class="shp rng" data-fields="scaled"><label class="rn">factor'
+            f'<input class="field mono" data-form="factor" inputmode="decimal" '
+            f'value="{_e(_typed(factor))}" aria-label="{name}: factor"{off}></label>'
+            f'<span class="rn">× each object&#x27;s eccentricity</span></div>'
+            f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
+            f"apply</button>")
 
 
 def _drawn_side(row, view: View) -> str:
@@ -2167,7 +2190,9 @@ def _whence(row, view: View, over: str = "") -> str:
     if row.source in _SOURCES:
         parts.append(f'<span class="src">{_SOURCES[row.source]}</span>')
     if row.source == "form":
-        parts.append(f'<span class="src">a person&#x27;s draw, over {_e(over)}</span>')
+        what = ("scaling" if row.shape is not None and row.shape.get("shape") == "scaled"
+                else "draw")
+        parts.append(f'<span class="src">a person&#x27;s {what}, over {_e(over)}</span>')
     if row.conditions:
         # The rig names at most twenty and counts the rest (`ParamRow.more`; the C3 plan's
         # engineering review, M-5).
@@ -2224,6 +2249,8 @@ def _params(frame: Telemetry | None, view: View) -> str:
         change = staged.get(row.name)
         flag = '<span class="ceil">ceiling</span>' if row.bounded else ""
         lead = None if change is None else _STAGED_KINDS.get(change.kind)
+        if change is not None and change.kind == "form" and row.switch == "scaled":
+            lead = "scaled"
         mark = (
             ""
             if change is None
@@ -2240,6 +2267,10 @@ def _params(frame: Telemetry | None, view: View) -> str:
         settable = row.value is None or isinstance(row.value, str) or (
             isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
         per_trial = _PER_TRIAL.get(row.source)
+        scaled = (row.switch == "scaled" and row.shape is not None
+                  and row.shape.get("shape") == "scaled")
+        if scaled and row.source == "form":
+            per_trial = _SCALED
         if per_trial is not None:
             label = f'<span class="pv">{per_trial[0]}</span>'
             entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
@@ -2256,8 +2287,18 @@ def _params(frame: Telemetry | None, view: View) -> str:
                      f"{entry}</div>"
                      + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
                      f"{_drawn_side(row, view)}</div>")
+        elif row.switch == "scaled":
+            shown = (label + _switch(row, view, scaled, "scaled")
+                     + f'<div class="side fixed" data-side="fixed"{" hidden" if scaled else ""}>'
+                     f"{entry}</div>"
+                     + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
+                     f"{_scaled_side(row, view)}</div>")
         else:
             shown = label + entry
+        if row.gives is not None:
+            # What it gives each object, in degrees, made by the rig (`ParamRow.gives`; the
+            # console settings design's §5).
+            shown += f'<span class="src gives">gives {_e(row.gives)}</span>'
         cards.append(
             f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
             f"{shown}"
@@ -4440,7 +4481,9 @@ _SCRIPT = """
   function sendForm(button, detail) {
     var key = button.getAttribute("data-name");
     var card = button.closest(".param");
-    var shape = card.querySelector("select[data-shape]").value;
+    // A size's scaled side has no shape to choose: it is a scaling (the design's §5).
+    var select = card.querySelector("select[data-shape]");
+    var shape = select ? select.value : "scaled";
     var fields = card.querySelectorAll('[data-fields="' + CSS.escape(shape) + '"] input[data-form]');
     var command = { kind: "form", name: key, shape: shape };
     var numbers = {};

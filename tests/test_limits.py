@@ -272,7 +272,8 @@ def test_at_values_pins_a_number_or_a_span():
     assert (ring.low, ring.high, ring.start) == (7.0, 9.0, 7.0)
     assert declared["fix_hold"] == {p.name: p for p in task.params}["fix_hold"]
     assert LAYOUT == ("stimulus-off-screen", "overlapping-windows", "crowded-array",
-                      "answer-window-reaches-objects", "window-inside-object", "objects-touch")
+                      "answer-window-reaches-objects", "window-inside-object", "objects-touch",
+                      "scaled-small")
 
 
 def test_the_layout_is_judged_at_the_values_on_every_change(tmp_path):

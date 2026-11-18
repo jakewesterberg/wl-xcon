@@ -92,7 +92,9 @@ from wl_xcon.task import (
     Random,
     Remembered,
     SaccadeTo,
+    Scaled,
     SequenceBalanced,
+    SIZED_LOOKS,
     Show,
     Shuffled,
     Staircase,
@@ -113,6 +115,8 @@ from wl_xcon.task import (
     is_point,
     limit_reason,
     rule_at,
+    size_at,
+    sized_places,
 )
 from wl_xcon.variation import (
     bounds_of, directions, expanded, generated, in_force, level_name, own_ranges, values_of,
@@ -162,6 +166,7 @@ def check(
         + _overlapping_windows(valued)
         + _unreachable_timeouts(valued)
         + _crowded_arrays(valued)
+        + _unsized_windows(valued)
         + _windows_inside_objects(valued)
         + _objects_touch(valued)
         + _answer_windows_reach(valued)
@@ -586,12 +591,91 @@ def at_values(task: Task, values) -> Task:
 #: start (`preflight.laid_out`) and on every change (`taskd.Session._laid_out`), each finding
 #: compared with those at the values in force. Off the field refuses; the rest are warnings.
 LAYOUT = ("stimulus-off-screen", "overlapping-windows", "crowded-array",
-          "answer-window-reaches-objects", "window-inside-object", "objects-touch")
+          "answer-window-reaches-objects", "window-inside-object", "objects-touch",
+          "scaled-small")
+
+#: **A size scaled by eccentricity that the center leaves small** (the console settings design's
+#: §5: "eccentricity 0 gives size 0, so the load check warns for a scaled stimulus at or near the
+#: center"; the plan's Review Focus 4), a warning in every kind: a stimulus drawn straight ahead is
+#: not drawn at all, and one drawn nearer than its fixed size there says both sizes (the planner's
+#: call: "near the center" made checkable against the task's own size). One of `LAYOUT`.
+SCALED_SMALL = "scaled-small"
+
+#: **An object window by `scale` on an array whose looks have no single size** (`ObjectWindows.
+#: scale`; the console settings design's §5), refused at load: a multiple of an object's radius
+#: needs the object's radius.
+UNSIZED_WINDOW = "unsized-window"
+
+
+def _scaled_sizes(task: Task, values: dict, fixed: dict) -> tuple[dict, list[Finding]]:
+    """**`values` with each size scaled by eccentricity read as the sizes it gives**, and what those
+    sizes say (`laid_out`; the console settings design's §5): each `Scaled` value of a size setting
+    is drawn at each place the task draws a look of that size (`task.sized_places`, at the values
+    set, a span read at each of its ends and an open side at its start), each object at its own
+    eccentricity (`task.size_at`, true visual angle, never an average), and the layout checks read
+    the setting over the least and the most of those sizes above 0 (`at_values`' span). For each
+    stimulus: drawn straight ahead it is not drawn (`scaled-small`); drawn smaller somewhere than
+    its fixed value (`fixed`, the value it held before it was scaled) says both (`scaled-small`);
+    drawn past a bound its setting declares is refused there (`past-limit`), every bound being hard
+    (the console settings design's §4). Between trials, never in a frame."""
+    scaled = {name: value for name, value in values.items() if isinstance(value, Scaled)}
+    if not scaled:
+        return values, []
+    declared = {param.name: param for param in task.params}
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+
+    def end(value, which: int):
+        if isinstance(value, tuple) and len(value) == 2 and all(_finite(v) for v in value):
+            return sorted(value)[which]
+        return value
+
+    ends = [{**starts, **{name: end(value, which) for name, value in values.items()
+                          if name not in scaled}} for which in (0, 1)]
+    read = dict(values)
+    findings: list[Finding] = []
+    for name, form in scaled.items():
+        sizes: dict[str, list[tuple[float, float]]] = {}
+        for these in ends:
+            for structure in task.structures.values():
+                for label, place in sized_places(structure, these, name):
+                    eccentricity = size_at(Scaled(1.0), place)
+                    sizes.setdefault(label, []).append((eccentricity, size_at(form, place)))
+        drawn = [size for each in sizes.values() for _, size in each if size > 0.0]
+        held = fixed.get(name)
+        if drawn:
+            read[name] = (min(drawn), max(drawn))
+        elif _finite(held):
+            read[name] = held
+        else:
+            read.pop(name)
+        param = declared.get(name)
+        for label, each in sizes.items():
+            nearest, least = min(each)
+            subjects = (f"{label} sized by {name!r}",)
+            if nearest <= 1e-9:
+                findings.append(Finding(SCALED_SMALL, (
+                    f"{name!r} scaled by {form.factor:g} gives {label} no size straight ahead, at "
+                    f"0° out, so it is not drawn: a size scaled by eccentricity is 0 at the center; "
+                    f"keep {name!r} fixed while it draws something at the center"),
+                    blocking=False, accepted_in=SESSION_KINDS, subjects=subjects))
+            elif _finite(held) and least < held:
+                findings.append(Finding(SCALED_SMALL, (
+                    f"{name!r} scaled by {form.factor:g} gives {label} {least:.3g}° at "
+                    f"{nearest:.3g}° out, below its fixed {held:g}°: scaled, it is drawn smaller "
+                    f"there than it was"),
+                    blocking=False, accepted_in=SESSION_KINDS, subjects=subjects))
+            if param is not None:
+                past = [size for _, size in each if _outside(param, size)]
+                if past:
+                    findings.append(dataclasses.replace(
+                        _past_limit(param, max(past, key=lambda size: abs(size))),
+                        subjects=subjects))
+    return read, findings
 
 
 def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
              geometry: Geometry | None = None, calibration: Calibration | None = None,
-             deployment: Deployment | None = None) -> list[Finding]:
+             deployment: Deployment | None = None, fixed: dict | None = None) -> list[Finding]:
     """**The layout checks at the values set** (`LAYOUT`; the console settings design's §4): each
     structure's, on `task` with each setting `values` names pinned there (`at_values`: a number,
     or a draw's or a staircase's `(least, most)`) and every other open side at its start
@@ -604,8 +688,13 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
     a console sends past what a structure can hold -- a target index past its array, a
     correlation past 1, a size of 0 -- is what cannot be (§4), refused where it is set, as the load
     refused a range reaching it before the open ranges (the builder's call; the PI, 2026-10-14,
-    I4, refused such a range at load because a console could send it unchecked). Run between
-    trials, never in a frame."""
+    I4, refused such a range at load because a console could send it unchecked).
+
+    **A size scaled by eccentricity** (a `task.Scaled` value; the console settings design's §5) is
+    read as the sizes it gives at each place it is drawn, its center and nearness warned and a size
+    past its bound refused (`_scaled_sizes`), `fixed` giving each such setting's fixed value. Run
+    between trials, never in a frame."""
+    values, scaled = _scaled_sizes(task, dict(values), fixed or {})
     pinned, unstarted = _at_start(at_values(task, values))
     own, _ = _at_start(task)
     several = len(pinned.structures) > 1
@@ -629,6 +718,7 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
                 else value)
         if _finite(most) and most > longest:
             findings.append(_longer(name, most, longest))
+    findings += [finding for finding in scaled if not _among(finding, findings)]
     del deployment  # read by no structure's check: a head's is the task's (`_head_faults`)
     return findings
 
@@ -2624,7 +2714,9 @@ def _sources(task: Task, block: Block, condition: Condition, values: dict, held:
         # gives its setting each trial over the rest, a person's value aside.
         found[staircase.setting] = _staircase_levels(staircase, declared)
     for name, form in (forms or {}).items():
-        found[name] = _drawable(form, declared.get(name))
+        # A size scaled by eccentricity (`task.Scaled`) is one value, the scaling, as a held
+        # value is: two looks scaled alike are alike wherever they are drawn.
+        found[name] = (form,) if isinstance(form, Scaled) else _drawable(form, declared.get(name))
     for name in held:
         if name in values:
             found[name] = (values[name],)
@@ -6629,7 +6721,10 @@ def answer_reaches(trial: Trial, params: dict[str, Param]) -> list[tuple[str, st
                 apart = separation_deg(*window.at, *at)
                 widest = _span(window.radius, params, 0.0)[1]
                 ring_low, ring_high = _span(array.radius, params, 0.0)
-                reach = _span(objects[name].radius, params, 0.0)[1]
+                reached = _window_reach(objects[name], array, params)
+                if reached is None:
+                    continue  # refused at load (XC-426, `unsized-window`)
+                reach = reached[1]
                 nearest = (0.0 if ring_low <= apart <= ring_high
                            else min(abs(ring_low - apart), abs(ring_high - apart)))
                 if not nearest < widest + reach:
@@ -6704,7 +6799,8 @@ def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) ->
     """`crowded-array` for one array of a family, or nothing (`_crowded_arrays`). The windows'
     radius is read as a window's (`_radius`): a choice that is no finite number left out, and
     nothing said where there is none to read, each refused at load (XC-426)."""
-    widest = _radius(declared.radius, params)
+    reach = _window_reach(declared, array, params)
+    widest = None if reach is None else reach[1]
     if widest is None or not (_counted(array.n) and _counted(array.radius)):
         return []  # refused at load (XC-426; `_block_faults`, XC-273)
     most = _whole(_span(array.n, params, 0.0)[1])
@@ -6721,7 +6817,7 @@ def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) ->
             "crowded-array",
             f"array {declared.of!r} can put {objects} objects{_by(array.n)} on a "
             f"{tightest:g}° ring{_by(array.radius)}, {spacing:.2f}° apart, with windows "
-            f"{windows} radius{_by(declared.radius)}; adjacent objects would overlap and a "
+            f"{windows} radius{_by(_window_setting(declared))}; adjacent objects would overlap and a "
             f"saccade to one would be scored against another",
             blocking=False,
             accepted_in=SESSION_KINDS,
@@ -6735,6 +6831,76 @@ def _by(value: object) -> str:
     layout warning names each setting with its value (the console settings plan's Review Focus 3:
     "a warning naming the pair and both values")."""
     return f" ({value.name!r})" if isinstance(value, P) else ""
+
+
+def _window_setting(declared: ObjectWindows) -> object:
+    """What sizes an array's object windows, as declared: their `radius` in degrees, or their
+    `scale`, a multiple of each object's radius (`ObjectWindows`)."""
+    return declared.radius if declared.scale is None else declared.scale
+
+
+def _window_reach(declared: ObjectWindows, array: Array,
+                  params: dict[str, Param]) -> "tuple[float, float] | None":
+    """**An array's object windows' least and greatest radius, in degrees**, over the settings'
+    ranges or at the values set: a radius in degrees as `_span` reads it, its greatest as `_radius`
+    does (a choice that is no finite number left out, XC-426); **a ratio of each object's radius**
+    (`ObjectWindows.scale`; the console settings design's §5), the ratio at its least and its most
+    times half the narrowest and the widest object the array can show (`_narrowest`, `_widest`;
+    STE-05). `None` where nothing can be read, a literal that is no number or no object's width
+    (refused at load: `bad-placement`, `unsized-window`)."""
+    if declared.scale is None:
+        if not (isinstance(declared.radius, P) or _finite(declared.radius)):
+            return None
+        most = _radius(declared.radius, params)
+        return None if most is None else (_span(declared.radius, params, 0.0)[0], most)
+    if not (isinstance(declared.scale, P) or _finite(declared.scale)):
+        return None
+    low, high = _span(declared.scale, params, 0.0)
+    widest = [one[0] for one in (_widest(array.looks, params), _widest(array.among, params))
+              if one is not None]
+    if not widest:
+        return None
+    narrowest = min(_narrowest(array.looks, params), _narrowest(array.among, params))
+    least = low * narrowest / 2.0 if math.isfinite(narrowest) else 0.0
+    return (least, high * max(widest) / 2.0)
+
+
+def _unsized_windows(trial: Trial) -> list[Finding]:
+    """**`unsized-window`: object windows by `scale` on an array whose looks have no single size**
+    (`ObjectWindows.scale`; the console settings design's §5), refused at load: a window that is a
+    multiple of its object's radius needs a `Disc`, a `Square`, a `Cross` or a `Polygon`
+    (`task.SIZED_LOOKS`) for every object, each of an array's two looks and each choice of a look
+    setting, so a look with no `size` -- a `Gabor`, a `Look`, a `Blank` -- names no radius."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+
+    def unsized(looks: object, inside: frozenset = frozenset()) -> list[str]:
+        if isinstance(looks, P):
+            param = params.get(looks.name)
+            if param is None or looks.name in inside:
+                return []
+            return [one for choice in param.choices
+                    for one in unsized(choice, inside | {looks.name})]
+        return [] if isinstance(looks, SIZED_LOOKS) else [type(looks).__name__]
+
+    for declared in trial.windows:
+        if not isinstance(declared, ObjectWindows) or declared.scale is None:
+            continue
+        for name, array in _shown_arrays(trial):
+            if name != declared.of:
+                continue
+            kinds = list(dict.fromkeys(unsized(array.looks) + unsized(array.among)))
+            if not kinds:
+                continue
+            finding = Finding(UNSIZED_WINDOW, (
+                f"the object windows of {declared.of!r} are a multiple of each object's radius "
+                f"(scale), and array {name!r} can draw an object as {', '.join(kinds)}, which has "
+                f"no single size, so its window has no radius; draw every object as a Disc, a "
+                f"Square, a Cross or a Polygon, or give the windows a radius in degrees"),
+                subjects=(f"array {name!r}",))
+            if not _among(finding, findings):
+                findings.append(finding)
+    return findings
 
 
 def _widest(looks: object, params: dict[str, Param],
@@ -6771,12 +6937,31 @@ def _windows_inside_objects(trial: Trial) -> list[Finding]:
     settings design's §4: "a window smaller than its disc"), a warning in every kind: over the
     settings' ranges, or at the values set (`laid_out`), the windows' radius at its least below
     the largest object's half-width at its most, so a look landing on an object's edge is outside
-    its window and scored as no answer. A window radius in degrees; the console settings plan's
-    Task 6 extends it to a window declared as a ratio of its object."""
+    its window and scored as no answer. **A window declared as a ratio of its object's radius**
+    (`ObjectWindows.scale`; the console settings design's §5: "a ratio below 1 is a warning")
+    is smaller than its object wherever the ratio can be below 1, whatever the object's size."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for declared in trial.windows:
         if not isinstance(declared, ObjectWindows):
+            continue
+        if declared.scale is not None:
+            if not (isinstance(declared.scale, P) or _finite(declared.scale)):
+                continue  # refused at load (`_position_kind_faults`)
+            ratio = _span(declared.scale, params, 0.0)[0]
+            if not ratio < 1.0:
+                continue
+            for name, array in _shown_arrays(trial):
+                if name != declared.of:
+                    continue
+                finding = Finding("window-inside-object", (
+                    f"array {name!r}'s object windows can be {ratio:g} times its objects' radius"
+                    f"{_by(declared.scale)}, a ratio below 1, smaller than its objects: a look "
+                    f"landing on an object's edge is outside its window, and scored as no answer; "
+                    f"keep the ratio at least 1"), blocking=False, accepted_in=SESSION_KINDS,
+                    subjects=(f"array {name!r}",))
+                if not _among(finding, findings):
+                    findings.append(finding)
             continue
         if not (isinstance(declared.radius, P) or _finite(declared.radius)):
             continue  # refused at load (XC-426)
@@ -7245,8 +7430,10 @@ def _sized(trial: Trial) -> "list[_Sized]":
             found.append(_Sized(f"window {window.name!r}", "its", "radius", window.radius,
                                 f"window {window.name!r}", _SIZED))
         elif isinstance(window, ObjectWindows):
-            found.append(_Sized(f"the object windows of {window.of!r}", "their", "radius",
-                                window.radius, f"the object windows of {window.of!r}", _SIZED))
+            found.append(_Sized(f"the object windows of {window.of!r}", "their",
+                                "radius" if window.scale is None else "scale",
+                                _window_setting(window), f"the object windows of {window.of!r}",
+                                _SIZED))
     for state, name, updated, array in array_actions(trial):
         how = "updates" if updated else "shows"
         for field, what in (("n", "set size"), ("radius", "ring radius"), ("phase", "phase"),
@@ -7459,11 +7646,12 @@ def _position_kind_faults(trial: Trial) -> list[Finding]:
     # An array's object windows' literal radius, as a window's is above (XC-426): `_crowded`
     # raised on a word.
     for window in trial.windows:
-        if (isinstance(window, ObjectWindows) and not isinstance(window.radius, P)
-                and not _finite(window.radius)):
+        if (isinstance(window, ObjectWindows) and not isinstance(_window_setting(window), P)
+                and not _finite(_window_setting(window))):
+            what = ("radius", "degrees") if window.scale is None else ("scale", "times its objects' radius")
             findings.append(Finding("bad-placement", (
-                f"the object windows of {window.of!r}: their radius is {_said(window.radius)}, "
-                f"which is not a finite number of degrees")))
+                f"the object windows of {window.of!r}: their {what[0]} is "
+                f"{_said(_window_setting(window))}, which is not a finite number of {what[1]}")))
     # A window's radius and an array's set size, ring radius, phase and target index: `None` among
     # a setting's choices (the review of XC-415's fix, M2). **A window's radius, or its object
     # windows', placed by a setting with a choice that is no finite number** (XC-426), as a literal

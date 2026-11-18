@@ -46,7 +46,7 @@ from wl_xcon.declarations import canonical
 from wl_xcon.geometry import shown_direction
 from wl_xcon.task import (
     EASIER, FRESH, NOT_DIFFICULTY, Background, Block, Condition, Distribution, Factorial, Listed,
-    Meaning, NonAging, P, Param, Polar, Task, TruncatedNormal, Uniform, Weighted, is_point,
+    Meaning, NonAging, P, Param, Polar, Scaled, Task, TruncatedNormal, Uniform, Weighted, is_point,
 )
 
 #: 2**53: a unit is the first 53 bits of a hash, as a fraction of this.
@@ -311,7 +311,11 @@ def draw(
       `maximum` by its inverse distribution function -- the distribution drawing a wait past the
       longest again gives, without a loop.
 
-    Anything else, which the load refuses, draws `None`."""
+    **A size scaled by eccentricity** (`task.Scaled`; the console settings design's §5) is no draw:
+    it gives itself, each object then drawn at its own place (`task.size_at`). Anything else, which
+    the load refuses, draws `None`."""
+    if isinstance(distribution, Scaled):
+        return distribution
     if isinstance(distribution, Listed):
         values = _items(distribution.values)
         place = ordinal % len(values)
@@ -686,7 +690,12 @@ def shaped(distribution: object, declared: Param | None = None) -> dict | None:
     design's §3): its shape and its numbers by the names a card sends back (`FORM_NUMBERS`), a
     normal's cut filled from `declared` where it gives none, and a list's values and weights as
     lists, each a number. `None` for anything else, and for a set holding a value that is no
-    finite number (a word, a position), which no card's fields can hold."""
+    finite number (a word, a position), which no card's fields can hold. **A size's scaling**
+    (`task.Scaled`; the console settings design's §5) is shape `"scaled"`, its number its
+    `factor`."""
+    if isinstance(distribution, Scaled):
+        return {"shape": "scaled", "numbers": {"factor": distribution.factor}, "values": [],
+                "weights": []}
     shape = _SHAPE_OF.get(type(distribution))
     if shape is None:
         return None
@@ -885,7 +894,10 @@ def words(distribution: Distribution, unit: str, *, direction: bool = False) -> 
     `"uniform from 315 deg to 45 deg"`; `"one of 0.1 s, 0.5 s, weighted 3:1"`; `"normal of mean
     1.0 s and sd 0.1 s, cut from 0.9 s to 1.1 s"` (`"cut to the setting's range"` where it
     declares no cut of its own); `"each of 2, 4, 6 once a pass, shuffled"` or `"in order: 2, 4, 6,
-    over and over"`; `"non-aging from 0.75 s to 1.25 s, mean 1.0 s"`."""
+    over and over"`; `"non-aging from 0.75 s to 1.25 s, mean 1.0 s"`; a size's scaling (`task.Scaled`)
+    `"scaled, 0.3 times its eccentricity"`."""
+    if isinstance(distribution, Scaled):
+        return f"scaled, {distribution.factor!r} times its eccentricity"
     shown = _shown(distribution, direction)
     # In a direction draw, equal ends mean the whole turn (the controller's ruling on the review of
     # Task 4): a span of 360 in the task's own terms reads as both ends the same direction.

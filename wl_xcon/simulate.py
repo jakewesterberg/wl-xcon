@@ -34,6 +34,7 @@ from wl_xcon.run import Result, run_trial
 from wl_xcon.simeye import Eye
 from wl_xcon.task import (
     After,
+    ObjectWindows,
     Entered,
     expand_windows,
     Exited,
@@ -458,5 +459,6 @@ def simulate(
                 fluid_ml=0.0,
                 last_reward_at=None,
                 placed=result.placed,
+                object_windows=tuple(w for w in trial.windows if isinstance(w, ObjectWindows)),
             )
     return tally.census()

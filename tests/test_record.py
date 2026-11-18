@@ -927,3 +927,40 @@ def test_a_warning_row_says_what_was_accepted_by_whom_when_and_in_which_kind(tmp
                    "accepted_in": ["training", "piloting", "recording"], "session_kind": "training",
                    "by": {"kind": "box", "name": "jake"}, "at": 1_800_000_000.0,
                    "at_local": _local(1_800_000_000.0), "how": "open", "run": None}
+
+
+def test_the_record_writes_each_objects_size_and_window(tmp_path):
+    """The console settings design's §5 and the wl-preproc ask of 2026-11-17 (XC-513, group 2):
+    each `stimuli[]` entry's `size_deg`, its look's size as drawn at its place, null for an array
+    and for a look with no single `size`; each object's own `size_deg` and `window_deg`, both keys
+    always written, `window_deg` null where the array has no object window; and a scaling the
+    line's `params` value for its setting, `{"class": "Scaled", "fields": {"factor": 0.3}}`. A ring
+    about (4°, 0°) scaled by 0.3 gives each object its own size at its own true eccentricity, and a
+    window ratio of 3 gives each 1.5 times its size."""
+    from wl_xcon.geometry import polar_of_deg
+    from wl_xcon.task import Array, Disc, Gabor, ObjectWindows, P, Scaled, Stimulus
+
+    disc = Disc(size=P("disc_size"))
+    ring = _shown(Stimulus("search", at=(4.0, 0.0),
+                           looks=Array(n=4, radius=4.0, looks=disc, among=disc)), 5)
+    fix = _shown(Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=P("fix_size"))), 1)
+    gabor = _shown(Stimulus("g", at=(5.0, 0.0), looks=Gabor()), 2)
+    windows = (ObjectWindows(of="search", scale=3.0),)
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    record.trial(index=1, outcome="correct", run=0, position=Position.lone(1), fluid_ml=0.0,
+                 last_reward_at=None, placed=(fix, gabor, ring), object_windows=windows,
+                 params={"disc_size": Scaled(0.3), "fix_size": 0.3})
+    line = json.loads((record.directory / "trials.jsonl").read_text())
+    assert line["params"]["disc_size"] == {"class": "Scaled", "fields": {"factor": 0.3}}
+    shown_fix, shown_gabor, shown_ring = line["stimuli"]
+    assert (shown_fix["size_deg"], shown_gabor["size_deg"], shown_ring["size_deg"]) == (
+        0.3, None, None)
+    assert len(shown_ring["objects"]) == 4
+    for drawn in shown_ring["objects"]:
+        own = 0.3 * polar_of_deg(drawn["x"], drawn["y"])[0]
+        assert drawn["size_deg"] == pytest.approx(own, abs=1e-12)
+        assert drawn["window_deg"] == pytest.approx(1.5 * own, abs=1e-12)
+    assert shown_ring["objects"][0]["size_deg"] == pytest.approx(2.4, abs=1e-12)
+    # No object window: both keys still written, the window null; a size in degrees as itself.
+    (alone,) = _line(tmp_path / "plain", (ring,), params={"disc_size": 1.0})
+    assert [(o["size_deg"], o["window_deg"]) for o in alone["objects"]] == [(1.0, None)] * 4

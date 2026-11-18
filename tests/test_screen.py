@@ -458,3 +458,29 @@ def test_every_block_a_screen_is_made_of_crosses_the_wire_and_nothing_else():
         screen.to_wire(replace(unwired, items=(item,)))
     with pytest.raises(ValueError, match="a screen description on the wire is a Screen"):
         screen.to_wire(unwired.items[0])
+
+
+def test_a_scaled_array_draws_each_object_at_its_own_eccentricity():
+    """The console settings design's §5 ("Size = factor x eccentricity", the PI, 2026-11-16): a size
+    a person scales is bound where a fixed size is, at each item's own cyclopean place, its true
+    eccentricity from straight ahead (`task.size_at`, `geometry.polar_of_deg`), never an average:
+    an array about (4°, 0°) of radius 4° puts its objects 8°, 5.65° (twice) and 0° out, so they are
+    drawn 2.4°, 1.70° and 0° across, each its own, where a fixed size draws all four alike."""
+    from wl_xcon.geometry import polar_of_deg
+    from wl_xcon.task import Scaled
+
+    disc = Disc(size=P("disc_size"), color=Gray(40.0))
+    ring = Stimulus("search", at=(4.0, 0.0), looks=Array(n=4, radius=4.0, looks=disc, among=disc))
+    scaled = _one(ring, geometry=DIRECT, values={"disc_size": Scaled(0.3)}).items
+    assert len(scaled) == 4
+    for item in scaled:
+        assert item.at_left == item.at_right
+        assert item.shape.size == pytest.approx(0.3 * polar_of_deg(*item.at_left)[0], abs=1e-12)
+    assert scaled[0].shape.size == pytest.approx(2.4, abs=1e-12)
+    assert len({round(item.shape.size, 9) for item in scaled}) == 3
+    fixed = _one(ring, geometry=DIRECT, values={"disc_size": 1.0}).items
+    assert [item.shape.size for item in fixed] == [1.0] * 4
+    square = Stimulus("s", at=(6.0, 6.0), looks=Square(size=P("disc_size"), color=Gray(40.0)))
+    (item,) = _one(square, geometry=DIRECT, values={"disc_size": Scaled(0.3)}).items
+    assert (item.shape.width, item.shape.height) == pytest.approx(
+        (0.3 * polar_of_deg(6.0, 6.0)[0],) * 2, abs=1e-12)

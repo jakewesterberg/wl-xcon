@@ -261,7 +261,10 @@ def _written(value: object) -> object:
     the same way, every field** (engine build C3's call 12; the controller's ruling 2 of
     2026-10-30), its `repeat` among them: `{"class": "Uniform", "fields": {"low": -10.0, "high":
     10.0, "repeat": "fresh"}}`, so a reader never needs this build's defaults. A value drawn from
-    one is written as the value it is.
+    one is written as the value it is. **A size scaled by eccentricity** (`task.Scaled`, a person's
+    form for a size setting; the console settings design's §5) is a trial line's `params` value
+    for its setting, written so too, `{"class": "Scaled", "fields": {"factor": 0.3}}`, each
+    object's size in degrees beside it in `stimuli` (`_stimuli`'s `size_deg`).
 
     **Anything else raises `TypeError`**, as `json` does: a `Polar` holding a setting, or a bare
     setting reference, is no value, and a record never writes a stand-in for one; nor does it write
@@ -270,7 +273,7 @@ def _written(value: object) -> object:
     from wl_xcon.geometry import polar_deg, shown_direction
     from wl_xcon.look import Edge, Fill, Outline, Shape
     from wl_xcon.photometry import Color, Contrast
-    from wl_xcon.task import Appearance, Distribution, Polar
+    from wl_xcon.task import Appearance, Distribution, Polar, Scaled
 
     def number(field: object) -> bool:
         return isinstance(field, (int, float)) and not isinstance(field, bool)
@@ -282,7 +285,8 @@ def _written(value: object) -> object:
         direction = None if value.eccentricity == 0 else shown_direction(value.direction)
         return {"eccentricity": value.eccentricity + 0, "direction": direction, "x": x + 0.0,
                 "y": y + 0.0}
-    if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline, Distribution)):
+    if isinstance(value, (Appearance, Color, Contrast, Shape, Fill, Edge, Outline, Distribution,
+                          Scaled)):
         return canonical(value, every_field=True, sets_by_name=True)
     raise TypeError(f"the record writes no {type(value).__name__} value ({value!r})")
 
@@ -292,7 +296,7 @@ def _written(value: object) -> object:
 _UNREADABLE = (KeyError, TypeError, ValueError, IndexError, ArithmeticError)
 
 
-def _stimuli(placed: tuple, values: dict) -> list[dict]:
+def _stimuli(placed: tuple, values: dict, windows: tuple = ()) -> list[dict]:
     """**Where each stimulus a trial showed was** (XC-399; the PI, 2026-10-19, "Record both, tell
     wl-preproc"), as its line writes it: one entry for each `Show` and each `Update` the trial drew,
     in the order they took effect (`run.Result.placed`).
@@ -313,12 +317,21 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
     stimulus drawn by per-eye positions** (engine spec §5.4) is drawn at no cyclopean position, so
     those four are null and `left` and `right` give each eye's own, in that eye's frame.
 
+    **And each size, in degrees, as drawn at its place** (the console settings design's §5; the
+    wl-preproc ask of 2026-11-17, group 2): every entry's `size_deg`, its look's `size` at its
+    cyclopean place (`task.size_at`: a fixed size as itself, a scaled one its factor times that
+    place's true eccentricity), null for an array, whose objects carry theirs, for a look with no
+    single `size`, and where it cannot be read; and each of an array's `objects` its own
+    `size_deg` and `window_deg`, its object window's radius in degrees (`windows`, the trial's
+    `ObjectWindows`; `ObjectWindows.radius_at`), both keys always written, `window_deg` null where
+    the array has no object window.
+
     **Never raises on a position** (the review's I1): one naming a setting with no value, or one
     that cannot be read, is written null with why in `unresolved` (null when everything resolved),
     so a trial that ran and paid always has its line. Computed as the line is written, between
     trials, never in a frame."""
     from wl_xcon.geometry import shown_polar
-    from wl_xcon.task import Array, Blank, P, Polar, position_of
+    from wl_xcon.task import SIZED_LOOKS, Array, Blank, P, Polar, position_of, size_at
 
     def value(field):
         """A field as it stands: a setting's value, `None` where it has none."""
@@ -346,6 +359,21 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
         eccentricity, direction = shown_polar(x, y)
         return {"eccentricity": eccentricity, "direction": direction, "x": x + 0.0, "y": y + 0.0}
 
+    def size_of(looks, place) -> "float | None":
+        """A sized look's size at `place`, in degrees; `None` where it has none or it cannot be
+        read."""
+        looks = value(looks) if isinstance(looks, P) else looks
+        if not isinstance(looks, SIZED_LOOKS) or place is None:
+            return None
+        size = value(looks.size)
+        if size is None:
+            return None
+        try:
+            return size_at(size, place) + 0.0
+        except _UNREADABLE:
+            return None
+
+    families = {declared.of: declared for declared in windows}
     nowhere = {"eccentricity": None, "direction": None, "x": None, "y": None}
     entries = []
     for stimulus, frame, kind, changed, _, off in placed:
@@ -374,9 +402,28 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
                     reasons.append(why(missing))
                 else:
                     try:
-                        entry["objects"] = [where(*p) for p in looks.positions(values, (x, y))]
+                        places = looks.positions(values, (x, y))
+                        entry["objects"] = [where(*p) for p in places]
                     except _UNREADABLE as fault:
                         reasons.append(f"its objects could not be placed ({fault})")
+                    else:
+                        family = families.get(stimulus.name)
+                        for index, (place, object_entry) in enumerate(
+                                zip(places, entry["objects"])):
+                            try:
+                                own = looks.object_looks(index, values)
+                            except _UNREADABLE:
+                                own = None
+                            object_entry["size_deg"] = size_of(own, place)
+                            object_entry["window_deg"] = None
+                            if family is not None:
+                                try:
+                                    radius = family.radius_at(looks, index, place, values)
+                                    radius = value(radius) if isinstance(radius, P) else radius
+                                    object_entry["window_deg"] = (
+                                        None if radius is None else float(radius) + 0.0)
+                                except _UNREADABLE:
+                                    pass
             return entry
 
         entry = {"name": stimulus.name, "kind": kind, "frame": frame, "off": off,
@@ -388,6 +435,11 @@ def _stimuli(placed: tuple, values: dict) -> list[dict]:
                          right=None if stimulus.at_right is None else at(stimulus.at_right))
         else:
             entry.update(at(stimulus.at))
+        try:
+            cyclopean = None if unset(stimulus.at) else position_of(stimulus.at, values)
+        except _UNREADABLE:
+            cyclopean = None
+        entry["size_deg"] = None if array else size_of(looks, cyclopean)
         if array:
             entry["target"] = None
             if unset(looks.target):
@@ -479,6 +531,7 @@ class SessionRecord:
         eased: tuple = (),
         planned: dict | None = None,
         color_realized: dict | None = None,
+        object_windows: tuple = (),
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -540,10 +593,12 @@ class SessionRecord:
         kind, frame and `off`, its (x, y) and its true eccentricity and direction beside them, a
         position that cannot be resolved written null with why, never raised. Required, as
         `position` is: a line written without it would say the trial showed nothing, and nothing
-        would say so. **Returns the line's `stimuli`**, so the session can say on the changes feed
+        would say so. Each with its size in degrees at its place, and each array object's its own
+        and its object window's radius (`size_deg`, `window_deg`), from `object_windows`, the
+        trial's `ObjectWindows` (the console settings design's §5). **Returns the line's `stimuli`**, so the session can say on the changes feed
         that one could not be resolved (`taskd`, once a run).
         """
-        stimuli = _stimuli(placed, params)
+        stimuli = _stimuli(placed, params, object_windows)
         if self._trials is None:
             self._trials = (self.directory / "trials.jsonl").open("a", encoding="utf-8")
         self._trials.write(

@@ -93,9 +93,10 @@ from wl_xcon.simeye import NOISE_DEG, Eye
 from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
-    COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo,
-    Staircase,
-    Task, Trial, at_hardest, limit_reason, staircase_verdict,
+    COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, ObjectWindows, Outcome, P, Param,
+    Plan, SaccadeTo, Scaled, Show, Staircase,
+    Task, Trial, actions_of, at_hardest, limit_reason, position_of, size_at, size_settings,
+    sized_places, staircase_verdict,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
@@ -325,8 +326,9 @@ def _varied_written(varied: dict) -> dict:
     """**What varied in one block, as its end row writes it** (`block_ends`' `varied`; engine build
     C3's spec §10; XC-344): each setting's ways in one order whatever order its trials met them,
     its conditions' first, then its draws in the order its trials first named them, then a
-    person's (`Session._vary`)."""
-    order = ("condition", "draw", "person")
+    person's scaling of a size (`"scaled"`; the console settings design's §5), then a person's
+    held value (`Session._vary`)."""
+    order = ("condition", "draw", "scaled", "person")
     return {name: sorted(ways, key=lambda way: order.index(way["by"]))
             for name, ways in varied.items()}
 
@@ -2464,8 +2466,13 @@ class Session:
             return None if not ends else (min(ends), max(ends)) if len(ends) > 1 else ends[0]
 
         base = dict(values)
+        # **A size scaled by eccentricity** is judged at each object's own size (`check.laid_out`,
+        # its `fixed` the value the setting holds beneath the scaling; the console settings
+        # design's §5).
+        fixed = {name: values.get(name) for name, form in formed.items()
+                 if isinstance(form, Scaled)}
         for name, form in formed.items():
-            at = span(form, name)
+            at = form if isinstance(form, Scaled) else span(form, name)
             if at is not None:
                 base[name] = at
         # The session's own values alone before a run has a plan; a run's trials each hold their
@@ -2502,7 +2509,7 @@ class Session:
             for finding in laid_out(task, these, allocation=self.allocation,
                                     geometry=self.spec.geometry,
                                     calibration=self.spec.calibration,
-                                    deployment=self.spec.deployment):
+                                    deployment=self.spec.deployment, fixed=fixed):
                 if any(_among(finding, [one]) for one, _ in found):
                     continue
                 found.append((finding, where))
@@ -2771,16 +2778,20 @@ class Session:
         running = self.phase == "running"
         in_force: dict = {}
         turned: frozenset = frozenset()
+        sizes: frozenset = frozenset()
         if running:
             in_force = variation.in_force(self._task, self._scheduler.block)
             turned = variation.directions(self._task)
+            sizes = size_settings(self._task)
         declared = []
         for p in self._params().values():
             source, conditions, draw, numbers, switch, shape = None, (), None, None, None, None
-            profile, shown = None, None
+            profile, shown, gives = None, None, None
             if running:
                 source, conditions = self._source(p.name, in_force), self._overrides(p.name)
-                switch = "drawn" if self._drawable(p) else None
+                switch = ("drawn" if self._drawable(p)
+                          else "scaled" if self._scalable(p, sizes) else None)
+                gives = self._gives(p.name)
                 if p.name in in_force and not self._own_range(p.name):
                     drawn, key = in_force[p.name]
                     drawn = self._ranges.get(key, (drawn,))[0]
@@ -2794,7 +2805,7 @@ class Session:
                     shape = variation.shaped(self._forms[p.name], p)
                     shape = None if shape is None else {**shape, "by": "person"}
                     shown = self._forms[p.name]
-            if shape is not None:
+            if shape is not None and not isinstance(shown, Scaled):
                 profile = variation.profile(shown, p).as_dict()
             # Why each limit it declares stands (the console settings design's §4: "each card says
             # why"), the same between runs as in one.
@@ -2802,14 +2813,74 @@ class Session:
                    else {"low": limit_reason(p, "low"), "high": limit_reason(p, "high")})
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
                              p.choices, source, conditions, draw, numbers, switch, shape, profile,
-                             why))
+                             why, gives))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None, None, None)
+             None, None, None, None, None, None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
         return tuple(declared) + ceilings
+
+    def _scalable(self, declared: Param, sizes: frozenset) -> bool:
+        """**Whether a person may scale `declared` by eccentricity from its card** (the console
+        settings design's §5): a live setting a look draws its `size` by (`task.size_settings`,
+        `sizes`), of numbers, never a ceiling's name -- the *fixed* | *scaled* switch its card
+        offers (`parameters`), and what `_scale` asks first."""
+        return (declared.live and declared.name in sizes and not declared.choices
+                and declared.name not in self.spec.bounds.ceilings)
+
+    def _gives(self, name: str) -> str | None:
+        """**What `name` gives each object, in degrees, at its own place** (`link.ParamRow.gives`;
+        the console settings design's §5: "the card shows the radius in degrees it gives at each
+        object's eccentricity"), at the values in force (`spec.values`, each size a person scales
+        scaled): for a size a person scales (`_forms`), each object's size (`task.size_at`), as
+        `2.4° at 8° out`; for an object window's ratio (`ObjectWindows.scale`), each object's
+        window radius (`ObjectWindows.radius_at`), as `radius 1.5° at 8° out`. One phrase for each
+        distinct eccentricity and amount, three at most, then "and N more"; ", every object" where
+        an array's objects all have the one. `None` for every other setting, a fixed size's among
+        them, and where nothing can be placed. Between trials, never in a frame."""
+        values = {**self.spec.values,
+                  **{n: form for n, form in self._forms.items() if isinstance(form, Scaled)}}
+        found: list[tuple[str, tuple[float, float], float]] = []
+        word = ""
+        if isinstance(self._forms.get(name), Scaled):
+            for structure in self._task.structures.values():
+                for label, place in sized_places(structure, values, name):
+                    found.append((label, place, size_at(self._forms[name], place)))
+        else:
+            word = "radius "
+            for structure in self._task.structures.values():
+                shown = {action.stimulus.name: action.stimulus
+                         for _, action in actions_of(structure) if isinstance(action, Show)}
+                for declared in structure.windows:
+                    if not (isinstance(declared, ObjectWindows) and isinstance(declared.scale, P)
+                            and declared.scale.name == name and declared.of in shown):
+                        continue
+                    stimulus = shown[declared.of]
+                    try:
+                        array = stimulus.looks
+                        array = values[array.name] if isinstance(array, P) else array
+                        places = array.positions(values, position_of(stimulus.at, values))
+                        found += [(f"array {declared.of!r}", place,
+                                   declared.radius_at(array, index, place, values))
+                                  for index, place in enumerate(places)]
+                    except (KeyError, TypeError, ValueError, IndexError, ArithmeticError,
+                            AttributeError):
+                        continue
+        if not found:
+            return None
+        said: list[str] = []
+        for _, place, amount in found:
+            out = size_at(Scaled(1.0), place)
+            phrase = f"{word}{round(amount, 3):g}° at {round(out, 3):g}° out"
+            if phrase not in said:
+                said.append(phrase)
+        if len(said) == 1 and len(found) > 1 and all(label.startswith("array ")
+                                                     for label, _, _ in found):
+            return f"{said[0]}, every object"
+        shown_said = ", ".join(said[:3])
+        return shown_said if len(said) <= 3 else f"{shown_said} and {len(said) - 3} more"
 
     def _drawable(self, declared: Param) -> bool:
         """**Whether a person may draw `declared` from its card** (the console settings design's
@@ -4034,8 +4105,8 @@ class Session:
         **Refused, with the sentence and nothing staged**, in this order:
         - a ceiling's name (a reward size is never drawn), a name the task does not declare, and a
           setting declared not live-editable;
-        - a scaling, a size's, which the console settings plan's Task 6 takes, and a shape that is
-          none of `task.SHAPES`;
+        - a shape that is none of `task.SHAPES` and not a size's scaling, which `_scale` judges
+          (the console settings design's §5);
         - a setting that is no timing setting (`_drawable`: in seconds, of numbers);
         - numbers its shape does not take, and a shortest not below its longest
           (`variation.formed`);
@@ -4065,11 +4136,8 @@ class Session:
             if not declared.live:
                 raise Exceeded("it is declared not live-editable by this task")
             if command.shape == "scaled":
-                # Waiting on the console settings plan's Task 6 (scaled sizes), which takes it.
-                raise Exceeded(
-                    "a scaling by eccentricity is a size's, which this rig does not draw yet (the "
-                    "console settings plan's Task 6); a timing setting is drawn in one of "
-                    + ", ".join(SHAPES))
+                self._scale(command, declared)
+                return
             if command.shape not in SHAPES:
                 raise Exceeded(f"{command.shape!r} is not a shape a setting is drawn in: one of "
                                f"{', '.join(SHAPES)}")
@@ -4113,13 +4181,62 @@ class Session:
                 after=len(self._staged), form=form,
             ))
         except Exceeded as refused:
-            why = f"{name!r} is not drawn as asked: {refused}"
+            how = "scaled" if command.shape == "scaled" else "drawn"
+            why = f"{name!r} is not {how} as asked: {refused}"
             self._ceiling_refused(name, dict(command.numbers), command.by, why, index)
             self._refuse(name, command.by, why)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             self._refuse(name, command.by, (
                 f"the draw of {name!r} could not be checked ({type(broken).__name__}: "
                 f"{broken}), so it is refused and the session runs on"))
+
+    def _scale(self, command, declared: Param) -> None:
+        """**A person switches a size setting to scaled by eccentricity on its card** (`link.SetForm`
+        shape `"scaled"`; the console settings design's §5; the PI, 2026-11-16, "Size = factor x
+        eccentricity", 0.3 dva per dva as in his arrays [@westerberg2020priming]; STE-31): from the
+        next trial each look whose `size` is the setting is drawn at `factor` times its own
+        eccentricity (`task.Scaled`, `task.size_at`), each object at its own, until a value typed
+        on the card, a hand-back or a revert ends it; staged and applied as any form is (`_form`,
+        whose refusals ahead of it it shares). **Refused with the sentence, nothing staged**: a
+        setting that no look draws by its `size` (`task.size_settings`) or that has choices; numbers
+        other than one `factor`, or values or weights; a factor that is no number above 0, since a
+        size is a positive width; trials left impossible (`_possible`: two looks scaled alike are
+        alike); and the layout it leaves (`_laid_out`), a size past its bound at some object refused
+        (`past-limit`), a stimulus at the center not drawn or one drawn smaller than its fixed
+        value warned (`scaled-small`), each accepted by who sent it. Raises `Exceeded` for `_form`
+        to refuse; between trials, never in a frame."""
+        name = command.name
+        if name not in size_settings(self._task) or declared.choices:
+            raise Exceeded(
+                f"a scaling by eccentricity is a size's, and {name!r} is no setting a look draws "
+                f"its size by; a size is scaled, a timing setting drawn in one of "
+                + ", ".join(SHAPES))
+        numbers = dict(command.numbers)
+        if set(numbers) != {"factor"} or command.values or command.weights:
+            sent = ", ".join(sorted(numbers)) or "none"
+            raise Exceeded(f"a scaling takes one number, its factor, and was sent {sent}")
+        factor = numbers["factor"]
+        if not (isinstance(factor, (int, float)) and not isinstance(factor, bool)
+                and math.isfinite(factor) and factor > 0):
+            raise Exceeded(f"its factor, {factor!r}, is no number above 0: a size is a positive "
+                           f"width, so it scales by a factor above 0")
+        form = Scaled(float(factor))
+        why = self._possible(forms={name: form})
+        if why is not None:
+            raise Exceeded(why)
+        self._laid_out(forms={name: form}, by=command.by)
+        values, held, _, formed = self._ahead()
+        before = formed.get(name)
+        if before is not None:
+            was = variation.recorded(before, declared)
+        elif name in held:
+            was = values.get(name)
+        else:
+            was = None if self._given_by(name, self._scheduler.block) else values.get(name)
+        self._pending.append(Pending(
+            "form", name, was=was, now=variation.recorded(form, declared), by=command.by,
+            after=len(self._staged), form=form,
+        ))
 
     def _to(self, name: str) -> str:
         """**What takes `name` back in the open block once a person's hold of it ends** (the C3
@@ -5113,7 +5230,8 @@ class Session:
             was = ("its draw or its conditions" if act.was is None
                    else "a person's draw" if isinstance(act.was, dict)
                    else _shown(act.was, choices))
-            return f"{act.name} {was} → drawn: {variation.words(act.form, unit)}"
+            how = "scaled" if isinstance(act.form, Scaled) else "drawn"
+            return f"{act.name} {was} → {how}: {variation.words(act.form, unit)}"
         drawn = "as declared" if act.draw is None else variation.words(act.draw, unit)
         return f"{_draw_said(act.key)} → {drawn}"
 
@@ -5229,7 +5347,8 @@ class Session:
     #: person put in force from its card (`Session._form` offers it, `_apply_pending` applies it),
     #: and the id of the `form` row that put it there, which each trial drawn from it names
     #: (`_draw`). A value a person gives, a hand-back or a revert ends one. Empty as each run
-    #: starts. A size's scaling (`task.Scaled`) joins it with the console settings plan's Task 6.
+    #: starts. **A size's scaling** (`task.Scaled`; the design's §5) is one too (`Session._scale`):
+    #: each trial's values carry it for its setting, never drawn.
     _forms: dict = field(init=False, default_factory=dict, repr=False)
     _form_ids: dict[str, int] = field(init=False, default_factory=dict, repr=False)
     #: **What each trial of the run in progress drew, kept for a repeat of it** (engine build C3's
@@ -5688,7 +5807,9 @@ class Session:
         C3 plan's Appendix B item 2). Between trials, never in a frame."""
         if meaning.kind == NOT_DIFFICULTY:
             return False
-        if meaning.kind == EXPECTED:
+        if meaning.kind == EXPECTED or isinstance(form, Scaled):
+            # A size scaled by eccentricity is no single value to judge a way it went by: each
+            # object has its own, so a clear-cut size's trial is kept out on that doubt.
             return True
         relative = meaning.relative_to
         reference = values.get(relative) if isinstance(relative, str) else None
@@ -5885,7 +6006,12 @@ class Session:
         for name, (_, source, original) in self._kept[number].items():
             if original != number:
                 continue
-            if name in self._forms and source == self._form_ids.get(name):
+            if (name in self._forms and source == self._form_ids.get(name)
+                    and isinstance(self._forms[name], Scaled)):
+                # A person's scaling of a size (the console settings design's §5), named by its
+                # `form` row's id, as wl-preproc was told (XC-513, group 1).
+                way = {"by": "scaled", "from": source, "factor": self._forms[name].factor}
+            elif name in self._forms and source == self._form_ids.get(name):
                 # A person's draw (the console settings build), named by its `form` row's id.
                 way = {"by": "draw", "from": source, "distribution": variation.recorded(
                     self._forms[name], self._declared.get(name))}
@@ -6912,6 +7038,10 @@ class Session:
                     # Where each stimulus it showed was (XC-399), turned into positions as the
                     # line is written, between trials.
                     placed=result.placed,
+                    # Each array's object windows, for each object's window in degrees (the
+                    # console settings design's §5).
+                    object_windows=tuple(window for window in trial.windows
+                                         if isinstance(window, ObjectWindows)),
                     counting=counted,
                     shown=shown,
                     repeat_of=drawn.repeat_of,

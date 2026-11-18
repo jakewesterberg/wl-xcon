@@ -337,9 +337,13 @@ def render(trial: Trial, allocation_names: dict[int, str] | None = None) -> str:
                 # A family, described as one: how many members it has is a
                 # parameter, so listing them would be listing one configuration.
                 count = " or ".join(counts.get(window.of, [])) or "?"
+                # A ratio of each object's radius (`ObjectWindows.scale`; the console settings
+                # design's §5), said as one.
+                radius = (_value_label(window.radius) if window.scale is None
+                          else f"{_value_label(window.scale)} × each object's radius")
                 lines.append(
                     f"| `{window.of}.*` | {count} objects on a ring "
-                    f"| {_value_label(window.radius)} | `{window.of}` "
+                    f"| {radius} | `{window.of}` "
                     f"| {window.eye} |"
                 )
                 continue

@@ -257,8 +257,12 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: share of the draws and its hazard against the first's), the declared distribution, not a measurement;
 #: and `ParamRow.why`, `{"low", "high"}`, each limit's one-line reason, or `None` (`task.limit_reason`;
 #: the design's §4: every declared bound is a hard limit). A staged row may be of kind `form`, its `was` and
-#: `now` in the rig's words. And a `form` command on the wire (`SetForm`). The build's later
-#: tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
+#: `now` in the rig's words. And a `form` command on the wire (`SetForm`). **A size scaled by
+#: eccentricity** (the design's §5; the build's Task 6): `ParamRow.switch` `"scaled"` on a live
+#: size setting (`task.size_settings`), `ParamRow.shape` `{"shape": "scaled", "numbers": {"factor"},
+#: ...}` for a person's scaling, and `ParamRow.gives`, the rig's words for what a scaled size or an
+#: object window's ratio gives each object in degrees, else `None`; a `form` command's shape may
+#: be `scaled`. The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
 SCHEMA = 22
 
@@ -465,8 +469,9 @@ class ParamRow:
     more: int = 0
     #: **Whether the card offers the drawn side** (schema 22; the console settings design's §3, the
     #: PI, 2026-11-16: "every timing setting gets the switch on its card"): `"drawn"` on a live
-    #: setting in seconds while a run goes, whose card is *fixed* or *drawn* (`SetForm`); `None` on
-    #: every other card, a ceiling's, and between runs.
+    #: setting in seconds while a run goes, whose card is *fixed* or *drawn* (`SetForm`);
+    #: **`"scaled"` on a live size setting** (`task.size_settings`; the design's §5), whose card is
+    #: *fixed* or *scaled* by a factor; `None` on every other card, a ceiling's, and between runs.
     switch: str | None = None
     #: **The shape in force, for the card's drawn side** (schema 22): a person's draw (`by`
     #: `"person"`, `source` `"form"`) or the open block's own or the task's (`"block"`, `"task"`),
@@ -487,13 +492,21 @@ class ParamRow:
     #: side with no bound or a bound the task gives no reason for. `None` where it declares no
     #: bound, has choices, or is a ceiling.
     why: dict | None = None
+    #: **What it gives each object, in degrees, at its own place** (schema 22; the console settings
+    #: design's §5: "the card shows the radius in degrees it gives at each object's eccentricity"):
+    #: the rig's words for each distinct eccentricity the open placement draws it at, three at
+    #: most, then "and N more" -- an object window's ratio as `radius 1.5° at 8° out, every
+    #: object`, a size scaled by eccentricity as `2.4° at 8° out` -- made by the rig
+    #: (`taskd.Session.parameters`), so no console computes a size. `None` for every other card,
+    #: a fixed size's among them, and between runs.
+    gives: str | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
            bounded: bool, choices=(), source: str | None = None, conditions=(),
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
            shape: dict | None = None, profile: dict | None = None,
-           why: dict | None = None) -> "ParamRow":
+           why: dict | None = None, gives: str | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -513,9 +526,9 @@ class ParamRow:
         words = position_words(value, choices)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape, profile, why)
+                       numbers, more, switch, shape, profile, why, gives)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape, profile, why)
+                   more, switch, shape, profile, why, gives)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1824,6 +1837,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "shape": p.shape,
                 "profile": p.profile,
                 "why": p.why,
+                "gives": p.gives,
             }
             for p in telemetry.params
         ],
@@ -2650,7 +2664,7 @@ class SetForm:
     """**A person asks that a timing setting be drawn each trial, from a shape they give** (the
     console settings design's §3; the PI, 2026-11-16: every timing setting "fixed or drawn",
     staged until the next trial like any change): setting `name` drawn from `shape`, one of
-    `task.SHAPES` -- or `"scaled"`, a size's (the console settings plan's Task 6) -- from the next
+    `task.SHAPES` -- or `"scaled"`, a size's scaling by eccentricity (the design's §5) -- from the next
     trial, recorded as a change, over what the block gives it until a typed value, a hand-back or
     a revert ends it. **Its own command, never a `SetParameter` or a `SetRange`**: `numbers` are
     the shape's by name (a non-aging wait's `shortest` and `longest`, a uniform's `low` and `high`,
@@ -2671,8 +2685,8 @@ class SetForm:
 
 
 #: **The shapes a `form` command may name on the wire**: the five a timing card draws
-#: (`task.SHAPES`) and a size's scaling (`task.Scaled`), which the session refuses until the
-#: console settings plan's Task 6 takes it.
+#: (`task.SHAPES`) and a size's scaling (`task.Scaled`; the design's §5), which the session takes
+#: on a size setting alone (`taskd.Session._scale`).
 FORM_SHAPES = (*SHAPES, "scaled")
 
 #: **The most values, and the most weights, one `SetForm` may carry**: a bound on one packet's reach

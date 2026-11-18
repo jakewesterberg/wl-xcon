@@ -26,8 +26,8 @@ from wl_xcon.photometry import (
     CONE_COLORS, D65, ColorSetLight, Gray, Michelson, Weber, colorset_xyz, cone_xyz, to_xyz, xyY,
 )
 from wl_xcon.task import (
-    Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Square, _value,
-    position_of,
+    Annulus, Array, Bar, Blank, Cross, Disc, Gabor, Grating, P, Polygon, Scaled, Square, _value,
+    position_of, size_at,
 )
 
 SCHEMA = 1
@@ -121,13 +121,18 @@ def _num(value, values) -> float:
     return float(_value(value, values))
 
 
-def _bind(block, values):
-    """`block` with every parameter in it bound to a number."""
+def _bind(block, values, at=None):
+    """`block` with every parameter in it bound to a number. **A size scaled by eccentricity**
+    (`task.Scaled`, a person's form for a size setting; the console settings design's §5) is bound
+    at `at`, the item's own cyclopean place, as `task.size_at` gives it there: where a fixed size
+    is bound, from the values made between trials, never at an average."""
     changes = {}
     for f in fields(block):
         v = getattr(block, f.name)
         if isinstance(v, P):
-            changes[f.name] = _num(v, values)
+            bound = _value(v, values)
+            changes[f.name] = (size_at(bound, at) if isinstance(bound, Scaled) and at is not None
+                               else float(bound))
         elif isinstance(v, tuple):
             changes[f.name] = tuple(tuple(_num(c, values) for c in point) for point in v)
     return replace(block, **changes) if changes else block
@@ -314,11 +319,12 @@ def _position(value, values) -> tuple[float, float]:
     return position_of(value, values)
 
 
-def _eyes(stimulus, values, geometry, place):
+def _eyes(stimulus, values, geometry, place, center):
     """Each eye's own direction, in degrees (engine spec §5.4): per-eye positions as
     given; otherwise the left eye at `x − d/2 + v` and the right at `x + d/2 − v`, `v`
-    the vergence offset (zero in direct view). `place` takes the stimulus's position to the
-    item's: itself, or an array's object on its true circle about it (`Array.positions`)."""
+    the vergence offset (zero in direct view), `(x, y)` the item's cyclopean `center`. `place`
+    takes the stimulus's position to the item's: itself, or an array's object on its true circle
+    about it (`Array.positions`)."""
     if stimulus.eye != "both" and geometry.view != "stereoscope":
         raise ValueError(f"{stimulus.name!r} is shown to the {stimulus.eye} eye only outside "
                          f"the stereoscope")
@@ -327,7 +333,7 @@ def _eyes(stimulus, values, geometry, place):
             raise ValueError(f"{stimulus.name!r} has per-eye positions outside the stereoscope")
         return (place(_position(stimulus.at_left, values)),
                 place(_position(stimulus.at_right, values)))
-    x, y = place(_position(stimulus.at, values))
+    x, y = center
     d = _num(stimulus.disparity, values)
     if d and geometry.view != "stereoscope":
         raise ValueError(f"{stimulus.name!r} has a disparity outside the stereoscope")
@@ -364,13 +370,16 @@ def _item(stimulus, name, order, looks, place, lights, geometry, onset) -> Item:
                                   xyz=lights.xyz(expanded.outline.color))
         if outline.xyz is None:
             raise ValueError(f"{name!r}'s outline has no light; an outline is drawn in a color")
-    at_left, at_right = _eyes(stimulus, values, geometry, place)
+    # The item's own cyclopean place (its `at`, an array's object on its ring about it), where a
+    # size scaled by eccentricity is bound (`_bind`) and each eye's direction is taken from.
+    center = place(_position(stimulus.at, values))
+    at_left, at_right = _eyes(stimulus, values, geometry, place, center)
     return Item(
         name=name, order=order, layer=stimulus.layer, combine=stimulus.combine,
         opacity=_num(stimulus.opacity, values), eye=stimulus.eye,
         at_left=at_left, at_right=at_right,
         orientation=orientation,
-        shape=_bind(expanded.shape, values), fill=fill, edge=edge, outline=outline,
+        shape=_bind(expanded.shape, values, center), fill=fill, edge=edge, outline=outline,
         onset_frame=onset,
     )
 

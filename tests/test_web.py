@@ -4433,3 +4433,56 @@ def test_a_lists_profile_is_drawn_one_bar_a_value():
     assert svg.count('<rect class="bar"') == 3
     assert len(re.search(r'<polyline class="haz" points="([^"]+)"', svg).group(1).split()) == 3
     assert "0.3 s" in svg and "0.9 s" in svg
+
+
+def test_a_size_card_offers_fixed_and_scaled_and_says_what_each_object_gets():
+    """The console settings design's §5: a size card (`switch` `scaled`) offers *fixed* and
+    *scaled*: fixed is today's number field, `set`; scaled is a factor field with *apply*, which
+    sends `form`, the side open scaled where a person's scaling is in force, its factor filled. The
+    card says what it gives each object in degrees, as the rig wrote it (`ParamRow.gives`), and a
+    window ratio's card says the radius each object gets. A staged scaling is led "scaled". Greyed
+    away from the box."""
+    scaled = {"shape": "scaled", "numbers": {"factor": 0.3}, "values": [], "weights": [],
+              "by": "person"}
+    rows = (
+        ParamRow.of("disc_size", "deg", 0.0, None, 1.0, False, (), "task", (), None, None,
+                    "scaled"),
+        ParamRow.of("fix_size", "deg", 0.0, None, 0.3, False, (), "form", (), None, None,
+                    "scaled", scaled, gives="0° at 0° out"),
+        ParamRow.of("object_window", "ratio", 0.0, None, 3.0, False, (), "task",
+                    gives="radius 1.5° at 8° out, every object"),
+    )
+    staged = (Staged("disc_size", 1.0, "scaled, 0.3 times its eccentricity", Box("jake"), False,
+                     kind="form"),)
+    params = fragments(frame(params=rows, staged=staged), view())["params"]
+    lan = fragments(frame(params=rows), view(can_write=False))["params"]
+    cards = _cards(params)
+
+    fixed = cards["disc_size"]
+    assert ('<div class="sw" role="group" aria-label="disc_size: fixed or scaled">'
+            '<button type="button" class="btn small seg on" data-switch="fixed" '
+            'data-name="disc_size" aria-pressed="true">fixed</button>'
+            '<button type="button" class="btn small seg" data-switch="scaled" '
+            'data-name="disc_size" aria-pressed="false">scaled</button></div>') in fixed
+    assert '<div class="side fixed" data-side="fixed">' in fixed
+    assert '<div class="side scaled" data-side="scaled" hidden>' in fixed
+    assert ('<label class="rn">factor<input class="field mono" data-form="factor" '
+            'inputmode="decimal" value="" aria-label="disc_size: factor"></label>') in fixed
+    assert ('<button type="button" class="btn small" data-cmd="form" data-name="disc_size">'
+            'apply</button>') in fixed
+    assert "select" not in fixed.split('data-side="scaled"')[1]
+    assert "staged scaled → scaled, 0.3 times its eccentricity by" in fixed
+    assert "gives" not in fixed
+
+    on = cards["fix_size"]
+    assert '<div class="side fixed" data-side="fixed" hidden>' in on
+    assert '<div class="side scaled" data-side="scaled">' in on
+    assert 'data-form="factor" inputmode="decimal" value="0.3"' in on
+    assert "scaled by eccentricity, by a person" in on
+    assert "a person&#x27;s scaling, over the run&#x27;s value" in on
+    assert '<span class="src gives">gives 0° at 0° out</span>' in on
+
+    window = cards["object_window"]
+    assert '<span class="src gives">gives radius 1.5° at 8° out, every object</span>' in window
+    assert "data-switch" not in window
+    assert 'data-switch="scaled" data-name="disc_size" aria-pressed="false" disabled' in lan

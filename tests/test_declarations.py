@@ -284,7 +284,11 @@ DEFAULTS = {
     "Hide": {"stimulus": REQUIRED},
     "Hold": {"window": REQUIRED, "seconds": REQUIRED},
     "Listed": {"values": REQUIRED, "in_order": False, "repeat": None},
-    "ObjectWindows": {"of": REQUIRED, "radius": REQUIRED, "eye": "both"},
+    # `radius` was required until the console settings build's Task 6 (2026-11-18), which gave it
+    # `None` beside the new `scale`, exactly one declared (refused as built): no task written
+    # before could leave it out, so none is at the new default and none's content moves, and the
+    # format stands (the builder's ruling).
+    "ObjectWindows": {"of": REQUIRED, "radius": None, "eye": "both", "scale": None},
     "Mark": {"code": REQUIRED},
     "Meaning": {
         "kind": REQUIRED,
