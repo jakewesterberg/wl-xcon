@@ -4068,3 +4068,16 @@ def test_a_card_carries_its_profile_over_the_wire():
     assert restored.params == rows
     assert restored.params[0].profile == profile and len(profile["density"]) == 20
     assert restored.params[1].profile is None
+
+
+def test_a_card_carries_each_limits_reason_over_the_wire():
+    """Schema 22 (the console settings plan's Task 4): a card's `why`, each limit's one-line reason
+    or `None`, crosses the wire whole; a card whose setting declares no bound carries none."""
+    why = {"low": "below 0 cannot be", "high": "a fraction is at most 1"}
+    rows = (ParamRow.of("catch_share", "fraction", 0.0, 1.0, 0.1, False, why=why),
+            ParamRow.of("free", "deg", None, None, 2.0, False))
+
+    restored = decode(encode(_telemetry(params=rows)))
+
+    assert restored.params == rows
+    assert (restored.params[0].why, restored.params[1].why) == (why, None)

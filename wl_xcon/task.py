@@ -159,8 +159,21 @@ class Param:
     #: starts the run -- and a `wlx taskd` run whose trials use a number nobody gave is
     #: refused by its pre-flight (`preflight.values`), not faulted at its first trial.
     start: object = None
+    #: **Why its limits stand, in one line** (the console settings design's §4; the PI,
+    #: 2026-11-16, "Hard limits only where impossible"): every bound a setting declares is a hard
+    #: limit, a value past it refused, and the console's card says why (`limit_reason`). Needed
+    #: only where no standard reason covers a bound (below 0, a count below 1, a fraction above
+    #: 1); a bound with neither is warned at load (`check.UNEXPLAINED_LIMIT`). Printable text of
+    #: `REASON_LIMIT` characters at most, refused otherwise as the setting is built.
+    why: str = ""
 
     def __post_init__(self) -> None:
+        if not (isinstance(self.why, str) and self.why.isprintable()
+                and len(self.why) <= REASON_LIMIT):
+            raise ValueError(
+                f"parameter {self.name!r}: why its limits stand is one printable line of "
+                f"{REASON_LIMIT} characters at most, not {self.why!r}"
+            )
         # **A bound past a float's range is refused as the setting is built** (XC-423): no float
         # holds it, so every check that reads a bound as one raised on it (`_real` below did, as
         # the task file loaded), and only code can write one.
@@ -200,6 +213,45 @@ class Param:
                 f"parameter {self.name!r}: its starting value {start!r} is {side} the "
                 f"range it declares, {declared}; a run would start outside it"
             )
+
+
+#: **The longest reason a limit is given in** (`Param.why`): one line on a card, as a staircase's
+#: hardest step in words is (`Staircase.hardest`), 120 characters.
+REASON_LIMIT = 120
+
+#: **The units a count is in** (the console settings design's §4: "a count below one where one is
+#: needed" is a limit that stands): a lowest of 1 on a setting in one of these needs no reason of
+#: its own (`limit_reason`).
+COUNT_UNITS = ("objects", "answers", "pairings", "trials")
+
+#: The standard reasons, each for a bound that marks where a value cannot be (§4), so needs no
+#: `Param.why`: a lowest of 0, a count's lowest of 1, and a fraction's highest of 1.
+BELOW_ZERO = "below 0 cannot be"
+BELOW_ONE = "fewer than 1 cannot be: one is needed"
+FRACTION_TOP = "a fraction is at most 1"
+
+
+def limit_reason(param: Param, side: str) -> str | None:
+    """**Why `param`'s limit on `side`** (`"low"` or `"high"`) **stands** (the console settings
+    design's §4; the PI, 2026-11-16, "Hard limits only where impossible"): the standard reason
+    where the bound marks where a value cannot be -- a lowest of 0 (`BELOW_ZERO`), a lowest of 1 on
+    a count (`COUNT_UNITS`, `BELOW_ONE`), a highest of 1 on a fraction (`FRACTION_TOP`) -- else
+    the task's own one line (`Param.why`), else `None`: a limit with no reason, which the load
+    warns of (`check.UNEXPLAINED_LIMIT`). `None` too where the side declares no bound. **The
+    standard reason first** (the builder's call): a lowest of 0 cannot be past, whatever the
+    task's line says of its other side."""
+    if side not in ("low", "high"):
+        raise ValueError(f"a limit's side is 'low' or 'high', not {side!r}")
+    bound = _real(param.low if side == "low" else param.high)
+    if bound is None:
+        return None
+    if side == "low" and bound == 0:
+        return BELOW_ZERO
+    if side == "low" and bound == 1 and param.unit in COUNT_UNITS:
+        return BELOW_ONE
+    if side == "high" and bound == 1 and param.unit == "fraction":
+        return FRACTION_TOP
+    return param.why or None
 
 
 def _real(bound: object) -> float | None:

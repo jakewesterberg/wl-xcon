@@ -777,4 +777,6 @@ def test_a_set_size_sent_past_its_range_is_not_judged_on_a_ring_of_the_wrong_kin
     found = beyond_range(task, {"n": 40})
 
     assert "overlapping-objects" not in {f.code for f in found}, found
-    assert [f.code for f in found] == ["outside-range"], found
+    # Refused first as past its limit since the console settings plan's Task 4 (`past-limit`);
+    # the widened checks say nothing more.
+    assert [f.code for f in found] == ["past-limit", "outside-range"], found

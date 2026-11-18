@@ -37,9 +37,10 @@ from wl_xcon import pointer, warnlist
 from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, beyond_range, check_task, impossible, parameters_used, undrawable,
-    unplaced, unpooled, unshowable, unstarted,
+    IMPOSSIBLE, _outside, _staircase_levels, beyond_range, check_task, impossible,
+    parameters_used, undrawable, unplaced, unpooled, unshowable, unstarted,
 )
+from wl_xcon.check import laid_out as check_laid_out
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
 from wl_xcon.findings import Finding
 from wl_xcon.link import Preflight, PreflightItem
@@ -239,6 +240,63 @@ def beyond(task: Task | None, given: dict, allocation, geometry, calibration, de
             f"the check for a trial no animal can get right could not be run at the starting "
             f"values ({type(broken).__name__}: {broken}), so whether they make one is unknown")))
     return found
+
+
+def laid_out(task: Task | None, given: dict, plan: str | None, allocation, geometry, calibration,
+             deployment) -> list:
+    """**The layout at the run's values** (the console settings design's §4: "warnings come from
+    the layout actually set"; `check.laid_out`): at its starting values (`starting`), for each
+    block and condition it plays, the condition's values over them, and each setting a draw gives
+    -- the task's, the block's own, the condition's own range -- and each staircase's setting
+    judged over its two ends (`variation.extremes`, `check._staircase_levels`), as a `(least,
+    most)` span the checks reason over whole. **A finding that blocks fails the starting values
+    item** (`values`'s `refused`; a stimulus off the field), and **each warning is offered for
+    acceptance at the start** with the run's others (`Service._preflight`), each naming the plan,
+    block and condition where the run first meets it, and one met at several said once. A check
+    that raises is a blocking finding saying it could not be run. Returns the findings, as
+    `beyond` does. Between runs, never in a frame."""
+    if task is None:
+        return []
+    try:
+        start = starting(task, given)
+        declared = {param.name: param for param in task.params}
+        turned = directions(task)
+        asked: dict[tuple, list] = {}
+        found: list = []
+        said: list = []
+        for block in _played(task, plan):
+            drawn = in_force(task, block)
+            for condition in block.conditions:
+                values = {**start, **condition.values}
+                for name, (draw, _) in {**drawn, **own_ranges(condition)}.items():
+                    ends = extremes(draw, declared.get(name), direction=name in turned)
+                    if ends:
+                        values[name] = (min(ends), max(ends)) if len(ends) > 1 else ends[0]
+                staircase = block.staircase
+                if staircase is not None:
+                    levels = [level for level in _staircase_levels(staircase, declared)
+                              if isinstance(level, (int, float)) and not isinstance(level, bool)
+                              and math.isfinite(level)]
+                    if levels:
+                        values[staircase.setting] = (min(levels), max(levels))
+                key = tuple(sorted((name, repr(value)) for name, value in values.items()))
+                if key not in asked:
+                    asked[key] = check_laid_out(task, values, allocation=allocation,
+                                                geometry=geometry, calibration=calibration,
+                                                deployment=deployment)
+                where = ("the plain run" if plan is None else
+                         f"plan {plan!r}, block {block.name!r}, condition {condition.name!r}")
+                for finding in asked[key]:
+                    if finding in said:
+                        continue
+                    said.append(finding)
+                    found.append(dataclasses.replace(finding, detail=f"in {where}: "
+                                                                     f"{finding.detail}"))
+        return found
+    except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
+        return [Finding("stimulus-off-screen", (
+            f"the layout at the run's values could not be judged ({type(broken).__name__}: "
+            f"{broken}), so whether a stimulus leaves the field is unknown"))]
 
 
 def _played(task: Task, plan: str | None) -> list[Block]:

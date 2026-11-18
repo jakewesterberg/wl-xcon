@@ -27,6 +27,7 @@ from _rig import RIG, naming
 from _sessions import OPEN_ACCEPTED, WALL, cue_task, malformed_task, planned_task, typed
 from _zmq_release import _every_zmq_context_released  # noqa: F401
 from wl_xcon import preflight, resume, stranded, warnlist
+from wl_xcon.check import UNEXPLAINED_LIMIT
 from wl_xcon.actor import Box
 from wl_xcon.cli import _load_allocation, _load_rig, main
 from wl_xcon.bounds import Exceeded
@@ -1588,7 +1589,12 @@ def test_the_search_task_runs_on_the_default_and_records_the_light_the_panel_sho
     # (the warnings-over-refusals review's M8): the search task's red and green.
     (clipped,) = [r["detail"] for r in rows if r["code"] == "unrealizable-color"]
     assert clipped.count(" ask for DKL(") == 2 and clipped.count("so the panel shows x=") == 2
-    assert len(items["warnings"].said) < 3_000, "5,392 with one per light and per isoluminant color"
+    # Less the reference task's builder's ranges, each a limit with no reason, which the console
+    # settings plan's Task 4 warns of until its Task 5 takes them away (`unexplained-limit`).
+    unexplained = sum(len(f"{UNEXPLAINED_LIMIT}: {r['detail']}; ") for r in rows
+                      if r["code"] == UNEXPLAINED_LIMIT)
+    assert len(items["warnings"].said) - unexplained < 3_000, (
+        "5,392 with one per light and per isoluminant color")
 
 
 def _narrow(service) -> str:
@@ -1640,25 +1646,33 @@ def test_a_stereoscope_session_runs_on_its_settings_warnings_once_they_are_accep
 def test_a_starting_value_outside_its_range_starts_with_a_warning_unless_it_breaks_the_run(tmp_path):
     """XC-352's D2 (the PI, 2026-10-11: "re-run the load-time checks with the range widened to the
     new value; accept with a warning that the task was not designed for it if nothing breaks;
-    refuse only what would break the run"): a fixation window of 7° (declared 0.5-5°) asks for its
-    warning and starts once accepted, `warnings.jsonl` recording it; a target at 40° (declared
-    ±16°) is off direct view's screen, and the start is refused, saying so."""
+    refuse only what would break the run") started a fixation window of 7° (declared 0.5-5°) once
+    its warning was accepted. **Since the console settings plan's Task 4 every declared bound is
+    hard** (the PI, 2026-11-16, "Hard limits only where impossible"): the 7° window and a target
+    at 40° (declared ±16°, off direct view's screen too) each fail the starting values as past
+    the limit, saying so, and neither run starts. Inside its range the window starts, its layout
+    judged at the run's values (`preflight.laid_out`), nothing warned of it."""
     service = _service(tmp_path)
     _step(service, _open())
 
     off = _step(service, _start(values={**VALUES, "target_x": 40.0}))
     wide = _step(service, CheckRun(by=BY, task=TASK, values={**VALUES, "fix_window": 7.0}))
-    started = _step(service, _start(values={**VALUES, "fix_window": 7.0}))
+    refused = _step(service, _start(values={**VALUES, "fix_window": 7.0}))
+    started = _step(service, _start(values={**VALUES, "fix_window": 4.0}))
 
-    assert off.run_index is None
-    assert ("starting values: stimulus-off-screen: with 'target_x' at 40, outside its declared "
-            "range: ") in _refused(off)[-1]
+    assert off.run_index is None and refused.run_index is None
+    assert ("starting values: past-limit: 'target_x' at 40 deg is above its 16: ") in (
+        _refused(off)[-1])
+    assert "stimulus-off-screen: with 'target_x' at 40, outside its declared range: " in (
+        _refused(off)[-1])
     items = {i.name: i for i in wide.preflight.items}
-    assert items["starting values"].result == "pass" and items["warnings"].result == "unknown"
-    assert "outside-range: 'fix_window' is 7 deg, outside the [0.5, 5.0]" in items["warnings"].said
+    assert items["starting values"].result == "fail"
+    assert items["starting values"].said == (
+        "past-limit: 'fix_window' at 7 deg is above its 5: the task gives no reason for this "
+        "limit (unexplained-limit)")
     assert started.run_index == 0
     rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
-    assert [r["how"] for r in rows if r["code"] == "outside-range"] == ["start"]
+    assert not [r for r in rows if r["code"] in ("outside-range", "past-limit")]
 
 
 def test_a_task_whose_declarations_are_malformed_fails_its_preflight_and_the_service_goes_on(
@@ -1869,8 +1883,12 @@ def test_the_unknowns_are_acknowledged_once_a_session(tmp_path):
         assert (second[name]["acknowledged_by"], second[name]["carried"]) == (BY_MAP, True), name
     assert second["warnings"]["result"] == "pass"
     rows = _jsonl(service.root / "2027-01-14_01" / "xcon" / "warnings.jsonl")
-    assert [(r["code"], r["run"]) for r in rows if r["how"] == "start"] == [
+    # The reference task's limits with no reason left out (`unexplained-limit`; the console
+    # settings plan's Task 4, until its Task 5): each accepted at the first start alike.
+    assert [(r["code"], r["run"]) for r in rows if r["how"] == "start"
+            and r["code"] != UNEXPLAINED_LIMIT] == [
         ("contrast-on-default", 0), ("pump calibration", 0), ("eye tracker", 0)]
+    assert {r["run"] for r in rows if r["code"] == UNEXPLAINED_LIMIT} == {0}
 
 
 def test_a_recording_session_on_the_default_runs_once_its_warnings_are_accepted(tmp_path):
@@ -2102,14 +2120,19 @@ def test_every_warning_a_start_accepts_is_named_in_the_item_it_accepted(tmp_path
 
     item = {i.name: i for i in service.session.preflight.items}["warnings"]
     accepted = service._starting[3]
-    assert [e.code for e in accepted] == [
+    # The task's limits with no reason, after its own warnings (`unexplained-limit`; the console
+    # settings plan's Task 4, until its Task 5), named once in the item's head with their count.
+    unexplained = [e for e in accepted if e.code == UNEXPLAINED_LIMIT]
+    assert unexplained and [e.code for e in accepted if e.code != UNEXPLAINED_LIMIT] == [
         "default calibration", "color-on-default", "contrast-on-default", "pump calibration", "eye tracker"]
-    owed = accepted[:3]
-    before = f"{len(owed)} not yet accepted this session: {warnlist.sentence(owed)}"
+    first = accepted[:3]
+    before = f"{len(first)} not yet accepted this session: {warnlist.sentence(first)}"
     assert before.index("contrast-on-default:") > NOTE_LIMIT, "past the cut before this fix"
+    owed = [e for e in accepted if e.code not in ("pump calibration", "eye tracker")]
     assert item.said == (
-        "3 not yet accepted this session (default calibration, color-on-default, "
-        f"contrast-on-default): {warnlist.sentence(owed)}"
+        f"{len(owed)} not yet accepted this session (default calibration, color-on-default, "
+        f"contrast-on-default, unexplained-limit ×{len(unexplained)}): "
+        f"{warnlist.sentence(owed)}"
     ), "each shown whole (XC-353)"
 
 

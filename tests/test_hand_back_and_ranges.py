@@ -508,13 +508,14 @@ def test_a_conditions_own_range_a_weighted_set_a_list_a_direction_and_a_setting_
         ("target_window", "task"), ("target_x", "task"), ("target_y", "task"))}
 
 
-def test_a_live_range_past_its_declared_range_is_warned_or_refused_as_a_value_is(tmp_path):
+def test_a_live_range_past_its_declared_range_is_refused_as_a_value_is(tmp_path):
     """TSK-51 and the C3 spec §6 ("numbers outside the declared range are re-checked widened, as a
     value is"): each extreme of a new range outside its setting's declared range is checked as a
-    typed value outside it is (`Session._beyond_range`). `visual_search`'s ring drawn from 3°,
-    below its 5°, crowds its 12 objects: refused, saying why, and nothing of it written. A
-    fixation hold drawn up to 2.5 s, past its 2 s, breaks nothing: the range applies, its warning
-    accepted by who sent it and said on the feed."""
+    typed value outside it is (`Session._beyond_range`). **Since the console settings plan's Task
+    4 every declared bound is hard**: `visual_search`'s ring drawn from 3°, below its 5°, and a
+    fixation hold drawn up to 2.5 s, past its 2 s, are each refused as past its limit, saying
+    the limit, nothing of either written and no warning accepted; the trials run on the block's
+    own draws."""
     blocks = [Block("drawn", [Condition("any", {}, target=4)],
                     draws={"array_eccentricity": Uniform(6.0, 9.0, repeat=FRESH),
                            "fix_hold": Uniform(0.2, 0.4, repeat=FRESH)})]
@@ -525,26 +526,24 @@ def test_a_live_range_past_its_declared_range_is_warned_or_refused_as_a_value_is
 
     session.run()
 
-    assert session.refusals == [("array_eccentricity", JAKE, (
-        "the range of 'array_eccentricity' is not changed: 'array_eccentricity' at 3 is outside "
-        "its declared range, and with the range widened to it the load-time checks refuse it: "
-        "crowded-array: with 'array_eccentricity' at 3, outside its declared range: array "
-        "'search' can put 12 objects on a 3° ring, 1.55° apart, with windows of 1° radius; "
-        "adjacent objects would overlap and a saccade to one would be scored against another; the "
-        "previous value stands"))]
-    warned = ("'fix_hold' is 2.5 s, outside the [0.05, 2.0] the task declares, so the task was "
-              "not designed for it: its load-time checks were proved only over its declared "
-              "range, and were run again with the range widened to 2.5")
-    assert [(row["code"], row["by"], row["detail"]) for row in
-            _rows(session, "warnings.jsonl")] == [("outside-range", BY, warned)]
-    assert _fed(session, "warning") == [("warning", JAKE, f"outside-range: {warned}")]
-    (row,) = _changes(session)
-    assert (row["kind"], row["block"], row["now"]) == (
-        "range", "drawn", variation.recorded(Uniform(0.2, 2.5, repeat=FRESH)))
+    unexplained = "the task gives no reason for this limit (unexplained-limit)"
+    assert session.refusals == [
+        ("array_eccentricity", JAKE, (
+            f"the range of 'array_eccentricity' is not changed: 'array_eccentricity' at 3 is "
+            f"refused, and the previous value stands: past-limit: 'array_eccentricity' at 3 deg is "
+            f"below its 5: {unexplained}")),
+        ("fix_hold", JAKE, (
+            f"the range of 'fix_hold' is not changed: 'fix_hold' at 2.5 is refused, and the "
+            f"previous value stands: past-limit: 'fix_hold' at 2.5 s is above its 2: "
+            f"{unexplained}"))]
+    written = session.directory / "warnings.jsonl"
+    assert not [row for row in (_rows(session, "warnings.jsonl") if written.exists() else [])
+                if "fix_hold" in row["detail"] or "array_eccentricity" in row["detail"]]
+    assert _changes(session) == []
     lines = _lines(session)
     assert len(lines) > 2 and all(
-        line["drawn"] == {"array_eccentricity": "block", "fix_hold": 1}
-        and 0.2 <= line["params"]["fix_hold"] <= 2.5 for line in lines[2:])
+        line["drawn"] == {"array_eccentricity": "block", "fix_hold": "block"}
+        and 6.0 <= line["params"]["array_eccentricity"] <= 9.0 for line in lines)
 
 
 def test_an_impossible_hand_back_or_range_is_refused_and_leaves_no_warning_written(tmp_path):
@@ -806,35 +805,44 @@ def test_a_change_offered_after_a_pending_hand_back_or_range_is_judged_over_it(t
     assert session._ranges == {task_key: (Uniform(0.1, 0.3, repeat=FRESH), 3)}
 
 
-def test_a_value_outside_its_range_offered_after_a_pending_range_is_checked_with_its_extremes(
-        tmp_path):
+def test_a_value_offered_after_a_pending_range_is_judged_with_its_extremes(tmp_path):
     """The C3 spec §11 ("Live, `Session._beyond_range` learns conditions and draws"), across one
-    drain: a range offered and not yet applied is in force for a value offered after it. Block
-    `drawn` draws `visual_search`'s ring from 6° to 9°; a person widens it to 4°, below its
-    declared 5° (warned: six objects fit there), then asks for 13 objects, past the 12 the task
-    declares. 13 fit on the 8° ring and on the 6° to 9° declared, not on the 4° the range just
-    offered reaches, so they are refused, naming the range's extreme."""
+    drain: a range offered and not yet applied is in force for a value offered after it. **Since
+    the console settings plan's Task 4** the layout is judged at what the run will hold after a
+    change (`Session._laid_out`), so this runs `visual_search` with its set size declared to 20
+    and its ring from 0°, its object windows 1°. Block `drawn` draws the ring from 6° to 9°; a
+    person widens it to 4° (six objects fit there), then asks for 13 objects. 13 fit on the 6° to
+    9° declared, not on the 4° the range just offered reaches: staged, with the crowding warned at
+    the range's least end, naming the block, accepted by who sent it."""
+    path = tmp_path / "wide_search.py"
+    text = Path("tasks/visual_search.py").read_text()
+    for old, new in (
+            ('Param("set_size", unit="objects", low=2, high=12)',
+             'Param("set_size", unit="objects", low=2, high=20, why="a stand-in for its places")'),
+            ('Param("array_eccentricity", unit="deg", low=5.0, high=14.0)',
+             'Param("array_eccentricity", unit="deg", low=0.0, high=14.0)')):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text)
     blocks = [Block("drawn", [Condition("any", {}, target=4)],
                     draws={"array_eccentricity": Uniform(6.0, 9.0, repeat=FRESH)})]
     link = _Drained({2: [SetRange(name="array_eccentricity", numbers={"low": 4.0}, by=JAKE),
                          SetParameter(name="set_size", value=13, by=JAKE)]})
-    session = _session(_spec(tmp_path, "tasks/visual_search.py", blocks=blocks,
-                             values=dict(SEARCHED)), link, world=None)
+    session = _session(_spec(tmp_path, str(path), blocks=blocks,
+                             values={**SEARCHED, "object_window": 1.0}), link, world=None)
 
     session.run()
 
-    (refusal,) = session.refusals
-    assert refusal[:2] == ("set_size", JAKE)
-    assert refusal[2].startswith("'set_size' at 13 is outside its declared range, and with the "
-                                 "range widened to it the load-time checks refuse it: "
-                                 "crowded-array: ")
-    assert refusal[2].endswith(" (on the trials of block 'drawn', condition 'any', block "
-                               "'drawn''s draw of 'array_eccentricity' at 4); the previous value "
-                               "stands")
-    assert [row["code"] for row in _rows(session, "warnings.jsonl")] == ["outside-range"]
+    assert session.refusals == []
+    (crowded,) = [row for row in _rows(session, "warnings.jsonl") if row["code"] == "crowded-array"]
+    assert (crowded["by"], crowded["how"]) == (BY, "set")
+    assert crowded["detail"].startswith(
+        "array 'search' can put 13 objects ('set_size') on a 4° ring ('array_eccentricity'), "
+        "1.91° apart")
+    assert crowded["detail"].endswith("(on the trials of block 'drawn', condition 'any')")
     assert [(row["kind"], row["name"]) for row in _changes(session)] == [
-        ("range", "array_eccentricity")]
-    assert session.spec.values["set_size"] == 6
+        ("range", "array_eccentricity"), ("set", "set_size")]
+    assert session.spec.values["set_size"] == 13
 
 
 def test_neither_a_hand_back_nor_a_range_touches_a_reward_size(tmp_path):
@@ -966,36 +974,54 @@ def _windows(folder: Path) -> Path:
          '                On(Exited("fix"), Outcome.FIXATION_BREAK),'))
 
 
-def test_a_hand_back_to_a_run_value_outside_its_range_is_checked_with_the_ranges_widened_since(
+def test_a_hand_back_is_judged_by_the_layout_it_leaves_with_the_ranges_widened_since(
         tmp_path):
-    """The plan's engineering review, I-3: a run given `fix_window` 4°, outside its declared 3° --
-    widened alone it overlaps nothing, so it is only warned -- is held at 1° by a person, who then
-    widens the target window's draw to 4.9° (checked widened with the held 1°, it breaks nothing)
-    and hands `fix_window` back. The run's 4° beside a 4.9° window overlaps, which the widened
-    load checks refuse for a typed value: so the hand-back is checked as one is (`_beyond_range`),
-    refused at once, and 1° stands. With no range widened, the same hand-back applies."""
-    def run(name: str, script: dict) -> Session:
+    """The plan's engineering review, I-3: a hand-back to the run's own value is checked as a
+    typed value is. A run given `fix_window` 4° is held at 1° by a person, who then widens the
+    target window's draw to 6.5° and hands `fix_window` back. **Since the console settings plan's
+    Task 4** every declared bound is hard and the layout is judged at what a change leaves
+    (`Session._laid_out`): with the two windows' ranges left open, the run's 4° beside a 6.5°
+    window 10° out overlaps, which is a warning (XC-352's A8), so the hand-back applies, the
+    warning accepted by who handed it back; with no range widened the same hand-back says nothing.
+    And where the fixation window declares 3° at most, the run's 4° is past it, so the hand-back
+    is refused as past its limit (`_beyond_range`), and 1° stands."""
+    def run(name: str, script: dict, *, open_windows: bool = True) -> Session:
         where = tmp_path / name
         path = _windows(where)
+        if open_windows:
+            _edited(path,
+                    ('        Param("fix_window", unit="deg", low=0.5, high=3.0, start=2.0),',
+                     '        Param("fix_window", unit="deg", low=0.0, start=2.0),'),
+                    ('        Param("target_window", unit="deg", low=0.5, high=3.0, start=3.0),',
+                     '        Param("target_window", unit="deg", low=0.0, start=3.0),'))
         session = _session(_spec(where, path, trials=6), _Drained(script))
         session.run(RunSpec(task=str(path), trials=6, seed=SEED,
                             values={"target_appearance": None, "fix_window": 4.0}))
         return session
 
     widened = run("widened", {1: [SetParameter("fix_window", 1.0, JAKE)],
-                              2: [SetRange("target_window", {"high": 4.9}, JAKE)],
+                              2: [SetRange("target_window", {"high": 6.5}, JAKE)],
                               3: [HandBack("fix_window", JAKE)]})
-    (why,) = [why for name, _, why in widened.refusals if name == "fix_window"]
-    assert why.startswith(
-        "'fix_window' is not handed back: 'fix_window' at 4 is outside its declared range, and "
-        "with the range widened to it the load-time checks refuse it: overlapping-windows"), why
-    assert [row["kind"] for row in _changes(widened)] == ["set", "range"]
-    assert [line["params"]["fix_window"] for line in _lines(widened)] == [4.0] + [1.0] * 5
+    assert widened.refusals == []
+    (overlap,) = [row for row in _rows(widened, "warnings.jsonl")
+                  if row["code"] == "overlapping-windows"]
+    assert overlap["by"] == BY and "scores 'target' and 'fix'" in overlap["detail"]
+    assert [row["kind"] for row in _changes(widened)] == ["set", "range", "hand_back"]
+    assert [line["params"]["fix_window"] for line in _lines(widened)] == [4.0, 1.0, 1.0, 4.0,
+                                                                           4.0, 4.0]
     plain = run("plain", {1: [SetParameter("fix_window", 1.0, JAKE)],
                           3: [HandBack("fix_window", JAKE)]})
     assert plain.refusals == []
+    assert not [row for row in _rows(plain, "warnings.jsonl")
+                if row["code"] == "overlapping-windows"]
     assert [line["params"]["fix_window"] for line in _lines(plain)] == [4.0, 1.0, 1.0, 4.0, 4.0,
                                                                          4.0]
+    capped = run("capped", {1: [SetParameter("fix_window", 1.0, JAKE)],
+                            3: [HandBack("fix_window", JAKE)]}, open_windows=False)
+    (why,) = [why for name, _, why in capped.refusals if name == "fix_window"]
+    assert why.startswith("'fix_window' is not handed back: 'fix_window' at 4 is refused, and the "
+                          "previous value stands: past-limit: 'fix_window' at 4 deg is above its 3")
+    assert [line["params"]["fix_window"] for line in _lines(capped)] == [4.0] + [1.0] * 5
 
 
 def test_a_hand_back_applied_as_the_plan_moves_on_says_what_takes_the_setting_there(tmp_path):

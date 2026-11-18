@@ -50,8 +50,9 @@ from wl_xcon import variation
 from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
-    IMPOSSIBLE, _outside, _whole_numbers, answer_reaches, beyond_range, check_task, impossible,
-    margin_reaches, start_at, undrawable, unplaced, unpooled, unshowable, unstarted,
+    IMPOSSIBLE, PAST_LIMIT, _among, _outside, _staircase_levels, _whole_numbers,
+    beyond_range, check_task, impossible, laid_out, margin_reaches, start_at, undrawable, unplaced,
+    unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -94,7 +95,7 @@ from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, Outcome, P, Param, Plan, SaccadeTo,
     Staircase,
-    Task, Trial, at_hardest, staircase_verdict,
+    Task, Trial, at_hardest, limit_reason, staircase_verdict,
 )
 from wl_xcon.task import (
     EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, Background, Distribution,
@@ -2071,7 +2072,13 @@ class Session:
         self._staged.append((name, self.spec.values.get(name), value, by, False))
 
     def _beyond_range(self, name: str, value: float, by: Actor) -> None:
-        """**A live value outside its setting's declared range** (the PI, 2026-10-11, XC-352's D2:
+        """**Since the console settings plan's Task 4 every declared bound is a hard limit** (the
+        PI, 2026-11-16, "Hard limits only where impossible"): a value past one is refused here
+        first, `past-limit`, saying the limit's reason, and nothing it would warn of is accepted;
+        what follows below, the widened checks of XC-352's D2, runs only behind that refusal
+        (XC-516).
+
+        **A live value outside its setting's declared range** (the PI, 2026-10-11, XC-352's D2:
         "re-run the load-time checks with the range widened to the new value; accept with a
         warning that the task was not designed for it if nothing breaks; refuse only what would
         break the run (off screen, windows colliding, colors unmakeable), saying what"). The run's
@@ -2112,6 +2119,13 @@ class Session:
                 f"could not be run again with the range widened ({type(broken).__name__}: "
                 f"{broken}), so it is refused and the previous value stands"
             ) from broken
+        past = [f for f in found if f.code == PAST_LIMIT]
+        if past:
+            # **A hard limit** (the console settings design's §4; the PI, 2026-11-16, "Hard
+            # limits only where impossible"): refused with the limit's reason, nothing accepted.
+            raise Exceeded(
+                f"{name!r} at {value:g} is refused, and the previous value stands: "
+                + "; ".join(f"{f.code}: {f.detail}" for f in past))
         refusing = [f for f in found if f.refuses(self.spec.session_kind)]
         if refusing:
             raise Exceeded(
@@ -2289,7 +2303,7 @@ class Session:
             return (f"the check for trials no animal can get right could not be run "
                     f"({type(broken).__name__}: {broken})")
 
-    def _impossible(self, name: str, value: object) -> None:
+    def _impossible(self, name: str, value: object, by: Actor | None = None) -> None:
         """**The live refusal of a value no animal can get right with** (engine build C3's spec §9;
         the PI, 2026-10-30, Q10, "Refuse in file and live"). `_command`'s one line ahead of `set`
         calls it with the value a console offers (the C3 spec's §14 item 2, approved for the
@@ -2308,7 +2322,12 @@ class Session:
         `OverflowError` here as it does in `set`, and ends the session as a fault, as it did
         before this line. A check that raises refuses the value (`_possible`). Run between trials,
         as the command is drained, never in a frame. Not welfare-critical: the line calling it
-        is."""
+        is.
+
+        **And the layout at what it leaves** (`_laid_out`; the console settings design's §4), a value
+        inside its declared range: one off the field is refused here, and the warnings it newly
+        gives are accepted by `by`, who sent it, and said on the feed. A value past a bound is
+        left to `set`, which refuses it (`past-limit`), so it writes no warning here."""
         if name in self.spec.bounds.ceilings:
             return
         declared = self._params().get(name)
@@ -2336,9 +2355,160 @@ class Session:
                 raise Exceeded(f"{name!r} at {value:g} is refused, and the previous value stands: "
                                f"{dark[0][1]}")
         why = self._possible({name: value})
+        said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
         if why is not None:
-            said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
             raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: {why}")
+        if declared.choices or not _outside(declared, value):
+            try:
+                self._laid_out({name: value}, by=by)
+            except Exceeded as refused:
+                raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: "
+                               f"{refused}") from refused
+
+    def _laid_out(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
+                  ranges: dict | None = None, forms: dict | None = None, shaping=None,
+                  by: Actor | None) -> None:
+        """**The layout at what the run will hold after a change** (the console settings design's
+        §4: "warnings come from the layout actually set, recomputed whenever a value changes"; the
+        plan's Review Focus 3), composed as `_possible` composes it -- what all offered ahead of it
+        leaves (`_ahead`), with `changed` values a person holds, `handed` names handed back,
+        `ranges` draws changed by key and `forms` a person's draws -- and judged by the layout
+        checks (`check.laid_out`) for each block and condition of the run's plan and each draw's,
+        staircase's and person's draw's two ends (`_layouts`). **Compared with the layout at the
+        values in force** (`_laid`, made once for each boundary that applies a change): **a new
+        finding that refuses this session's kind** -- a stimulus off the field -- **is `Exceeded`**,
+        naming it, so the change is refused with the sentence and nothing staged; **each new
+        warning is accepted by `by`** (`accept(..., how="set")`, `warnings.jsonl`, once each) and
+        said on the changes feed. New is a finding met at no value in force, about something new
+        (`check._among`): a raised set size that crowds the array is new, lowering it again is not.
+
+        Called from `_impossible` (a value, ahead of `set`), `_range`, `_form`, `_hand_back` and
+        `_revert`, each after `_possible` passes, so a change refused as impossible writes no
+        layout warning; the console settings plan's Tasks 7 and 10 call it too. `shaping` is Task
+        10's (the three-position switch), which no caller passes before it is built; one given now
+        is refused. **Nothing but `Exceeded` leaves here**: a check that raises, or a warning that
+        cannot be written, refuses the change. Between trials, never in a frame. Not
+        welfare-critical: no reward size is a task setting, so none is laid out."""
+        if self._task is None:
+            return
+        try:
+            if shaping is not None:
+                # Waits on the console settings plan's Task 10 (`Shaping`), which composes it.
+                raise Exceeded("a shaping switch is not built yet (the console settings plan's "
+                               "Task 10)")
+            if self._laid is None:
+                self._laid = self._layouts(
+                    dict(self.spec.values), set(self._edited),
+                    {key: draw for key, (draw, _) in self._ranges.items()}, dict(self._forms))
+            values, held, drawn, formed = self._ahead()
+            for name in handed:
+                held.discard(name)
+                formed.pop(name, None)
+                if name in self._run_values:
+                    values[name] = self._run_values[name]
+                else:
+                    values.pop(name, None)
+            for name, value in (changed or {}).items():
+                values[name] = value
+                held.add(name)
+                formed.pop(name, None)
+            for name, form in (forms or {}).items():
+                formed[name] = form
+                held.discard(name)
+            drawn.update(ranges or {})
+            found = self._layouts(values, held, drawn, formed)
+            known = {(finding.code, subject) for finding in self._laid
+                     for subject in finding.subjects}
+            new = [finding for finding in found if not _among(finding, self._laid)
+                   and (not finding.subjects
+                        or any((finding.code, subject) not in known
+                               for subject in finding.subjects))]
+        except Exceeded:
+            raise
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            raise Exceeded(f"the layout it leaves could not be judged ({type(broken).__name__}: "
+                           f"{broken})") from broken
+        refusing = [finding for finding in new if finding.refuses(self.spec.session_kind)]
+        if refusing:
+            raise Exceeded("the layout it leaves refuses it: " + "; ".join(
+                f"{finding.code}: {finding.detail}" for finding in refusing))
+        if not new:
+            return
+        try:
+            entries = of_findings(new)
+            fresh = [entry for entry in entries if entry.key not in self._warnings]
+            self.accept(entries, by=by, how="set", run=self.run_index)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            raise Exceeded(f"the layout's warning could not be recorded "
+                           f"({type(broken).__name__}: {broken})") from broken
+        at = self.wall_now()
+        for entry in fresh:
+            self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
+
+    def _layouts(self, values: dict, held: set, drawn: dict, formed: dict) -> list:
+        """**The layout's findings over what a run holds** (`_laid_out`): `values` with, for each
+        block and condition of the run's plan (`_played`; the session's own values alone before a
+        run has one), its condition's values over them but where a person holds the setting or
+        draws it (`held`, `formed`), and each setting a draw gives judged over its two ends
+        (`variation.extremes`, a `(least, most)` span the checks reason over whole,
+        `check.at_values`): the block's own draw or the task's, or the condition's own range, each
+        as `drawn` changed it (`None` restoring the one declared); the block's staircase's levels
+        (`check._staircase_levels`); and a person's draw (`formed`), which beats them all. **Once per
+        distinct set of values**; a finding met in several places is listed once, naming the
+        first. Before a run has a plan, the session's own values alone, naming none."""
+        task, declared = self._task, self._declared
+        turned = variation.directions(task)
+
+        def span(form, name: str):
+            ends = variation.extremes(form, declared.get(name), direction=name in turned)
+            return None if not ends else (min(ends), max(ends)) if len(ends) > 1 else ends[0]
+
+        base = dict(values)
+        for name, form in formed.items():
+            at = span(form, name)
+            if at is not None:
+                base[name] = at
+        # The session's own values alone before a run has a plan; a run's trials each hold their
+        # block's and condition's, so the places are those.
+        places: list[tuple[dict, str]] = [(base, "")] if self._played is None else []
+        for block in (self._played.blocks if self._played is not None else ()):
+            draws = variation.in_force(task, block)
+            staircase = block.staircase
+            for condition in block.conditions:
+                given = {**base, **{n: v for n, v in condition.values.items()
+                                    if n not in held and n not in formed}}
+                for name, (draw, key) in {**draws, **variation.own_ranges(condition)}.items():
+                    if name in held or name in formed:
+                        continue
+                    changed = drawn.get(key)
+                    at = span(draw if changed is None else changed, name)
+                    if at is not None:
+                        given[name] = at
+                if (staircase is not None and staircase.setting not in held
+                        and staircase.setting not in formed):
+                    levels = [level for level in _staircase_levels(staircase, declared)
+                              if isinstance(level, (int, float)) and not isinstance(level, bool)
+                              and math.isfinite(level)]
+                    if levels:
+                        given[staircase.setting] = (min(levels), max(levels))
+                places.append((given, f"block {block.name!r}, condition {condition.name!r}"))
+        asked: dict = {}
+        found: list = []
+        for these, where in places:
+            key = tuple(sorted((name, repr(value)) for name, value in these.items()))
+            if key in asked:
+                continue
+            asked[key] = True
+            for finding in laid_out(task, these, allocation=self.allocation,
+                                    geometry=self.spec.geometry,
+                                    calibration=self.spec.calibration,
+                                    deployment=self.spec.deployment):
+                if any(_among(finding, [one]) for one, _ in found):
+                    continue
+                found.append((finding, where))
+        return [finding if not where else dataclasses.replace(
+                    finding, detail=f"{finding.detail} (on the trials of {where})")
+                for finding, where in found]
 
     def _offered(self) -> list:
         """**Every change offered and not yet applied, in the order offered**: each value staged
@@ -2563,7 +2733,7 @@ class Session:
     @property
     def parameters(self) -> tuple:
         """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
-        choices, source, conditions, draw, numbers, switch, shape)` -- the shape `link.Telemetry.of`
+        choices, source, conditions, draw, numbers, switch, shape, profile, why)` -- the shape `link.Telemetry.of`
         builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it").
         `choices` is the setting's own, empty for a ceiling: they say whether a pair it holds is a
         position (schema 18, XC-401's fix round, M2; `review.declares_position`).
@@ -2626,11 +2796,16 @@ class Session:
                     shown = self._forms[p.name]
             if shape is not None:
                 profile = variation.profile(shown, p).as_dict()
+            # Why each limit it declares stands (the console settings design's §4: "each card says
+            # why"), the same between runs as in one.
+            why = (None if p.choices or (p.low is None and p.high is None)
+                   else {"low": limit_reason(p, "low"), "high": limit_reason(p, "high")})
             declared.append((p.name, p.unit, p.low, p.high, self.spec.values.get(p.name), False,
-                             p.choices, source, conditions, draw, numbers, switch, shape, profile))
+                             p.choices, source, conditions, draw, numbers, switch, shape, profile,
+                             why))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None, None)
+             None, None, None, None, None)
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
@@ -3691,9 +3866,9 @@ class Session:
         never held as a task setting, so a hand-back never reaches one -- a name the task does not
         declare, one no person holds nor draws once what is offered applies (`_ahead`), and one
         whose hand-back would leave trials no animal can get right (`_possible`; the C3 spec §9),
-        or whose run value, outside its declared range, the load-time checks refuse widened with
-        the ranges and values in force now, as a typed value's (`_beyond_range`; the C3 plan's
-        engineering review, I-3).
+        or whose run value is past a declared bound, a hard limit since the console settings
+        plan's Task 4 (`_beyond_range`: `past-limit`; the C3 plan's engineering review, I-3), or
+        whose layout refuses it, its new layout warnings otherwise accepted (`_laid_out`).
         **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
         outside `_command`'s listed `try`, so a check that raises refuses the hand-back, saying it
         could not be checked, and the session runs on. **It does not pass through `set`**: it
@@ -3720,6 +3895,8 @@ class Session:
                 # and the values held now, as a typed value would (the C3 plan's engineering
                 # review, I-3): it was checked widened only as the run started.
                 self._beyond_range(name, restored, command.by)
+            # And the layout it leaves (`_laid_out`; the console settings design's §4).
+            self._laid_out(handed=frozenset({name}), by=command.by)
             ended = formed.get(name)
             self._pending.append(Pending(
                 "hand_back", name,
@@ -3760,11 +3937,11 @@ class Session:
         - a weighted set or a prepared list (XC-443), and a number its kind does not change live
           (`variation.LIVE_NUMBERS`);
         - numbers that cannot be drawn (`check.undrawable`), that would leave trials no animal can
-          get right (`_possible`; the C3 spec §9), or whose extreme outside the setting's declared
-          range the load-time checks refuse widened to it, as a typed value's (`_beyond_range`),
-          whose warnings are otherwise accepted by who sent it and said. §9 is asked first, so a
-          range it refuses writes no warning; one refused at its second extreme keeps the first's
-          warning accepted, by `_beyond_range`'s rule.
+          get right (`_possible`; the C3 spec §9), or whose extreme is past a declared bound, a
+          hard limit since the console settings plan's Task 4 (`_beyond_range`: `past-limit`);
+        - numbers whose layout refuses them, a stimulus off the field at one of the draw's ends,
+          the new layout warnings otherwise accepted by who sent it and said (`_laid_out`). §9 is
+          asked first, so a range it refuses writes no warning.
 
         **It never raises** (the C3 plan's call 20; its review, I-1): it runs beside the pause,
         outside `_command`'s listed `try`, so a check that raises refuses the range, saying it
@@ -3825,6 +4002,9 @@ class Session:
             for end in variation.extremes(new, declared):
                 if _outside(declared, end):
                     self._beyond_range(name, end, command.by)
+            # And the layout it leaves, judged at both its ends (`_laid_out`; the console settings
+            # design's §4).
+            self._laid_out(ranges={key: new}, by=command.by)
             self._pending.append(Pending(
                 "range", name, was=variation.recorded(drawn, declared),
                 now=variation.recorded(new, declared), by=command.by, after=len(self._staged),
@@ -3863,10 +4043,11 @@ class Session:
           the card's fixed side;
         - a draw that would leave trials no animal can get right, judged at what it can give
           (`_possible`'s `forms`; the C3 spec §9);
-        - a draw whose extreme outside the setting's declared range the load-time checks refuse
-          widened to it, as a typed value's (`_beyond_range`, at each extreme, its warnings
-          otherwise accepted by who sent it; the console settings plan's Task 4 makes a hard limit
-          refuse there). §9 is asked first, so a draw it refuses writes no warning.
+        - a draw whose extreme is past a declared bound, a hard limit since the console settings
+          plan's Task 4 (`_beyond_range`, at each extreme: `past-limit`, saying its reason);
+        - a draw whose layout refuses it, a stimulus off the field at one of its ends, its new
+          layout warnings otherwise accepted by who sent it (`_laid_out`). §9 is asked first, so
+          a draw it refuses writes no warning.
 
         **It never raises** (the C3 plan's call 20): it runs beside the pause, outside `_command`'s
         listed `try`, so a check that raises refuses the draw, saying it could not be checked, and
@@ -3916,7 +4097,9 @@ class Session:
             for end in ends:
                 if _outside(declared, end):
                     self._beyond_range(name, end, command.by)
-            # The console settings plan's Task 4 adds the layout's judgment here (`_laid_out`).
+            # And the layout it leaves, judged at both its ends (`_laid_out`; the console settings
+            # design's §4).
+            self._laid_out(forms={name: form}, by=command.by)
             values, held, _, formed = self._ahead()
             before = formed.get(name)
             if before is not None:
@@ -4051,8 +4234,9 @@ class Session:
         number from 0 (the wire's rule again, as `_clear` meets its own); one made before the run
         started; one not made yet; a moment the run already holds, leaving nothing to revert; a
         revert that would leave trials no animal can get right (`_possible`, judging all of it at
-        once, before any value is set, so a revert refused for it writes no warning); and one any
-        of whose values `set` refuses. What it staged and offered is cut back to what was there
+        once, before any value is set, so a revert refused for it writes no warning); one whose
+        layout refuses it, judged whole at what it leaves (`_laid_out`, its new layout warnings
+        otherwise accepted); and one any of whose values `set` refuses. What it staged and offered is cut back to what was there
         before it (`_staged`, `_pending`; `_acts` is written only once all of it is accepted), and
         no change row is written. A warning `set` accepted (`_beyond_range`) for one of its values
         ahead of the refused one stays accepted, by that function's rule. **Its hand-backs and
@@ -4092,6 +4276,10 @@ class Session:
             why = self._possible(restored, handed=frozenset(handed), ranges=drawn, forms=formed)
             if why is not None:
                 raise Exceeded(why)
+            # And the layout it leaves, the whole revert at once (`_laid_out`; the console settings
+            # design's §4).
+            self._laid_out(restored, handed=frozenset(handed), ranges=drawn, forms=formed,
+                           by=command.by)
             self._act += 1
             act = self._act
             for name in handed:
@@ -4548,7 +4736,7 @@ class Session:
             )
             return
         try:
-            self._impossible(command.name, command.value)
+            self._impossible(command.name, command.value, by=command.by)
             self.set(command.name, command.value, by=command.by)
         # **Welfare-critical, this one line** (`docs/design/architecture.md`, like
         # `cli.main`'s `confirmed=` line): it makes a malformed setting a refusal
@@ -4769,15 +4957,18 @@ class Session:
         self._pending.clear()
         self._acts.clear()
         self._act_moments.clear()
+        # The values in force moved: the layout at them is made again when a change next asks.
+        self._laid = None
         self._warn_reach()
 
     def _warn_reach(self) -> None:
-        """**A value set live that puts an object inside the window whose exit starts the answer**
-        (`check.answer_reaches`; the re-review, I-2, a warning by the PI's "warnings over
-        refusals"), said on the changes feed as the change applies, between trials: judged at the
-        run's values now, each setting at its value alone, once each time it starts to reach --
-        a correct look there would end as no response, with no reward. The load warns of the
-        same over the declared ranges (`answer-window-reaches-objects`)."""
+        """**A margin that can reach a bar's count at the values set now** (`check.margin_reaches`;
+        the re-review 2, M-7), for the run's plan, said on the changes feed as the change applies,
+        between trials, once each time it starts to reach. **A window whose exit starts the answer
+        reaching the objects** (`check.answer_reaches`; the re-review, I-2) was said here too, at
+        the run's values as each change applied; since the console settings plan's Task 4 it is
+        one of the layout's warnings, judged and accepted as the change is offered, each block,
+        condition and draw's ends with it (`_laid_out`), so it is said there, once."""
         task = self._task
         if task is None:
             return
@@ -4790,11 +4981,6 @@ class Session:
             else:
                 params[name] = Param(name, param.unit, low=value, high=value)
         now = set()
-        for trial in task.structures.values():
-            now |= {f"answer-window-reaches-objects: at the values set now, {said}"
-                    for _, said in answer_reaches(trial, params)}
-        # And a margin that can reach a bar's count at the values set now (`check.margin_reaches`;
-        # the re-review 2, M-7), for the run's plan.
         plan = getattr(self, "_played", None)
         if plan is not None and self._run is not None and self._run.plan is not None:
             now |= {f"margin-reaches-bar: at the values set now, {said}"
@@ -5087,6 +5273,10 @@ class Session:
     _realized_at: frozenset = field(init=False, default=frozenset(), repr=False)
     #: The answer-window warnings standing at the run's values (`_warn_reach`), said once each.
     _reaching: frozenset = field(init=False, default=frozenset(), repr=False)
+    #: **The layout's findings at the values in force** (`_laid_out`; the console settings design's
+    #: §4), what a change's are compared with: kept for each boundary that applies a change, made
+    #: when a change first asks after it (`None` until then, and as each run starts).
+    _laid: list | None = field(init=False, default=None, repr=False)
     _climb_block: int | None = field(init=False, default=None, repr=False)
     #: **The stage the staircase in `_climb` belongs to, and each stage's staircase value as the
     #: run left it** (the PI, 2026-11-08, "Pick up where it left"; `_climbing`, `_resumed`), by
@@ -6130,6 +6320,7 @@ class Session:
         # Each color set's luminances realized and written in this run (`_realize`).
         self._lights, self._realized_at = color_set_lights(task), set()
         self._reaching = frozenset()
+        self._laid = None
         # Only a resumed session's first run may go on from the run its process stopped in.
         went_from, self._last_run = self._last_run, None
         # Nothing has varied in a block of this run yet, and no line is counted (engine build C3).

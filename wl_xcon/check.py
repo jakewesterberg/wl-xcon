@@ -111,6 +111,7 @@ from wl_xcon.task import (
     actions_of,
     array_actions,
     is_point,
+    limit_reason,
     rule_at,
 )
 from wl_xcon.variation import (
@@ -125,7 +126,12 @@ def check(
     components: Registry | None = None,
     geometry: Geometry | None = None,
     calibration: Calibration | None = None,
+    unstarted: frozenset[str] = frozenset(),
 ) -> list[Finding]:
+    """One structure's load-time checks. `unstarted` names the settings with an open side and no
+    start (`_at_start`), whose place is left to the run's start: check 8 says nothing of a place
+    one of them leaves unbounded (the console settings design's §4), and the run's pre-flight
+    judges it at the run's values (`preflight.laid_out`)."""
     # Every check but the placement refusal reads a placing setting's choices less `None`, which
     # that refusal says in its own sentence (`_valued`; XC-415).
     valued = _valued(trial)
@@ -139,7 +145,7 @@ def check(
         + _framework_codes(valued, allocation)
         + _undeclared_parameters(valued)
         + _custom_components(valued, components or Registry())
-        + _offscreen_stimuli(valued, geometry)
+        + _offscreen_stimuli(valued, geometry, unstarted)
         + _unallocated_outcomes(valued, allocation)
         + _undeclared_windows(valued)
         + _uncoupled_windows(valued)
@@ -156,6 +162,8 @@ def check(
         + _overlapping_windows(valued)
         + _unreachable_timeouts(valued)
         + _crowded_arrays(valued)
+        + _windows_inside_objects(valued)
+        + _objects_touch(valued)
         + _answer_windows_reach(valued)
         + _view_faults(valued, geometry)
         + _placement_faults(valued)
@@ -200,8 +208,19 @@ def check_task(
     # draws (the C3 plan's call 39).
     drawn = {(f"setting {name!r}",) for name in _drawn_directions(task)}
     findings: list[Finding] = []
-    for name, structure in task.structures.items():
-        for finding in check(structure, allocation, components, geometry, calibration):
+    # **An open side is judged at the setting's start** (the console settings design's §4: every
+    # limit that stays is hard, so a task leaves a side open where nothing cannot be), one with no
+    # start left to the run's (`_at_start`); the task's own checks read its declarations as written.
+    pinned, unstarted = _at_start(task)
+    for name, structure in pinned.structures.items():
+        found = check(structure, allocation, components, geometry, calibration, unstarted)
+        # **But a set size reads its declared highest**, which it must declare (the PI,
+        # 2026-10-14, "Refuse at load"; the console settings design's §4: "a set size past the
+        # array's places" is a limit that stands): held at its start, one with none would pass
+        # and a console could send a set size the run stalls building (the builder's call).
+        found += [finding for finding in _unbounded_set_sizes(_valued(task.structures[name]))
+                  if not _among(finding, found)]
+        for finding in found:
             if finding.code == "direction-outside-0-360" and finding.subjects in drawn:
                 continue
             findings.append(
@@ -213,6 +232,7 @@ def check_task(
     return (
         findings
         + _structure_faults(task)
+        + _unexplained_limits(task)
         + _meaning_faults(task)
         + _reaction_time_faults(task)
         + _choice_faults(task)
@@ -305,6 +325,13 @@ def _waits(task: Task) -> tuple[set[str], float]:
                     if param.choices:
                         offered = [_seconds(c) for c in param.choices if _is_number(c)]
                         longest = max([longest, *offered])
+                    elif _is_number(param.start) and param.high is None:
+                        # **A wait with no highest counts by its start** (the console settings
+                        # plan's Task 4; the planner's call): every limit that stays is hard
+                        # since the PI's 2026-11-16 ruling, so a wait sets its highest only where
+                        # a longer one cannot be, and the PI's 2026-10-12 warning compares a wait
+                        # with the longest the task's own starting values give.
+                        longest = max(longest, _seconds(param.start))
                     elif _is_number(param.high):
                         longest = max(longest, _seconds(param.high))
                     else:
@@ -326,14 +353,18 @@ def widened(task: Task, values) -> Task:
     outside its range (the PI, 2026-10-11, XC-352's D2). A setting with choices, a value that is
     no finite number, a name the task does not declare and a value inside its range leave its
     declaration as it is. A starting value stays: widening only extends a range, so the start
-    `Param` held inside it is inside it still."""
+    `Param` held inside it is inside it still. **A side left open is closed at the start** (or at
+    the value, with none), so the load's reading of an open range at its start (`_at_start`; the
+    console settings plan's Task 4) does not hold it there: the value is what is judged."""
     def wide(param: Param) -> Param:
         value = values.get(param.name)
         if not _outside(param, value):
             return param
         low = value if param.low is not None and value < param.low else param.low
         high = value if param.high is not None and value > param.high else param.high
-        return dataclasses.replace(param, low=low, high=high)
+        other = param.start if _finite(param.start) else value
+        return dataclasses.replace(param, low=min(value, other) if low is None else low,
+                                   high=max(value, other) if high is None else high)
 
     return dataclasses.replace(task, structures={
         name: dataclasses.replace(structure, params=[wide(p) for p in structure.params])
@@ -366,7 +397,10 @@ def beyond_range(
     made over (the checks "Reasoning over the whole parameter space" below), which proves a value
     inside them cannot break the task from the console and says nothing of one outside them, so
     the checks run again, widened to it, twice: at a run's start (`preflight.beyond`) and on a
-    live edit (`Session.set`)."""
+    live edit (`Session.set`). **Since the console settings plan's Task 4 every declared bound is
+    a hard limit** (the PI, 2026-11-16, "Hard limits only where impossible"): each value past one
+    is refused first, `past-limit`, blocking, saying the limit's reason; the widened checks follow
+    it, unchanged, and say nothing a person can act on (XC-516)."""
     declared = {param.name: param for param in task.params}
     outside = {name: value for name, value in values.items()
                if name in declared and _outside(declared[name], value)}
@@ -378,7 +412,12 @@ def beyond_range(
     # a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap it
     # names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`).
     waits, longest = _waits(task)
-    findings: list[Finding] = []
+    # **Every declared bound is a hard limit** (the console settings design's §4; the PI,
+    # 2026-11-16, "Hard limits only where impossible"): a value past one is refused first, saying
+    # the limit's reason (`task.limit_reason`), at a run's start (`preflight.beyond`) and live
+    # (`Session.set`, through `_beyond_range`), each by its existing path.
+    findings: list[Finding] = [_past_limit(declared[name], value)
+                               for name, value in outside.items()]
     said = ", ".join(f"{name!r} at {value:g}" for name, value in outside.items())
     for name, value in outside.items():
         param = declared[name]
@@ -393,12 +432,7 @@ def beyond_range(
             f"its load-time checks were proved only over its declared range, and were run again "
             f"with the range widened to {value:g}"), blocking=False, accepted_in=SESSION_KINDS))
         if name in waits and value > longest:
-            findings.append(Finding("longer-than-declared", (
-                f"{name!r} at {value:g} s is a wait longer than any the task declares (its "
-                f"longest, {longest:g} s), and a stop, a pause and the out-of-cage limit are heard "
-                f"only between trials: while a trial waits on {name!r} they go unheard until that "
-                f"trial ends, and {TRIAL_CAP} ends any trial still running then, with no outcome "
-                f"(a hang)"), blocking=False, accepted_in=SESSION_KINDS))
+            findings.append(_longer(name, value, longest))
     before = check_task(task, allocation, components, geometry, calibration, deployment)
     # What the declared task's findings are about (the warnings-over-refusals review's I5): a
     # finding of `BREAKS_A_RUN` about the same thing, only larger, was accepted with the task.
@@ -408,7 +442,10 @@ def beyond_range(
         # One the declared task gives, about the same things: equality leaves `subjects` out, and
         # a light a value newly asks for can be one the task's clip warning already says, word
         # for word (Task 10's review, I1).
-        if _among(finding, before) or not (finding.blocking or finding.is_warning):
+        if (_among(finding, before) or not (finding.blocking or finding.is_warning)
+                or finding.code == UNEXPLAINED_LIMIT):
+            # A limit with no reason is the declaration's, said at load, never the value's: the
+            # widened range only moves the bound it names.
             continue
         detail = f"with {said}, outside its declared range: {finding.detail}"
         new = [subject for subject in finding.subjects if (finding.code, subject) not in known]
@@ -430,6 +467,169 @@ def beyond_range(
                     f"with {said}, outside its declared range: {where}{finding.detail}")
             for finding in _overlapping_objects(structure, raised)
         ]
+    return findings
+
+
+#: **A value past a declared bound** (the console settings design's §4; the PI, 2026-11-16, "Hard
+#: limits only where impossible"): refused wherever it is offered, saying the limit's reason.
+PAST_LIMIT = "past-limit"
+
+#: **A bound declared with no reason** (§4: "each card says why for any limit that stays, in one
+#: line"): a warning at load, accepted in every kind, naming the setting and the bound, until the
+#: task gives the line (`Param.why`) or takes the limit away.
+UNEXPLAINED_LIMIT = "unexplained-limit"
+
+
+def _past_limit(param: Param, value: float) -> Finding:
+    """`PAST_LIMIT` for `value` past `param`'s bound, blocking: "'fix_hold' at -0.1 s is below its
+    0: below 0 cannot be", the reason `task.limit_reason`'s, or that the task gives none."""
+    low = param.low is not None and value < param.low
+    side, bound = ("low", param.low) if low else ("high", param.high)
+    why = limit_reason(param, side) or (
+        f"the task gives no reason for this limit ({UNEXPLAINED_LIMIT})")
+    unit = f" {param.unit}" if param.unit else ""
+    return Finding(PAST_LIMIT, (
+        f"{param.name!r} at {value:g}{unit} is {'below' if low else 'above'} its {bound:g}: {why}"))
+
+
+def _longer(name: str, value: float, longest: float) -> Finding:
+    """`longer-than-declared` for a wait setting at `value`, longer than the task's `longest`
+    (`_waits`; the PI, 2026-10-12: "Allow, with a warning"): stop, pause and the out-of-cage limit
+    are heard between trials, never inside one, until they are checked about once a second
+    inside a trial (WEL-11; engine spec §6.8; XC-373), when this sentence changes; the trial cap
+    it names is the longest trial, five minutes since engine build C2a (`TRIAL_CAP`)."""
+    return Finding("longer-than-declared", (
+        f"{name!r} at {value:g} s is a wait longer than any the task declares (its "
+        f"longest, {longest:g} s), and a stop, a pause and the out-of-cage limit are heard "
+        f"only between trials: while a trial waits on {name!r} they go unheard until that "
+        f"trial ends, and {TRIAL_CAP} ends any trial still running then, with no outcome "
+        f"(a hang)"), blocking=False, accepted_in=SESSION_KINDS)
+
+
+def _unexplained_limits(task: Task) -> list[Finding]:
+    """`UNEXPLAINED_LIMIT` for each setting declaring a bound that neither a standard reason nor
+    its own line explains (`task.limit_reason`): since every bound is hard (the console settings
+    design's §4), each says why or goes."""
+    findings: list[Finding] = []
+    for param in task.params:
+        if param.choices:
+            continue
+        sides = [(side, bound) for side, bound in (("low", param.low), ("high", param.high))
+                 if _finite(bound) and limit_reason(param, side) is None]
+        if not sides:
+            continue
+        said = " and ".join(f"its {'lowest' if side == 'low' else 'highest'}, {bound:g}"
+                            for side, bound in sides)
+        unit = f" {param.unit}" if param.unit else ""
+        findings.append(Finding(UNEXPLAINED_LIMIT, (
+            f"{param.name!r} declares {said}{unit}, with no reason: every limit is hard, a value "
+            f"past it refused (the PI, 2026-11-16, \"Hard limits only where impossible\"); give "
+            f"its reason in one line (`why`), or take it away"),
+            blocking=False, accepted_in=SESSION_KINDS, subjects=(f"setting {param.name!r}",)))
+    return findings
+
+
+def _at_start(task: Task) -> tuple[Task, frozenset[str]]:
+    """**`task` with each numeric setting whose range is open judged at its start** (the console
+    settings design's §4; the planner's call): a setting that leaves a side open declares no span
+    of values it was designed for -- the bound it keeps marks only where a value cannot be -- so
+    the load-time checks, which reason over the declared ranges, hold it at the value the run
+    begins with (`low = high = start`), and a change from there is judged again where it is made
+    (`laid_out`, `taskd.Session._laid_out`). Read over `[0, start]`, a ring's least would be 0 and
+    every array crowded at load, at a value no one set (the builder's call). A setting declaring
+    both bounds is read over them still. **A setting with an open side and no start is left to the
+    run's start**, named in the set returned: its place is judged at the run's values
+    (`preflight.laid_out`), and check 8 says nothing of it at load. Every structure alike."""
+    unstarted: set[str] = set()
+
+    def pinned(param: Param) -> Param:
+        if param.choices or (param.low is not None and param.high is not None):
+            return param
+        if not _finite(param.start):
+            unstarted.add(param.name)
+            return param
+        return dataclasses.replace(param, low=param.start, high=param.start)
+
+    held = dataclasses.replace(task, structures={
+        name: dataclasses.replace(structure, params=[pinned(p) for p in structure.params])
+        for name, structure in task.structures.items()
+    })
+    return held, frozenset(unstarted)
+
+
+def at_values(task: Task, values) -> Task:
+    """**`task` with each numeric setting `values` names pinned there** (the console settings
+    design's §4: "warnings come from the layout actually set"): a number pins the setting's range
+    and start to it, `low = high = start = value`; a `(least, most)` pair, a draw's or a
+    staircase's two ends, to that span, its start the least. A setting with choices, a name the
+    task does not declare and a value that is no finite number are left as declared. Every
+    structure alike; what the layout checks read at the values set (`laid_out`)."""
+    def pinned(param: Param) -> Param:
+        if param.choices or param.name not in values:
+            return param
+        value = values[param.name]
+        if isinstance(value, tuple) and len(value) == 2 and all(_finite(v) for v in value):
+            least, most = sorted(float(v) for v in value)
+            return dataclasses.replace(param, low=least, high=most, start=least)
+        if not _finite(value):
+            return param
+        return dataclasses.replace(param, low=value, high=value, start=value)
+
+    return dataclasses.replace(task, structures={
+        name: dataclasses.replace(structure, params=[pinned(p) for p in structure.params])
+        for name, structure in task.structures.items()
+    })
+
+
+#: **The layout checks** (the console settings design's §4: "warnings come from the layout actually
+#: set, recomputed whenever a value changes"): judged at the values set (`laid_out`) at a run's
+#: start (`preflight.laid_out`) and on every change (`taskd.Session._laid_out`), each finding
+#: compared with those at the values in force. Off the field refuses; the rest are warnings.
+LAYOUT = ("stimulus-off-screen", "overlapping-windows", "crowded-array",
+          "answer-window-reaches-objects", "window-inside-object", "objects-touch")
+
+
+def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
+             geometry: Geometry | None = None, calibration: Calibration | None = None,
+             deployment: Deployment | None = None) -> list[Finding]:
+    """**The layout checks at the values set** (`LAYOUT`; the console settings design's §4): each
+    structure's, on `task` with each setting `values` names pinned there (`at_values`: a number,
+    or a draw's or a staircase's `(least, most)`) and every other open side at its start
+    (`_at_start`), each named by its structure in a task of several, as `check_task` names them;
+    and `longer-than-declared` for a wait set longer than any the task's own starting values give
+    (`_waits`, `_longer`; the planner's call: the PI's 2026-10-12 warning keeps its sense).
+
+    **And every refusal a structure's checks newly give at the values** (`check`, against what
+    they give at the task's own starts): an open range is judged at its start at load, so a value
+    a console sends past what a structure can hold -- a target index past its array, a
+    correlation past 1, a size of 0 -- is what cannot be (§4), refused where it is set, as the load
+    refused a range reaching it before the open ranges (the builder's call; the PI, 2026-10-14,
+    I4, refused such a range at load because a console could send it unchecked). Run between
+    trials, never in a frame."""
+    pinned, unstarted = _at_start(at_values(task, values))
+    own, _ = _at_start(task)
+    several = len(pinned.structures) > 1
+    findings: list[Finding] = []
+    for name, structure in pinned.structures.items():
+        found = check(structure, allocation, None, geometry, calibration, unstarted)
+        found = [finding for finding in found if finding.code in LAYOUT or finding.blocking]
+        if any(finding.blocking and finding.code not in LAYOUT for finding in found):
+            given = check(own.structures[name], allocation, None, geometry, calibration,
+                          unstarted)
+            found = [finding for finding in found if finding.code in LAYOUT
+                     or not _among(finding, given)]
+        findings += [dataclasses.replace(
+            finding, detail=f"in structure {name!r}: {finding.detail}",
+            subjects=tuple(f"{name}: {subject}" for subject in finding.subjects))
+            if several else finding for finding in found]
+    waits, longest = _waits(task)
+    for name in sorted(waits):
+        value = values.get(name)
+        most = (max(value) if isinstance(value, tuple) and value and all(_finite(v) for v in value)
+                else value)
+        if _finite(most) and most > longest:
+            findings.append(_longer(name, most, longest))
+    del deployment  # read by no structure's check: a head's is the task's (`_head_faults`)
     return findings
 
 
@@ -3589,7 +3789,8 @@ def _as_updated(trial: Trial) -> dict[int, list[Stimulus]]:
     return result
 
 
-def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]:
+def _offscreen_stimuli(trial: Trial, geometry: Geometry | None,
+                       unstarted: frozenset[str] = frozenset()) -> list[Finding]:
     """S1 §9 check 8: every stimulus can actually be shown.
 
     Checked **per eye, after disparity**, not at the cyclopean position. Disparity is
@@ -3670,6 +3871,10 @@ def _offscreen_stimuli(trial: Trial, geometry: Geometry | None) -> list[Finding]
             )
             continue
         except _Unbounded as unbounded:
+            if unbounded.args[0] in unstarted:
+                # An open side with no start: left to the run's start (the console settings
+                # design's §4), which judges it at the run's values (`preflight.laid_out`).
+                continue
             findings.append(
                 Finding(
                     "stimulus-off-screen",
@@ -6514,15 +6719,128 @@ def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) ->
     return [
         Finding(
             "crowded-array",
-            f"array {declared.of!r} can put {objects} objects on a "
-            f"{tightest:g}° ring, {spacing:.2f}° apart, with windows "
-            f"{windows} radius; adjacent objects would overlap and a "
+            f"array {declared.of!r} can put {objects} objects{_by(array.n)} on a "
+            f"{tightest:g}° ring{_by(array.radius)}, {spacing:.2f}° apart, with windows "
+            f"{windows} radius{_by(declared.radius)}; adjacent objects would overlap and a "
             f"saccade to one would be scored against another",
             blocking=False,
             accepted_in=SESSION_KINDS,
             subjects=(f"array {declared.of!r}",),
         )
     ]
+
+
+def _by(value: object) -> str:
+    """The setting a number of a finding comes from, as " ('set_size')", or "" for a literal: so a
+    layout warning names each setting with its value (the console settings plan's Review Focus 3:
+    "a warning naming the pair and both values")."""
+    return f" ({value.name!r})" if isinstance(value, P) else ""
+
+
+def _widest(looks: object, params: dict[str, Param],
+            inside: frozenset[str] = frozenset()) -> "tuple[float, object] | None":
+    """**The greatest full width, in degrees, an array's object can be drawn at**, with what gives
+    it (a setting, or the literal): over each appearance `looks` can be -- each choice of a
+    parameter -- the widest of the full widths it declares (`_SIZES`; a `Look`'s are its
+    shape's), each at the most its setting allows (`_span`). `None` where nothing declares a
+    width this check can read, or one can be any size: nothing is judged there. `_narrowest`'s
+    other end, for the two layout warnings that ask how large an object is
+    (`_windows_inside_objects`, `_objects_touch`)."""
+    from wl_xcon import look
+
+    if isinstance(looks, P):
+        param = params.get(looks.name)
+        if param is None or looks.name in inside or not param.choices:
+            return None
+        found = [_widest(choice, params, inside | {looks.name}) for choice in param.choices]
+        found = [one for one in found if one is not None]
+        return max(found, key=lambda one: one[0]) if found else None
+    if isinstance(looks, look.Look):
+        return _widest(looks.shape, params, inside)
+    if not dataclasses.is_dataclass(looks):
+        return None
+    widths = [getattr(looks, f.name) for f in dataclasses.fields(looks) if f.name in _SIZES]
+    found = [(_span(width, params, 0.0)[1], width) for width in widths
+             if isinstance(width, P) or _finite(width)]
+    found = [one for one in found if math.isfinite(one[0])]
+    return max(found, key=lambda one: one[0]) if found else None
+
+
+def _windows_inside_objects(trial: Trial) -> list[Finding]:
+    """**`window-inside-object`: an array's object window smaller than its object** (the console
+    settings design's §4: "a window smaller than its disc"), a warning in every kind: over the
+    settings' ranges, or at the values set (`laid_out`), the windows' radius at its least below
+    the largest object's half-width at its most, so a look landing on an object's edge is outside
+    its window and scored as no answer. A window radius in degrees; the console settings plan's
+    Task 6 extends it to a window declared as a ratio of its object."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    for declared in trial.windows:
+        if not isinstance(declared, ObjectWindows):
+            continue
+        if not (isinstance(declared.radius, P) or _finite(declared.radius)):
+            continue  # refused at load (XC-426)
+        least = _span(declared.radius, params, 0.0)[0]
+        for name, array in _shown_arrays(trial):
+            if name != declared.of:
+                continue
+            sizes = [one for one in (_widest(array.looks, params), _widest(array.among, params))
+                     if one is not None]
+            if not sizes:
+                continue
+            width, given = max(sizes, key=lambda one: one[0])
+            if not least < width / 2.0:
+                continue
+            finding = Finding("window-inside-object", (
+                f"array {name!r}'s object windows can be {least:g}° in radius"
+                f"{_by(declared.radius)}, smaller than its objects, up to {width:g}° across"
+                f"{_by(given)}, {width / 2.0:g}° in radius: a look landing on an object's edge is "
+                f"outside its window, and scored as no answer; keep each window's radius at least "
+                f"its object's"), blocking=False, accepted_in=SESSION_KINDS,
+                subjects=(f"array {name!r}",))
+            if not _among(finding, findings):
+                findings.append(finding)
+    return findings
+
+
+def _objects_touch(trial: Trial) -> list[Finding]:
+    """**`objects-touch`: two of an array's objects closer center to center than their sizes'
+    mean** (the console settings design's §4: "discs touching"), a warning in every kind: the most
+    objects on the smallest ring (`geometry.ring_spacing_deg`, the PI's true circle, 2026-10-19),
+    over the settings' ranges or at the values set (`laid_out`), against the largest mean of two
+    neighbors' widths -- a target's and a distractor's, or two distractors' where there are three
+    objects or more -- so they touch or overlap on the screen, whatever their windows. A set size
+    far past where they are drawn on one another was refused as past its highest
+    (`_overlapping_objects`); every limit that stays is hard since §4, so no open range reaches
+    that refusal, and touching is said here."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+    for name, array in _shown_arrays(trial):
+        if not (_counted(array.n) and _counted(array.radius)):
+            continue  # refused at load (XC-273)
+        most = _whole(_span(array.n, params, 0.0)[1])
+        # The ring at its least, its distance from 0, each choice a point (`_intervals`), as
+        # `_overlapping_objects` reads it (the final re-review's m1).
+        ring = min(0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
+                   for low, high in _intervals(array.radius, params, 0.0))
+        target, among = _widest(array.looks, params), _widest(array.among, params)
+        if not (math.isfinite(most) and most >= 2) or target is None or among is None:
+            continue
+        mean = (target[0] + among[0]) / 2.0
+        if most >= 3:
+            mean = max(mean, among[0])
+        spacing = ring_spacing_deg(ring, most)
+        if spacing >= mean:
+            continue
+        finding = Finding("objects-touch", (
+            f"array {name!r} can put {int(most)} objects{_by(array.n)} on a {ring:g}° ring"
+            f"{_by(array.radius)}, {spacing:.2f}° apart center to center, closer than their sizes' "
+            f"mean ({mean:g}°{_by(among[1]) or _by(target[1])}), so neighbors touch or overlap on "
+            f"the screen"), blocking=False, accepted_in=SESSION_KINDS,
+            subjects=(f"array {name!r}",))
+        if not _among(finding, findings):
+            findings.append(finding)
+    return findings
 
 
 def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding]:

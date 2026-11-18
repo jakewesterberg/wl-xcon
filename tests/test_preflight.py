@@ -14,7 +14,7 @@ import _sessions
 from _sessions import WALL, session
 from wl_xcon import preflight
 from wl_xcon.actor import Box
-from wl_xcon.check import parameters_used
+from wl_xcon.check import PAST_LIMIT, UNEXPLAINED_LIMIT, parameters_used
 from wl_xcon.cli import _load_allocation, _load_task
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
@@ -109,10 +109,13 @@ def test_a_task_with_a_window_placed_by_a_whole_point_setting_is_checked_and_war
 
 
 def test_the_task_item_returns_its_findings_checked_against_the_calibration():
+    """And the reference task's builder's ranges, each a limit with no reason
+    (`unexplained-limit`), until the console settings plan's Task 5 takes them away."""
     item, trial, findings = preflight.task(TASK, ALLOCATION, DIRECT, SRGB)
 
     assert item.result == "pass" and trial is not None
-    assert [f.code for f in findings] == ["contrast-on-default"]
+    assert [f.code for f in findings if f.code != UNEXPLAINED_LIMIT] == ["contrast-on-default"]
+    assert UNEXPLAINED_LIMIT in {f.code for f in findings}
 
 
 
@@ -651,15 +654,20 @@ def test_a_tasks_own_start_outside_its_range_is_held_as_a_sent_value_is():
 def test_a_starting_value_outside_its_range_is_checked_widened_and_what_breaks_fails_the_item():
     """XC-352's D2 (the PI, 2026-10-11): the load-time checks run again with the range widened to
     the value (`preflight.beyond`); what breaks the run -- here the target off direct view's
-    screen -- fails the starting values item, saying which value, and the rest are warnings."""
+    screen -- fails the starting values item, saying which value, and the rest are warnings.
+    **Since the console settings plan's Task 4 every declared bound is hard**: a value past one
+    is refused first (`past-limit`), failing the item for that alone."""
     task = _load_task(TASK)
 
     off = preflight.beyond(task, {"target_x": 40.0}, ALLOCATION, DIRECT, SRGB, None)
     wide = preflight.beyond(task, {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
     item = preflight.values(task, {"target_x": 40.0}, [f for f in off if f.blocking])
 
-    assert [(f.code, f.blocking) for f in wide] == [("outside-range", False)]
-    assert {f.code for f in off if f.blocking} == {"stimulus-off-screen"}
+    assert [(f.code, f.blocking) for f in wide] == [(PAST_LIMIT, True), ("outside-range", False)]
+    assert preflight.values(task, {"fix_window": 7.0}, [f for f in wide if f.blocking]).said == (
+        "past-limit: 'fix_window' at 7 deg is above its 5: the task gives no reason for this "
+        "limit (unexplained-limit)")
+    assert {f.code for f in off if f.blocking} == {PAST_LIMIT, "stimulus-off-screen"}
     assert item.result == "fail"
     assert "stimulus-off-screen: with 'target_x' at 40, outside its declared range: " in item.said
 
@@ -851,7 +859,9 @@ def test_a_plan_its_task_does_not_declare_fails_the_task_checks(tmp_path):
 def test_each_conditions_values_are_held_to_their_ranges_as_starting_values_are(tmp_path):
     """Engine build C2b, under the PI's rule of 2026-10-11 (XC-352's D2): a value a condition sets
     outside its range is a warning naming the condition, and one that would break the run -- a
-    target off the screen -- fails the starting values, naming it too."""
+    target off the screen -- fails the starting values, naming it too. **Since the console
+    settings plan's Task 4** a value past its bound is refused first (`past-limit`), naming the
+    condition, so each fails the starting values."""
     path = _sessions.planned_task(tmp_path, (
         '{"wide": Plan([Block("b", [Condition("near", {"target_x": 5.0}, target=1), '
         'Condition("past", {"target_x": 17.0}, target=1)])]), '
@@ -862,9 +872,12 @@ def test_each_conditions_values_are_held_to_their_ranges_as_starting_values_are(
     wide = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="wide")
     off = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="off")
 
-    assert [f.code for f in wide] == ["outside-range"]
-    assert wide[0].detail.startswith("in plan 'wide', block 'b', condition 'past': 'target_x'")
-    assert not wide[0].blocking
+    assert [f.code for f in wide] == [PAST_LIMIT, "outside-range"]
+    assert all(f.detail.startswith("in plan 'wide', block 'b', condition 'past': 'target_x'")
+               for f in wide)
+    assert [f.blocking for f in wide] == [True, False]
+    assert preflight.values(task, {}, [f for f in wide if f.blocking], plan="wide").result == (
+        "fail")
     refused = [f for f in off if f.blocking]
     assert refused and all("condition 'away'" in f.detail for f in refused)
     assert preflight.values(task, {}, refused, plan="off").result == "fail"

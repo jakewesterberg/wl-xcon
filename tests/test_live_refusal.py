@@ -321,13 +321,13 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
     tmp_path, monkeypatch
 ):
     """The spec's §11 ("Live, `Session._beyond_range` learns conditions and draws"; call 27):
-    `visual_search` at 13 objects, past its 12, is no fault on its 8° ring alone, but conditions
-    'near' and 'near_again', holding the ring at 4°, below its 5°, crowd it, and so does block
-    'drawn', drawing the ring from 4°. Refused, naming each place, no warning written. A fixation
-    hold of 2.5 s, past its 2 s, breaks nothing anywhere: staged, with its warning as the session's
-    own values make it and the ring's at 4° naming where it is met. Each is checked once for the
-    session's own values and once for the set of values outside their ranges the three places
-    share (the outline review's M-11), never once per condition or extreme."""
+    `visual_search` at 13 objects, past its 12, is checked with the conditions 'near' and
+    'near_again', holding the ring at 4°, below its 5°, and block 'drawn', drawing the ring from
+    4°. **Since the console settings plan's Task 4 every declared bound is hard**, so it is refused
+    as past its limit, and the ring those places hold past its own is said too, naming each place,
+    no warning written; a fixation hold of 2.5 s, past its 2 s, is refused likewise. Each is still
+    checked once for the session's own values and once for the set of values outside their ranges
+    the three places share (the outline review's M-11), never once per condition or extreme."""
     checked = []
     real = taskd.beyond_range
 
@@ -347,27 +347,20 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
     places = ("(on the trials of block 'set', condition 'near'; block 'set', condition "
               "'near_again'; block 'drawn', condition 'any', block 'drawn''s draw of "
               "'array_eccentricity' at 4)")
-    (refusal,) = session.refusals
+    unexplained = "the task gives no reason for this limit (unexplained-limit)"
+    (refusal, held) = session.refusals
     assert refusal[:2] == ("set_size", JAKE)
     assert refusal[2] == (
-        "'set_size' at 13 is outside its declared range, and with the range widened to it the "
-        "load-time checks refuse it: crowded-array: with 'array_eccentricity' at 4, 'set_size' at "
-        "13, outside its declared range: array 'search' can put 13 objects on a 4° ring, 1.91° "
-        "apart, with windows of 1° radius; adjacent objects would overlap and a saccade to one "
-        f"would be scored against another {places}; the previous value stands")
+        f"'set_size' at 13 is refused, and the previous value stands: past-limit: 'set_size' at "
+        f"13 objects is above its 12: {unexplained}; past-limit: 'array_eccentricity' at 4 deg is "
+        f"below its 5: {unexplained} {places}")
+    assert held[:2] == ("fix_hold", JAKE)
+    assert held[2].startswith(f"'fix_hold' at 2.5 is refused, and the previous value stands: "
+                              f"past-limit: 'fix_hold' at 2.5 s is above its 2: {unexplained}")
     assert checked == [(13, 0.3, 8.0), (13, 0.3, 4.0), (6, 2.5, 8.0), (6, 2.5, 4.0)]
-    assert [(row["code"], row["by"]["name"], row["detail"]) for row in
-            _rows(session, "warnings.jsonl")] == [
-        ("outside-range", "jake",
-         "'fix_hold' is 2.5 s, outside the [0.05, 2.0] the task declares, so the task was not "
-         "designed for it: its load-time checks were proved only over its declared range, and "
-         "were run again with the range widened to 2.5"),
-        ("outside-range", "jake",
-         "'array_eccentricity' is 4 deg, outside the [5.0, 14.0] the task declares, so the task "
-         "was not designed for it: its load-time checks were proved only over its declared range, "
-         f"and were run again with the range widened to 4 {places}"),
-    ]
-    assert session.spec.values["set_size"] == 6 and session.spec.values["fix_hold"] == 2.5
+    assert not [row for row in _rows(session, "warnings.jsonl")
+                if "'set_size'" in row["detail"] or "'fix_hold'" in row["detail"]]
+    assert session.spec.values["set_size"] == 6 and session.spec.values["fix_hold"] == 0.3
 
     # Where a person holds the ring, no condition or draw moves it; and a live range's extreme is
     # its own.
@@ -555,12 +548,13 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
     draw by the one rule a run's start does), with the final whole-branch review's Minor 1 (the
     controller's revised ruling): a direction draw is judged against its declared range on the
     circle by arc containment. `Uniform(-45, 45)`, declared [0, 360] or in signed terms [-180,
-    180], is inside the whole turn, so a person's `fix_hold` of 2.5, outside its own, writes that
-    setting's warning alone and no `target_dir` row. Declared [0, 180] it reaches past at -45, as
+    180], is inside the whole turn, so a person's `fix_hold` of 2.5, outside its own, is said for
+    that setting alone and nothing of `target_dir`. Declared [0, 180] it reaches past at -45, as
     drawn; declared [-30, 30], at -45 and 45; and `Uniform(100, 120)`, declared [0, 90], is wholly
-    past it, at 100 and 120. Each the start warns and the live check says too, once, and no
-    `direction-outside-0-360` row (the load suppresses that warning for a drawn direction). A
-    setting that is no direction keeps its live warning."""
+    past it, at 100 and 120. Each the start says and the live check says too, once. **Since the
+    console settings plan's Task 4 every declared bound is hard**: each is refused as past its
+    limit (`past-limit`), at the start and live, the person's `fix_hold` among them, and no
+    warning row is written."""
     from test_draws_in_runs import _directed, _right, _rows as _run_rows
     from test_draws_in_runs import _session as _run_session, _spec as _run_spec
     from wl_xcon import preflight
@@ -584,14 +578,17 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
 
     session.run()
 
-    rows = _run_rows(session, "warnings.jsonl")
-    live = [row for row in rows if "target_dir" in row["detail"]]
-    assert [row["code"] for row in live] == [f.code for f in start]
-    assert [row["code"] for row in rows if "fix_hold" in row["detail"]] == ["outside-range"]
-    assert [row["code"] for row in live] == ["outside-range"] * len(shown)
-    for details in ([f.detail for f in start], [row["detail"] for row in live]):
-        assert [f"target_dir' is {end} deg" in detail
-                for detail, end in zip(details, shown)] == [True] * len(shown)
+    written = session.directory / "warnings.jsonl"
+    rows = _run_rows(session, "warnings.jsonl") if written.exists() else []
+    assert not [row for row in rows if "target_dir" in row["detail"] or "fix_hold" in row["detail"]]
+    ((name, _, refusal),) = session.refusals
+    assert name == "fix_hold" and "past-limit: 'fix_hold' at 2.5 s is above its 2" in refusal
+    past = [f for f in start if f.code == "past-limit"]
+    assert [f.blocking for f in past] == [True] * len(shown)
+    for end, finding in zip(shown, past):
+        assert f"'target_dir' at {end} deg is " in finding.detail
+        assert f"past-limit: 'target_dir' at {end} deg is " in refusal
+    assert ("'target_dir' at" in refusal) == bool(shown)
 
 
 def _choosing_task(folder: Path) -> Path:
@@ -652,20 +649,22 @@ def test_a_live_value_outside_its_range_beside_a_wait_of_any_length_is_staged_wi
     """XC-423's fix round 1 (the review's I1 and m3), driven through a session: a task whose
     fixation wait declares a highest of infinity, a wait of any length, refused every live value
     outside its range, a fixation hold of 2.5 s past its 2 s among them ("a wait the task declares,
-    can be inf s ... cannot be judged"). `Session._beyond_range` stages it, its `outside-range`
-    warning accepted by the person who set it, as beside a wait declared with no highest."""
+    can be inf s ... cannot be judged"). **Since the console settings plan's Task 4** a value past
+    its bound is refused for that alone (`past-limit`), saying the limit, never that a wait cannot
+    be judged; one inside, 1.5 s, is staged, the endless wait refusing nothing."""
     text = Path("tasks/fixation_detection.py").read_text()
     old = '        Param("fix_acquisition", unit="s", low=0.5, high=10.0, start=4.0),'
     assert text.count(old) == 1
     task = tmp_path / "endless.py"
     task.write_text(text.replace(old, old.replace("high=10.0", 'high=float("inf")')))
-    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)]})
+    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)],
+                     3: [SetParameter(name="fix_hold", value=1.5, by=JAKE)]})
     session = _session(_spec(tmp_path, task), link)
 
     session.run()
 
     assert session.stop_kind == "completed"
-    assert session.refusals == []
-    assert session.spec.values["fix_hold"] == 2.5
-    assert [(row["code"], row["by"]["name"]) for row in _rows(session, "warnings.jsonl")
-            if "'fix_hold'" in row["detail"]][:1] == [("outside-range", "jake")]
+    ((name, _, refusal),) = session.refusals
+    assert name == "fix_hold" and "past-limit: 'fix_hold' at 2.5 s is above its 2" in refusal
+    assert "cannot be judged" not in refusal
+    assert session.spec.values["fix_hold"] == 1.5

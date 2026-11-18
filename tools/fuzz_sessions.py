@@ -1697,7 +1697,7 @@ def apply_control(control):
                 self._acts[len(self._staged) - 1] = self._act
         T.Session._revert = _revert
     elif control == "impossible":
-        T.Session._impossible = lambda self, name, value: None
+        T.Session._impossible = lambda self, name, value, by=None: None
         T.Session._possible = lambda self, changed=None, **kw: None
     elif control == "sequence":
         orig_pending = T.Session._apply_pending

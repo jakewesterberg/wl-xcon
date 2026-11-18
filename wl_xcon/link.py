@@ -254,7 +254,9 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: one of `"person"`, `"block"` or `"task"`, `None` where the setting is fixed; and
 #: `ParamRow.source` `"form"`, a person's draw; and `ParamRow.profile`, where `shape` is set, that draw's
 #: `{"edges", "density", "hazard"}` (`variation.profile`: a range's 20 bins or a list's values, each bin's
-#: share of the draws and its hazard against the first's), the declared distribution, not a measurement. A staged row may be of kind `form`, its `was` and
+#: share of the draws and its hazard against the first's), the declared distribution, not a measurement;
+#: and `ParamRow.why`, `{"low", "high"}`, each limit's one-line reason, or `None` (`task.limit_reason`;
+#: the design's §4: every declared bound is a hard limit). A staged row may be of kind `form`, its `was` and
 #: `now` in the rig's words. And a `form` command on the wire (`SetForm`). The build's later
 #: tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
@@ -479,12 +481,19 @@ class ParamRow:
     #: of the draws, and its hazard as a multiple of the first's. Arithmetic of the declared
     #: distribution, not a measurement; built between trials, cached by distribution.
     profile: dict | None = None
+    #: **Why each limit it declares stands** (schema 22; the console settings design's §4: "each
+    #: card says why for any limit that stays, in one line"): `{"low": reason, "high": reason}`,
+    #: each `task.limit_reason`'s -- a standard reason or the task's own line -- or `None` for a
+    #: side with no bound or a bound the task gives no reason for. `None` where it declares no
+    #: bound, has choices, or is a ceiling.
+    why: dict | None = None
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
            bounded: bool, choices=(), source: str | None = None, conditions=(),
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
-           shape: dict | None = None, profile: dict | None = None) -> "ParamRow":
+           shape: dict | None = None, profile: dict | None = None,
+           why: dict | None = None) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -504,9 +513,9 @@ class ParamRow:
         words = position_words(value, choices)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
-                       numbers, more, switch, shape, profile)
+                       numbers, more, switch, shape, profile, why)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape, profile)
+                   more, switch, shape, profile, why)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1814,6 +1823,7 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "switch": p.switch,
                 "shape": p.shape,
                 "profile": p.profile,
+                "why": p.why,
             }
             for p in telemetry.params
         ],

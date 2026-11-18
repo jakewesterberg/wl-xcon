@@ -25,6 +25,7 @@ from wl_xcon.actor import Box
 from wl_xcon.cli import _load_task
 from wl_xcon.dio import Simulated as Card
 from wl_xcon.findings import SESSION_KINDS, Finding
+from wl_xcon.warnlist import of_findings
 from wl_xcon.link import (
     CONTROL_HISTORY, ClearOwed, Drum, HandBack, Pause, Resume, Revert, SetParameter, SetRange,
     Simulated, Stop, Training,
@@ -180,27 +181,28 @@ def _ceiling(folder: Path) -> Path:
 
 
 def _breaks(monkeypatch, refused: tuple[str, float], warned: tuple[str, float] | None = None):
-    """**This file's stand-in for a value whose widened checks break the run**, installed from
-    the moment it is called: `check.beyond_range`, as `Session._beyond_range` meets it, refuses
-    values holding `refused`'s setting at its value with a finding that blocks, and gives values
-    holding `warned`'s, where given, a warning of its own, a sentence never accepted before. A
+    """**This file's stand-in for a value `Session.set` refuses**, installed from the moment it is
+    called: `set` refuses `refused`'s setting at its value, saying so, and accepts a warning of
+    its own, a sentence never accepted before, for `warned`'s, where given, before it stages it. A
     revert restores what the run held at an earlier moment, which every check passed when it was
-    set, so a check of the task refuses one only through something that changed since, as a trial
-    waiting to be shown again keeps a value (`test_a_revert_the_waiting_trial_cannot_meet_...`);
-    this stand-in is for a value whose widened checks answer otherwise now."""
-    real = taskd.beyond_range
+    set, so `set` refuses one only through something that changed since, as a trial waiting to be
+    shown again keeps a value (`test_a_revert_the_waiting_trial_cannot_meet_...`). Until the console
+    settings plan's Task 4 this stood in for `check.beyond_range`, a value outside its range
+    checked widened; since every declared bound is hard (`past-limit`), a value accepted before is
+    inside its range, `set` asks no widened check of it, and the stand-in is `set`'s own answer."""
+    real = taskd.Session.set
 
-    def standing_in(task, values, *args, **kwargs):
-        found = real(task, values, *args, **kwargs)
-        name, value = refused
-        if values.get(name) == value:
-            return [*found, Finding("stand-in", f"{name!r} at {value:g} breaks the run here")]
-        if warned is not None and values.get(warned[0]) == warned[1]:
-            return [*found, Finding("stand-in-warning", f"{warned[0]!r} at {warned[1]:g} is warned",
-                                    blocking=False, accepted_in=SESSION_KINDS)]
-        return found
+    def standing_in(self, name, value, by):
+        if (name, value) == refused:
+            raise taskd.Exceeded(f"{name!r} at {value:g} is refused by this file's stand-in: it "
+                                 f"breaks the run here; the previous value stands")
+        if warned is not None and (name, value) == warned:
+            self.accept(of_findings([Finding(
+                "stand-in-warning", f"{name!r} at {value:g} is warned", blocking=False,
+                accepted_in=SESSION_KINDS)]), by=by, how="set", run=self.run_index)
+        return real(self, name, value, by=by)
 
-    monkeypatch.setattr(taskd, "beyond_range", standing_in)
+    monkeypatch.setattr(taskd.Session, "set", standing_in)
 
 
 def test_a_revert_restores_each_value_held_or_handed_back_and_each_range_as_then(tmp_path):
@@ -468,8 +470,8 @@ def test_a_revert_is_refused_whole_when_one_value_is_and_writes_no_change_row(
     sentence: no change row is written and nothing applies -- what it staged and offered is cut
     back, and the trials after run as before. The warning `set` accepted for the earlier value
     stays accepted, by `_beyond_range`'s rule (the outline review's M-16)."""
-    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE),
-                         SetParameter(name="response_deadline", value=3.5, by=JAKE)],
+    link = _Drained({2: [SetParameter(name="fix_hold", value=1.5, by=JAKE),
+                         SetParameter(name="response_deadline", value=2.5, by=JAKE)],
                      4: [HandBack(name="fix_hold", by=JAKE),
                          HandBack(name="response_deadline", by=JAKE)],
                      6: [Revert(change=2, by=JAKE)]})
@@ -477,7 +479,7 @@ def test_a_revert_is_refused_whole_when_one_value_is_and_writes_no_change_row(
     def world(trial, values, index):
         if index == 4:
             # After the two hand-backs were offered (the 4th drain), before the revert is.
-            _breaks(monkeypatch, ("response_deadline", 3.5), warned=("fix_hold", 2.5))
+            _breaks(monkeypatch, ("response_deadline", 2.5), warned=("fix_hold", 1.5))
         return _right(values)
 
     session = _session(_spec(tmp_path, "tasks/fixation_detection.py", blocks=[_near(8)]), link,
@@ -486,16 +488,15 @@ def test_a_revert_is_refused_whole_when_one_value_is_and_writes_no_change_row(
     session.run()
 
     assert session.refusals == [("revert", JAKE, (
-        "the revert to change 2 is refused, and none of it applies: 'response_deadline' at 3.5 "
-        "is outside its declared range, and with the range widened to it the load-time checks "
-        "refuse it: stand-in: 'response_deadline' at 3.5 breaks the run here; the previous value "
+        "the revert to change 2 is refused, and none of it applies: 'response_deadline' at 2.5 "
+        "is refused by this file's stand-in: it breaks the run here; the previous value "
         "stands"))]
     assert [(row["change"], row["kind"], row["name"]) for row in _changes(session)] == [
         (1, "set", "fix_hold"), (2, "set", "response_deadline"),
         (3, "hand_back", "fix_hold"), (4, "hand_back", "response_deadline")]
     (*_, kept) = _rows(session, "warnings.jsonl")
     assert (kept["code"], kept["detail"], kept["by"]) == (
-        "stand-in-warning", "'fix_hold' at 2.5 is warned", BY)
+        "stand-in-warning", "'fix_hold' at 1.5 is warned", BY)
     assert (session._staged, session._pending, session._acts, session._act_moments) == (
         [], [], {}, {})
     assert [(line["params"]["fix_hold"], line["params"]["response_deadline"], line["live"])
@@ -522,7 +523,7 @@ def test_a_revert_refused_whole_leaves_another_persons_staged_change_alone(
                                 dict(session._act_moments)))
             return super().drain()
 
-    link = Watched({2: [SetParameter(name="response_deadline", value=3.5, by=JAKE)],
+    link = Watched({2: [SetParameter(name="response_deadline", value=2.5, by=JAKE)],
                     3: [HandBack(name="response_deadline", by=JAKE),
                         SetParameter(name="fix_hold", value=0.5, by=JAKE)],
                     5: [SetParameter(name="target_x", value=12.0, by=JAKE)],
@@ -534,7 +535,7 @@ def test_a_revert_refused_whole_leaves_another_persons_staged_change_alone(
     def world(trial, values, index):
         if index == 3:
             # After the response deadline was handed back, before anything is reverted.
-            _breaks(monkeypatch, ("response_deadline", 3.5))
+            _breaks(monkeypatch, ("response_deadline", 2.5))
         return _right(values)
 
     session = _session(_spec(tmp_path, "tasks/fixation_detection.py", blocks=[_near(8)]), link,
@@ -543,9 +544,8 @@ def test_a_revert_refused_whole_leaves_another_persons_staged_change_alone(
     session.run()
 
     assert session.refusals == [("revert", JAKE, (
-        "the revert to change 1 is refused, and none of it applies: 'response_deadline' at 3.5 "
-        "is outside its declared range, and with the range widened to it the load-time checks "
-        "refuse it: stand-in: 'response_deadline' at 3.5 breaks the run here; the previous value "
+        "the revert to change 1 is refused, and none of it applies: 'response_deadline' at 2.5 "
+        "is refused by this file's stand-in: it breaks the run here; the previous value "
         "stands"))]
     ((staged, pending, moments),) = waiting
     (act,) = moments
@@ -565,19 +565,22 @@ def test_a_revert_refused_whole_leaves_another_persons_staged_change_alone(
             for line in _lines(session)[5:]] == [(40.0, 5.0, ["fix_hold"])] * 3
 
 
-@pytest.mark.parametrize("broken", ["impossible", "possible", "beyond_range", "set"])
+@pytest.mark.parametrize("broken", ["impossible", "possible", "laid_out", "set"])
 def test_a_check_that_raises_inside_a_revert_refuses_it_and_the_session_runs_on(
         tmp_path, monkeypatch, broken):
     """Review Focus 5, the revert's part (the outline review's I-1; the C3 plan's call 20): a
     revert runs beside the pause, outside `_command`'s listed `try`, so it refuses its own faults.
     A check that raises -- `check.impossible`, as `_possible` meets it and says it could not run;
-    `_possible` itself; `check.beyond_range`, as `set`'s `_beyond_range` meets it and refuses the
-    value; `set` itself, on the second of the two values the revert puts back -- refuses the
+    `_possible` itself; `check.laid_out`, as `_laid_out` meets it and says the layout could not be
+    judged (since the console settings plan's Task 4, which made every declared bound hard, so
+    a value a revert puts back is inside its range and `set`'s widened check, `check.beyond_range`,
+    which this test once broke, is never asked of it); `set` itself, on the second of the two
+    values the revert puts back -- refuses the
     revert whole, saying so, and the session runs to its end with nothing of the revert applied:
     the hand-back it offered and the value it staged ahead of the fault are cut back too. The
     stand-ins are this file's own: each raises from the trial after the values the revert puts
     back were set and handed back, so that they were checked first."""
-    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE),
+    link = _Drained({2: [SetParameter(name="fix_hold", value=1.5, by=JAKE),
                          SetParameter(name="target_x", value=12.0, by=JAKE)],
                      3: [HandBack(name="fix_hold", by=JAKE), HandBack(name="target_x", by=JAKE),
                          SetParameter(name="target_y", value=2.0, by=JAKE)],
@@ -609,10 +612,8 @@ def test_a_check_that_raises_inside_a_revert_refuses_it_and_the_session_runs_on(
         "impossible": "the revert to change 2 is refused, and none of it applies: the check for "
                       "trials no animal can get right could not be run (ZeroDivisionError: "
                       "division by zero)",
-        "beyond_range": "the revert to change 2 is refused, and none of it applies: 'fix_hold' "
-                        "at 2.5 is outside its declared range, and the load-time checks could "
-                        "not be run again with the range widened (ZeroDivisionError: division by "
-                        "zero), so it is refused and the previous value stands",
+        "laid_out": "the revert to change 2 is refused, and none of it applies: the layout it "
+                    "leaves could not be judged (ZeroDivisionError: division by zero)",
     }.get(broken, "the revert to change 2 could not be checked (ZeroDivisionError: division by "
                   "zero), so it is refused, none of it applies, and the session runs on"))]
     assert [row["kind"] for row in _changes(session)] == [
@@ -721,18 +722,31 @@ def test_a_revert_drained_with_a_stop_is_dropped_and_said(tmp_path):
 
 def test_a_revert_judges_each_value_over_what_it_hands_back_and_restores(tmp_path):
     """An engineering call of the engine C3 plan's Task 14: a revert offers its hand-backs and
-    ranges ahead of its values, so `set` judges each value over the moment the revert goes back
-    to, not over what it is about to undo. 13 objects fit on `visual_search`'s 8° ring (change 1);
-    then the set size is handed back and the ring drawn in to 4°, past its declared 5° (warned:
-    six fit there). The revert to change 1 hands the ring back to 8° and puts 13 objects back:
-    judged on the 8° ring, they are accepted; judged on the 4° one, they would crowd it."""
+    ranges ahead of its values, so each value is judged over the moment the revert goes back to,
+    not over what it is about to undo. **Since the console settings plan's Task 4** a value past
+    a declared bound is refused and the layout at the values is judged where it is set
+    (`Session._laid_out`), so this runs `visual_search` with its set size declared to 20 and its
+    ring from 0°, its object windows 1°: 13 objects fit on the 8° ring (change 1); then the set
+    size is handed back and the ring drawn in to 4°, where six fit. The revert to change 1 hands
+    the ring back to 8° and puts 13 objects back: judged on the 8° ring, they are accepted, and
+    nothing crowded is said; judged on the 4° one, they would crowd it, 1.91° apart."""
+    path = tmp_path / "wide_search.py"
+    text = Path("tasks/visual_search.py").read_text()
+    for old, new in (
+            ('Param("set_size", unit="objects", low=2, high=12)',
+             'Param("set_size", unit="objects", low=2, high=20, why="a stand-in for its places")'),
+            ('Param("array_eccentricity", unit="deg", low=5.0, high=14.0)',
+             'Param("array_eccentricity", unit="deg", low=0.0, high=14.0)')):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text)
     blocks = [Block("ring", [Condition("any", {}, target=8)])]
     link = _Drained({2: [SetParameter(name="set_size", value=13, by=JAKE)],
                      3: [HandBack(name="set_size", by=JAKE),
                          SetParameter(name="array_eccentricity", value=4.0, by=JAKE)],
                      5: [Revert(change=1, by=JAKE)]})
-    session = _session(_spec(tmp_path, "tasks/visual_search.py", blocks=blocks,
-                             values=dict(SEARCHED)), link, world=None)
+    session = _session(_spec(tmp_path, str(path), blocks=blocks,
+                             values={**SEARCHED, "object_window": 1.0}), link, world=None)
 
     session.run()
 
@@ -746,6 +760,12 @@ def test_a_revert_judges_each_value_over_what_it_hands_back_and_restores(tmp_pat
     assert len(lines) > 6 and all(
         (line["params"]["set_size"], line["params"]["array_eccentricity"]) == (13, 8.0)
         for line in lines[5:])
+    written = session.directory / "warnings.jsonl"
+    assert not [row for row in (_rows(session, "warnings.jsonl") if written.exists() else [])
+                if row["code"] == "crowded-array" and "on a 4° ring" in row["detail"]]
+    crowded = taskd.laid_out(session._task, {**session.spec.values, "set_size": 13,
+                                             "array_eccentricity": 4.0}, geometry=DIRECT)
+    assert "1.91° apart" in next(f.detail for f in crowded if f.code == "crowded-array")
 
 
 def test_a_hand_backs_moment_says_what_took_the_setting_where_it_applied(tmp_path):

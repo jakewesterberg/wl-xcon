@@ -1577,6 +1577,12 @@ class Service:
         # warnings join the run's, and what breaks the run fails the starting values item.
         beyond = _preflight.beyond(loaded, values, self.allocation, session.spec.geometry,
                                    session.spec.calibration, session.spec.deployment, plan)
+        # **And the layout at the run's values** (the console settings design's §4): what blocks
+        # fails the starting values item with what `beyond` refuses, and its warnings join the
+        # run's, those the load already gives said once.
+        beyond += [finding for finding in _preflight.laid_out(
+            loaded, values, plan, self.allocation, session.spec.geometry,
+            session.spec.calibration, session.spec.deployment) if finding not in findings]
 
         def warned():
             try:

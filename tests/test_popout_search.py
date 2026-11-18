@@ -286,17 +286,24 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     for found in (on_default, on_measured):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
+    # **And the console settings plan's Task 4's three** (the controller's ruling: the expectation
+    # changes only to the new warnings, and the plan's Task 11 makes the load clean of them
+    # again): every bound the task declares without a reason (`unexplained-limit`), and over its
+    # builder's ranges its 0.5° windows inside its discs up to 3° across (`window-inside-object`)
+    # and twelve of those discs touching on the smallest ring (`objects-touch`).
+    new = {"unexplained-limit", "window-inside-object", "objects-touch"}
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
                                              "color-set-desaturated", "crowded-array",
                                              "answer-window-reaches-objects", "margin-reaches-bar",
-                                             "endless-plan"}
+                                             "endless-plan"} | new
     assert {f.code for f in on_measured} == {"crowded-array", "answer-window-reaches-objects",
-                                             "margin-reaches-bar", "endless-plan"}
+                                             "margin-reaches-bar", "endless-plan"} | new
     (pale,) = [f for f in on_default if f.code == "color-set-desaturated"]
     assert "above about 26 cd/m², of the 1 to 30 cd/m² setting 'color_luminance' allows" in (
         pale.detail)
     (crowded,) = [f for f in on_measured if f.code == "crowded-array"]
-    assert "12 objects on a 4° ring, 2.07° apart" in crowded.detail
+    # Each setting named beside its value since the console settings plan's Task 4.
+    assert "12 objects ('set_size') on a 4° ring ('ring_radius'), 2.07° apart" in crowded.detail
 
 
 def test_it_holds_the_pis_values(task):

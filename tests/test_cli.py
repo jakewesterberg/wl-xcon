@@ -35,6 +35,7 @@ from _frames import idle
 from _calibrations import BACKGROUND, OBSERVER, PRIMARIES
 import _sessions
 from wl_xcon import cli
+from wl_xcon.check import UNEXPLAINED_LIMIT
 from wl_xcon import link as _link
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
@@ -503,7 +504,11 @@ def test_wlx_run_says_the_calibration_and_every_warning_its_flag_accepts(tmp_pat
     assert "  calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
     assert [line for line in out if line.startswith("  warning accepted: ")] == [
         f"  warning accepted: {row['code']}: {row['detail']}" for row in rows]
-    assert [row["code"] for row in rows] == ["default calibration", "contrast-on-default"]
+    # And the reference task's builder's ranges, each a limit with no reason, until the console
+    # settings plan's Task 5 takes them away (`unexplained-limit`, its Task 4).
+    assert [row["code"] for row in rows if row["code"] != UNEXPLAINED_LIMIT] == [
+        "default calibration", "contrast-on-default"]
+    assert UNEXPLAINED_LIMIT in {row["code"] for row in rows}
 
 
 def test_wlx_run_accepts_and_records_a_position_its_task_file_computes_from_cos_and_sin(tmp_path):
@@ -2722,9 +2727,12 @@ def test_wlx_run_records_the_warnings_its_flag_accepted(tmp_path):
 
     rows = [json.loads(line) for line in
             (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
-    assert [(r["code"], r["how"], r["by"]) for r in rows] == [
+    # The reference task's limits with no reason left out (`unexplained-limit`; the console
+    # settings plan's Task 4, until its Task 5): accepted alike.
+    assert [(r["code"], r["how"], r["by"]) for r in rows if r["code"] != UNEXPLAINED_LIMIT] == [
         ("default calibration", "--accept-warnings", {"kind": "box", "name": "jake"}),
         ("contrast-on-default", "--accept-warnings", {"kind": "box", "name": "jake"})]
+    assert {(r["how"], r["by"]["name"]) for r in rows} == {("--accept-warnings", "jake")}
 
 
 def test_wlx_run_accepts_its_warnings_before_the_departure_is_marked(tmp_path, monkeypatch):

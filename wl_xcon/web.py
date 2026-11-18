@@ -55,7 +55,7 @@ from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
-from wl_xcon.task import Family, Outcome, at_hardest
+from wl_xcon.task import BELOW_ZERO, Family, Outcome, at_hardest
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
@@ -1875,8 +1875,18 @@ def _range(row) -> str:
     if row.bounded:
         return f"welfare ceiling {_e(_significant(row.high))} {_e(row.unit)}"
     if row.low is None and row.high is None:
-        return "no declared range"
-    return f"{_e(_edge(row.low))} to {_e(_edge(row.high))} {_e(row.unit)}"
+        return "no limit"
+    said = f"{_e(_edge(row.low))} to {_e(_edge(row.high))} {_e(row.unit)}"
+    # **Why each limit stands, in one line** (`ParamRow.why`; the console settings design's §4:
+    # "each card says why for any limit that stays"). The standard "below 0 cannot be" is left
+    # unsaid beside another reason, which it goes without saying beside (the builder's call): a
+    # fraction's card reads "0 to 1 fraction · a fraction is at most 1".
+    why = row.why or {}
+    reasons = list(dict.fromkeys(reason for reason in (why.get("low"), why.get("high"))
+                                 if reason))
+    if len(reasons) > 1 and BELOW_ZERO in reasons:
+        reasons.remove(BELOW_ZERO)
+    return f"{said} · {_e('; '.join(reasons))}" if reasons else said
 
 
 #: The arrows' step by unit: the mockup's `stepOf` (`docs/superpowers/mockups/

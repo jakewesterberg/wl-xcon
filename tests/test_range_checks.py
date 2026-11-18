@@ -19,7 +19,8 @@ import wl_xcon.check as checking
 from _rig import DIRECT
 from tasks.allocation import ALLOCATION
 from wl_xcon import service
-from wl_xcon.check import BREAKS_A_RUN, beyond_range, check, check_task, widened
+from wl_xcon.check import BREAKS_A_RUN, PAST_LIMIT, check, check_task, widened
+from wl_xcon.check import beyond_range as _beyond_range
 from wl_xcon.cli import _load_task
 from wl_xcon.findings import SESSION_KINDS, Finding
 from wl_xcon.photometry import SRGB, Gray, Michelson, Weber
@@ -83,6 +84,20 @@ def two_windows(a_at, a_r, b_at, b_r, params=()) -> Trial:
             ),
         ],
     )
+
+
+def beyond_range(task, values, *args, **kwargs):
+    """`check.beyond_range` with its leading `past-limit` refusals checked and set aside: since the
+    console settings plan's Task 4 every declared bound is a hard limit (the PI, 2026-11-16, "Hard
+    limits only where impossible"), so a value past one is refused first, one blocking finding a
+    value, saying the limit's reason. What follows them -- the load-time checks run again widened
+    to the values (XC-352's D2) -- is what these tests read, and it is unchanged."""
+    found = _beyond_range(task, values, *args, **kwargs)
+    declared = {param.name: param for param in task.params}
+    past = sum(1 for name, value in values.items()
+               if name in declared and checking._outside(declared[name], value))
+    assert [(f.code, f.blocking) for f in found[:past]] == [(PAST_LIMIT, True)] * past, found
+    return found[past:]
 
 
 def test_windows_that_overlap_are_a_warning_saying_a_look_at_one_can_count_as_the_other():
@@ -441,8 +456,11 @@ def test_an_array_whose_size_has_no_highest_or_is_chosen_is_checked_at_its_large
     ringless = found(sized(Param("array_eccentricity", unit="deg", high=12.0)), "crowded-array")
     any_size = found(sized(Param("object_window", unit="deg", low=0.5)), "crowded-array")
 
-    assert "can put any number of objects on a 8° ring" in unbounded.detail
-    assert "can put 6 objects on a 0° ring, 0.00° apart" in ringless.detail
+    # Each setting is named beside its value since the console settings plan's Task 4 (Review
+    # Focus 3: "a warning naming the pair and both values").
+    assert "can put any number of objects ('set_size') on a 8° ring" in unbounded.detail
+    assert "can put 6 objects ('set_size') on a 0° ring ('array_eccentricity'), 0.00° apart" in (
+        ringless.detail)
     assert "with windows of any radius" in any_size.detail
     assert "crowded-array" in codes(sized(Param("set_size", unit="objects", choices=(2, 16))))
     assert "crowded-array" not in codes(sized(Param("set_size", unit="objects", choices=(2, 6))))
@@ -785,18 +803,23 @@ def _timing_out(timeout: Param) -> Task:
     )}, default="waiting")
 
 
-def test_a_wait_with_no_highest_makes_no_wait_longer_than_any_the_task_declares():
+def test_a_wait_with_no_highest_counts_toward_the_tasks_longest_by_its_start():
     """Task 10's review, M1: a wait setting with no highest was left out of the task's longest
     wait, so one sent below its lowest was "a wait longer than any the task declares (its
-    longest, 0 s)". With no highest a wait can be any length, so no value of any wait is longer
-    than one the task declares. Its `outside-range` warning names the one bound declared (M2).
-    Since engine build C2a it also draws `hold-cut-short`: a timeout declared with a lowest of 1.0
-    only, sent at 0.5, can now end before the hold, a true warning."""
+    longest, 0 s)". **Since the console settings plan's Task 4 it counts by its start** (the
+    planner's call: every bound that stays is hard, so the PI's 2026-10-12 warning compares a
+    wait with the longest the task's own starting values give): the timeout's 2 s, under the
+    task's 10 s, so `fix_acquisition` at 600 s is longer than any it declares. Its `outside-range`
+    warning names the one bound declared (M2). Since engine build C2a it also draws
+    `hold-cut-short`: a timeout declared with a lowest of 1.0 only, sent at 0.5, can now end
+    before the hold, a true warning."""
     task = _timing_out(Param("timeout", unit="s", low=1.0, start=2.0))
 
     below = beyond_range(task, {"timeout": 0.5})
+    longer = beyond_range(task, {"fix_acquisition": 600.0})
 
-    assert [f.code for f in beyond_range(task, {"fix_acquisition": 600.0})] == ["outside-range"]
+    assert [f.code for f in longer] == ["outside-range", "longer-than-declared"]
+    assert "a wait longer than any the task declares (its longest, 10 s)" in longer[1].detail
     assert [(f.code, f.blocking) for f in below] == [
         ("outside-range", False), ("hold-cut-short", False)]
     assert below[0].detail.startswith(
@@ -861,10 +884,14 @@ def test_a_wait_that_can_be_no_finite_number_is_any_length_and_refuses_nothing(e
             (f.code, f.blocking) for f in expected], (values, found)
         assert not any(f.blocking for f in found), (values, found)
         assert "longer-than-declared" not in {f.code for f in found}
-        given = preflight.beyond(task, values, ALLOCATION, DIRECT, SRGB, None)
+        # Past its bound a value is refused first since the console settings plan's Task 4
+        # (`past-limit`); what follows is the widened checks', read here.
+        given = [f for f in preflight.beyond(task, values, ALLOCATION, DIRECT, SRGB, None)
+                 if f.code != PAST_LIMIT]
         assert not any(f.blocking for f in given), (values, given)
         assert [f.code for f in given] == [
-            f.code for f in preflight.beyond(highest_none, values, ALLOCATION, DIRECT, SRGB, None)]
+            f.code for f in preflight.beyond(highest_none, values, ALLOCATION, DIRECT, SRGB, None)
+            if f.code != PAST_LIMIT]
 
 
 def test_a_value_no_float_holds_is_not_judged_outside_its_range_and_never_raises():
@@ -1012,22 +1039,28 @@ def test_a_set_size_past_its_range_whose_objects_stay_apart_on_the_tightest_ring
     for n in (13, 31):
         assert [(f.code, f.blocking) for f in _on_the_rig(crowded, {"set_size": n})] == [
             ("outside-range", False), ("crowded-array", False)]
+    # Their 0.98° apart is closer than their 1° size: `objects-touch` too, a warning since the
+    # console settings plan's Task 4 (the design's §4: "discs touching").
     assert [(f.code, f.blocking) for f in _on_the_rig(crowded, {"set_size": 32})] == [
-        ("outside-range", False), ("crowded-array", False), ("overlapping-objects", True)]
+        ("outside-range", False), ("crowded-array", False), ("objects-touch", False),
+        ("overlapping-objects", True)]
     (refusal,) = [f for f in _on_the_rig(crowded, {"set_size": 32}) if f.blocking]
     assert "0.98° apart on its ring at its least, 5°" in refusal.detail
     three = (Disc(size=3.0, color=Gray(16.0)),)
     larger = _search(object_window=3.0, targets=three, distractors=three)
+    # Twenty 3° discs 1.56° apart touch: `objects-touch` since the console settings plan's Task 4.
     assert [(f.code, f.blocking) for f in _on_the_rig(larger, {"set_size": 20})] == [
-        ("outside-range", False), ("crowded-array", False)]
+        ("outside-range", False), ("crowded-array", False), ("objects-touch", False)]
     assert [(f.code, f.blocking) for f in beyond_range(
         _windowless(6, looks=Disc(size=3.0), among=Disc(size=1.0)), {"set_size": 20})] == [
         ("outside-range", False)]
     assert [(f.code, f.blocking) for f in beyond_range(_windowless(6), {"set_size": 13})] == [
         ("outside-range", False)]
     triangles = _windowless(6, looks=Polygon(sides=3, size=1.0))
+    # Sixty 0.84° apart are closer than the triangle's 1° and the 1° discs beside it: they touch,
+    # a warning since the console settings plan's Task 4 (`objects-touch`, read by full sizes).
     assert [(f.code, f.blocking) for f in beyond_range(triangles, {"set_size": 60})] == [
-        ("outside-range", False)]
+        ("outside-range", False), ("objects-touch", False)]
     (refusal,) = [f for f in beyond_range(triangles, {"set_size": 1000}) if f.blocking]
     assert "closer than its smallest object is across (0.5°)" in refusal.detail
 
@@ -1291,27 +1324,31 @@ def _stereogram(correlation: Param) -> Task:
     return Task({"stereogram": trial}, default="stereogram")
 
 
-def test_a_correlation_with_one_bound_is_refused_at_load_and_widened_past_one_refused_again():
+def test_a_correlation_with_one_bound_is_judged_at_its_start_and_refused_past_one_where_set():
     """The fix round's concern 1: `_widest` read a setting with one bound as 0 to 0, so a
-    correlation declared up to 1 alone passed at load -- though a console can send it any value
-    below, unchecked -- and sent at 2 passed the widened check too: an impossible stereogram
-    accepted, the run failing mid-trial, what D2 refuses. Read over what it can reach (`_span`),
-    its undeclared lowest is without end: refused at load, saying so, and at 2 refused again,
-    naming the value. A correlation declared over [-0.5, 0.5] passes at load, and sent at 0.9,
-    a correlation still, is only outside its range. **The refusal names the setting and the fix**
-    (Task 10's re-review, minor; the PI kept the refusal on 2026-10-14, I4)."""
+    correlation declared up to 1 alone passed at load, though a console could send it any value
+    below, unchecked; the PI kept its refusal at load on 2026-10-14 (I4). **Since the console
+    settings plan's Task 4 an open side is judged at the setting's start** (the design's §4: every
+    limit that stays is hard, so a side is left open where nothing cannot be), so it loads at its
+    0.5, and a value no stereogram can hold is refused where it is set (`check.laid_out`: a
+    refusal the structure's checks newly give at the values): at -2, naming the value. Past its
+    one bound it is refused first (`past-limit`), and the widened checks still say what they
+    said. A correlation declared over [-0.5, 0.5] passes at load, and sent at 0.9 is refused only
+    as past its limit."""
     one_bound = _stereogram(Param("c", unit="r", high=1.0, start=0.5))
     control = _stereogram(Param("c", unit="r", low=-0.5, high=0.5, start=0.2))
 
-    (declared,) = [f for f in check_task(one_bound) if f.code == "impossible-correlation"]
-    (refusal,) = [f for f in beyond_range(one_bound, {"c": 2.0}) if f.blocking]
+    assert "impossible-correlation" not in {f.code for f in check_task(one_bound)}
+    (refusal,) = [f for f in checking.laid_out(one_bound, {"c": -2.0}) if f.blocking]
+    (widened_refusal,) = [f for f in beyond_range(one_bound, {"c": 2.0}) if f.blocking]
 
-    assert declared.blocking and "whose correlation has no declared lowest;" in declared.detail
-    assert declared.detail.endswith("; 'c' declares no lowest; declare both limits")
     assert refusal.code == "impossible-correlation"
-    assert refusal.detail.startswith(
+    assert refusal.detail.startswith("state 'on' shows a stereogram whose correlation reaches -2")
+    assert widened_refusal.code == "impossible-correlation"
+    assert widened_refusal.detail.startswith(
         "with 'c' at 2, outside its declared range: state 'on' shows a stereogram whose "
-        "correlation reaches 2 and has no declared lowest;")
+        "correlation reaches 2")
+    assert not [f for f in checking.laid_out(one_bound, {"c": 0.9}) if f.blocking]
     assert "impossible-correlation" not in {f.code for f in check_task(control)}
     assert [(f.code, f.blocking) for f in beyond_range(control, {"c": 0.9})] == [
         ("outside-range", False)]
@@ -1332,34 +1369,33 @@ def _targeted(target: Param) -> Task:
     return Task({"search": trial}, default="search")
 
 
-def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_array_again():
+def test_a_target_index_with_one_bound_is_judged_at_its_start_and_refused_past_the_array_where_set():
     """The fix round's concern 1, for an array: a target index declared up to 1 alone was read as
-    0 to 0, so it passed at load -- though a console can send it below 0, unchecked, where the
-    target window is none of the objects -- and sent at 6, past four objects, passed the widened
-    check too, the run then failing as the trial expands its windows. Refused at load, saying
-    its lowest is undeclared, and at 6 refused again, naming the value; one declared over [0, 1]
-    passes at load, and sent at 3, still one of the four, is only outside its range. The refusal
-    names the setting and the fix, as a set size with no lowest does (Task 10's re-review, minor;
-    the PI kept the refusal on 2026-10-14, I4)."""
+    0 to 0, so it passed at load, though a console could send it below 0, unchecked, where the
+    target window is none of the objects; the PI kept its refusal at load on 2026-10-14 (I4).
+    **Since the console settings plan's Task 4 its open side is judged at its start** (the
+    design's §4), so it loads at its 0, and an index no object holds is refused where it is set
+    (`check.laid_out`): -1, or 6 past four objects, naming the value. One declared over [0, 1]
+    passes at load, and sent at 3 is refused only as past its limit, the widened checks finding
+    nothing more. A set size with no lowest and no start is read as declared, from 0."""
     one_bound = _targeted(Param("ti", unit="index", high=1, start=0))
     control = _targeted(Param("ti", unit="index", low=0, high=1, start=0))
 
-    (declared,) = [f for f in check_task(one_bound) if f.code == "target-outside-array"]
-    (refusal,) = [f for f in beyond_range(one_bound, {"ti": 6}) if f.blocking]
+    assert "target-outside-array" not in {f.code for f in check_task(one_bound)}
+    (below,) = [f for f in checking.laid_out(one_bound, {"ti": -1}) if f.blocking]
+    (past,) = [f for f in checking.laid_out(_targeted(Param("ti", unit="index", low=0, start=0)),
+                                            {"ti": 6}) if f.blocking]
 
-    assert declared.blocking and (
-        "with a target index reaching 1 that can be below 0, its lowest undeclared;"
-        in declared.detail)
-    assert declared.detail.endswith("; 'ti' declares no lowest; declare both limits")
-    assert refusal.code == "target-outside-array"
-    assert refusal.detail.startswith(
-        "with 'ti' at 6, outside its declared range: state 'search' shows an array of as few "
-        "as 4 objects with a target index reaching 6 that can be below 0")
+    assert below.code == past.code == "target-outside-array"
+    assert below.detail.startswith(
+        "state 'search' shows an array of as few as 4 objects with a target index reaching -1")
+    assert past.detail.startswith(
+        "state 'search' shows an array of as few as 4 objects with a target index reaching 6")
     assert "target-outside-array" not in {f.code for f in check_task(control)}
     assert [(f.code, f.blocking) for f in beyond_range(control, {"ti": 3})] == [
         ("outside-range", False)]
     sized = replace(control.structures["search"], params=[
-        *control.params, Param("n", unit="objects", high=6, start=4)])
+        *control.params, Param("n", unit="objects", high=6)])
     sized = replace(sized, states=[replace(sized.states[0], enter=[Show(Stimulus(
         "search", at=(0.0, 0.0), looks=Array(n=P("n"), radius=8.0, target=P("ti"))))])])
     (fewest,) = [f for f in check(sized) if f.code == "target-outside-array"]
@@ -1367,22 +1403,21 @@ def test_a_target_index_with_one_bound_is_refused_at_load_and_widened_past_the_a
     assert fewest.detail.endswith("; 'n' declares no lowest; declare both limits")
 
 
-def test_a_target_index_or_a_correlation_with_no_highest_is_refused_at_load_naming_it():
-    """The PI's answer of 2026-10-14 (the final review's I4: "Refuse at load") covers either
-    missing limit: a target index declared from 0 alone can pass any array, and a correlation
-    declared from -1 alone can pass +1, so each is refused at load, naming the setting, the
-    side it leaves open and the fix."""
-    (target,) = [f for f in check_task(_targeted(Param("ti", unit="index", low=0, start=0)))
-                 if f.code == "target-outside-array"]
-    (correlation,) = [f for f in check_task(_stereogram(Param("c", unit="r", low=-1.0, start=0.5)))
-                      if f.code == "impossible-correlation"]
+def test_a_target_index_or_a_correlation_with_no_highest_is_judged_at_its_start():
+    """The PI's answer of 2026-10-14 (the final review's I4: "Refuse at load") covered either
+    missing limit. **Since the console settings plan's Task 4 an open side is judged at the
+    setting's start** (the design's §4): a target index from 0 alone and a correlation from -1
+    alone load at their starts, and what no array or stereogram can hold is refused where it is
+    set (`check.laid_out`): an index of 4 on four objects, a correlation of 1.5."""
+    targeted = _targeted(Param("ti", unit="index", low=0, start=0))
+    stereogram = _stereogram(Param("c", unit="r", low=-1.0, start=0.5))
 
-    assert target.blocking and "with a target index with no declared highest;" in target.detail
-    assert target.detail.endswith("; 'ti' declares no highest; declare both limits")
-    assert correlation.blocking and "whose correlation has no declared highest;" in (
-        correlation.detail)
-    assert correlation.detail.endswith("; 'c' declares no highest; declare both limits")
-
+    assert "target-outside-array" not in {f.code for f in check_task(targeted)}
+    assert "impossible-correlation" not in {f.code for f in check_task(stereogram)}
+    assert [f.code for f in checking.laid_out(targeted, {"ti": 4}) if f.blocking] == [
+        "target-outside-array"]
+    assert [f.code for f in checking.laid_out(stereogram, {"c": 1.5}) if f.blocking] == [
+        "impossible-correlation"]
 
 def _set_size(declared: Param) -> Trial:
     """`_windowless`'s array of 1° discs on a ring 8-12° out, its set size declared as

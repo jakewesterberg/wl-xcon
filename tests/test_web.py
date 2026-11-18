@@ -674,7 +674,7 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
     assert "welfare ceiling 0.4 mL" in params
     assert "0.10 to 1.00 s" in params
     assert "open to 5.00 deg" in params
-    assert "no declared range" in params
+    assert "no limit" in params  # "no declared range" until the console settings plan's Task 4
     assert "unset" in params
     assert "penguin" in params
 

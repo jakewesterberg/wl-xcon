@@ -28,7 +28,7 @@ import pytest
 import _sessions
 from _rig import DIRECT, PATH as RIG_FILE
 from wl_xcon import check, preflight, service, variation
-from wl_xcon.check import CUED, IMPOSSIBLE, check_task
+from wl_xcon.check import CUED, IMPOSSIBLE, PAST_LIMIT, check_task
 from wl_xcon.cli import _load_allocation, _load_task, main
 from wl_xcon.photometry import SRGB, Gray
 from wl_xcon.task import (
@@ -189,7 +189,10 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
     refused where that breaks the run (here a target drawn off the screen). Each finding names
     where and which draw, and is said once, never again for a condition whose own value gave it.
     Not checked: a draw inside its range, a value a weighted set gives at weight 0, a set of
-    appearances, a block type's draw in a plain run, and a draw the load refuses."""
+    appearances, a block type's draw in a plain run, and a draw the load refuses. **Since the
+    console settings plan's Task 4 every declared bound is hard**, so each extreme past one is
+    refused first (`past-limit`), naming where and which draw; what follows is the widened
+    checks', unchanged, read here with those refusals set aside."""
     appearances = next(p for p in _task().params if p.name == "target_appearance").choices
     task = _task(draws={
         "fix_hold": Uniform(0.2, 2.5, repeat=FRESH),
@@ -201,6 +204,13 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
     assert not _blocking(task)
 
     found = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None)
+    past = [f.detail.split(": ")[0] for f in found if f.code == PAST_LIMIT]
+    assert past == [
+        "in the plain run, the task's draw of 'fix_hold' at 2.5",
+        "in the plain run, the task's draw of 'fix_acquisition' at 12",
+        "in the plain run, the task's draw of 'target_x' at 40"]
+    assert all(f.blocking for f in found if f.code == PAST_LIMIT)
+    found = [f for f in found if f.code != PAST_LIMIT]
 
     warned = [(f.code, f.detail.split(": ")[0]) for f in found if not f.blocking]
     assert warned == [
@@ -231,7 +241,8 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
     ])})
     assert not _blocking(planned)
 
-    found = preflight.beyond(planned, {}, ALLOCATION, DIRECT, SRGB, None, plan="p")
+    found = [f for f in preflight.beyond(planned, {}, ALLOCATION, DIRECT, SRGB, None, plan="p")
+             if f.code != PAST_LIMIT]
 
     assert [(f.code, f.detail.split(": ")[0]) for f in found if not f.blocking] == [
         ("outside-range", "in plan 'p', block 'b', condition 'd'"),
@@ -274,7 +285,9 @@ def test_a_draw_over_many_conditions_is_checked_once_and_said_once(monkeypatch):
     found = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="p")
 
     assert len(asked) == 2 and asked[1]["fix_hold"] == 2.5
-    assert [f.detail.split(": ")[0] for f in found] == [
+    # Refused as past its limit first since the console settings plan's Task 4, said once too.
+    assert [f.code for f in found] == [PAST_LIMIT, "outside-range"]
+    assert [f.detail.split(": ")[0] for f in found if f.code != PAST_LIMIT] == [
         "in plan 'p', block 'b', condition 'target_x=-6.0, target_y=-1.0', the task's draw of "
         "'fix_hold' at 2.5"]
 

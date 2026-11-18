@@ -18,7 +18,7 @@ from _rig import DIRECT, RIG
 from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_task
-from wl_xcon.check import check, check_task
+from wl_xcon.check import UNEXPLAINED_LIMIT, check, check_task
 from wl_xcon.cones import V_F10
 from wl_xcon.declarations import COMMON, OVERRIDE, OWN, SHARED, resolved
 from wl_xcon.findings import SESSION_KINDS
@@ -610,11 +610,14 @@ def test_each_reference_task_file_defines_one_task_object_over_its_trial(name):
 @pytest.mark.parametrize("calibration", [None, SRGB, PANEL], ids=["none", "default", "measured"])
 def test_each_reference_task_object_adds_no_finding_to_its_trials(name, calibration):
     """Its settings' meanings, its reaction time and its choice are declared and well formed: the
-    task object's checks find nothing its one structure's did not."""
+    task object's checks find nothing its one structure's did not, **but a limit with no reason**
+    (`unexplained-limit`, the console settings plan's Task 4): each reference task's builder's
+    ranges are warned of until the plan's Task 5 takes them away or gives them their reasons."""
     task = _load_task(TASKS / f"{name}.py")
     allocation = _load("allocation", "ALLOCATION")
 
-    assert check_task(task, allocation, geometry=GEOMETRY, calibration=calibration) == check(
+    assert [f for f in check_task(task, allocation, geometry=GEOMETRY, calibration=calibration)
+            if f.code != UNEXPLAINED_LIMIT] == check(
         task.trial, allocation, geometry=GEOMETRY, calibration=calibration)
 
 
