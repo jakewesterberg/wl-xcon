@@ -83,12 +83,6 @@ def _source(stages: list[str], order: str = CONFIRMED, plans: str = "") -> str:
     then always 0), and one plan, `train`, of `stages` in `order`, and `plans`, more of them as
     source. Engine test material."""
     text = Path(SEARCH).read_text()
-    for old, new in (('Param("set_size", unit="objects", low=2, high=12)',
-                      'Param("set_size", unit="objects", low=1, high=12)'),
-                     ('Param("target_index", unit="index", low=0, high=1)',
-                      'Param("target_index", unit="index", low=0, high=0)')):
-        assert text.count(old) == 1, old
-        text = text.replace(old, new)
     return text + (
         "\n\nimport dataclasses as _dataclasses\n"
         "from wl_xcon.scheduler import EVERY_TRIAL\n"

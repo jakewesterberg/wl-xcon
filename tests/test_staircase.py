@@ -381,7 +381,7 @@ def test_a_staircase_on_an_undeclared_setting_is_refused_at_load(tmp_path):
         f'"undeclared": Plan([{block}"fix_holdd", (0.1, 0.2)))])',
         f'"bounded": Plan([{block}"reward_correct", (0.1, 0.2)))])',
         f'"choices": Plan([{block}"target_appearance", (1.0, 2.0)))])',
-        f'"outside": Plan([{block}"fix_hold", (0.01, 0.2, 2.5)))])',
+        f'"outside": Plan([{block}"fix_hold", (0.01, 0.2, 12.5)))])',
         '"drawn": Plan([Block("b", [Condition("c", {}, target=5)], '
         'draws={"fix_hold": Uniform(0.2, 0.4, repeat=FRESH)}, '
         'staircase=Staircase("fix_hold", (0.1, 0.2)))])',
@@ -404,8 +404,8 @@ def test_a_staircase_on_an_undeclared_setting_is_refused_at_load(tmp_path):
         "choices": "plan 'choices': block 'b' has a staircase on 'target_appearance', a setting "
                    "of choices, and a staircase steps among numbers; declare it with a range, or "
                    "vary it by conditions",
-        "outside": "plan 'outside': block 'b''s staircase on 'fix_hold' has the levels 0.01, 2.5 "
-                   "outside the range the setting declares, 0.05 to 2.0 s; give it levels inside "
+        "outside": "plan 'outside': block 'b''s staircase on 'fix_hold' has the level 12.5 "
+                   "outside the range the setting declares, 0.0 to 10.0 s; give it levels inside "
                    "it",
         "drawn": "plan 'drawn': block 'b' draws 'fix_hold' and its staircase steps it: a setting "
                  "is drawn or stepped by a staircase, never both; take it out of the block's "
@@ -550,8 +550,8 @@ def test_a_step_changed_live_puts_the_staircase_at_the_level_nearest_its_value()
 
 #: Two settings a staircase's counts and steps and a rule's numbers can come from, for the load
 #: checks below: a count from 1 to 5, a step from 0.05 to 0.5, a share and a window of answers.
-_NAMED = (('        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),',
-           '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+_NAMED = (('        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),',
+           '        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),\n'
            '        Param("count", unit="answers", low=1, high=5, start=3),\n'
            '        Param("step", unit="s", low=0.05, high=0.5, start=0.1),\n'
            '        Param("share", unit="fraction", low=0.5, high=1.0, start=0.8),\n'
@@ -572,8 +572,8 @@ def test_a_staircases_settings_are_checked_at_load(tmp_path):
         f'"own": Plan([{block}"fix_hold", Steps(0.1, 1.0, P("fix_hold"))))])',
         f'"bounded": Plan([{block}"fix_hold", (0.1, 0.2), up=P("reward_correct")))])',
         f'"zero": Plan([{block}"fix_hold", Steps(0.1, 1.0, P("target_luminance"))))])',
-        f'"below": Plan([{block}"fix_hold", (0.1, 0.2), down=P("fix_window")))])',
-        f'"outside": Plan([{block}"fix_hold", Steps(0.1, 2.5, P("step"))))])',
+        f'"below": Plan([{block}"fix_hold", (0.1, 0.2), down=P("target_hold")))])',
+        f'"outside": Plan([{block}"fix_hold", Steps(0.1, 12.5, P("step"))))])',
     ]) + "}"
 
     found = _refused(_planned(tmp_path, DETECTION, plans, "detection", *_NAMED))
@@ -584,8 +584,8 @@ def test_a_staircases_settings_are_checked_at_load(tmp_path):
     assert "takes its step from 'fix_hold', which is the setting it steps" in found["own"]
     assert "takes its up from 'reward_correct', which is a bounded setting" in found["bounded"]
     assert "takes its step from 'target_luminance', whose range reaches 0" in found["zero"]
-    assert "takes its down from 'fix_window', whose range reaches 0.5" in found["below"]
-    assert "outside the range the setting declares, 0.05 to 2.0 s" in found["outside"]
+    assert "takes its down from 'target_hold', whose range reaches 0" in found["below"]
+    assert "outside the range the setting declares, 0.0 to 10.0 s" in found["outside"]
 
 
 def test_a_rules_numbers_may_be_settings_checked_at_load_and_read_live(tmp_path):

@@ -171,7 +171,7 @@ def test_a_tasks_draw_a_blocks_and_a_conditions_own_range_each_draw_and_say_wher
 #: Every kind of draw, and a condition's own range in a block that replaces one of the task's.
 REPLAYED = dict(
     draws=('{"target_x": Uniform(-10.0, 10.0, repeat=SAME), '
-           '"target_y": TruncatedNormal(0.0, 8.0, repeat=FRESH), '
+           '"target_y": TruncatedNormal(0.0, 8.0, low=-16.0, high=16.0, repeat=FRESH), '
            '"fix_hold": NonAging(0.2, 0.3, 0.5, repeat=FRESH), '
            '"target_appearance": Listed(' + APPEARANCES + ', repeat=FRESH)}'),
     plans=('{"p": Plan([Block("a", [Condition("near", {}, target=3), '
@@ -431,11 +431,13 @@ def test_generated_conditions_play_and_each_cell_owes_its_target(tmp_path):
 def test_the_start_row_records_the_draws_with_every_field_and_the_generated_conditions(tmp_path):
     """The C3 spec §10 and §4 ("each run's start row lists them too, so the record needs no task
     file"; pitfall P20), with the engine C3 plan's call 12 (the controller's ruling 2): the task's
-    draws as declared, every field, a normal's cut filled from its setting's range, and what each
+    draws as declared, every field, a normal's cut filled from its setting's range when it gives
+    none (`fix_hold`'s, 0 to 10 s; a position declares no range, so its draw gives its own), and what each
     block's factors made, with their values, targets and the exclusions; `plan_form` stays the
     plan as declared. A run of a task drawing nothing records no draws and nothing made."""
     path = _sessions.varied_task(
-        tmp_path, draws='{"target_y": TruncatedNormal(0.0, 4.0, repeat=SAME)}', plans=FACTORIAL)
+        tmp_path, draws='{"target_y": TruncatedNormal(0.0, 4.0, low=-16.0, high=16.0, repeat=SAME)}',
+        plans=FACTORIAL)
     task = _load_task(path)
     session = _session(_spec(tmp_path, path, plan="f"),
                        world=lambda trial, values, index: _right(values))
@@ -446,7 +448,7 @@ def test_the_start_row_records_the_draws_with_every_field_and_the_generated_cond
     assert start["draws"] == {"target_y": {"class": "TruncatedNormal", "fields": {
         "mean": 0.0, "sd": 4.0, "low": -16.0, "high": 16.0, "repeat": "same"}}}
     ranged = {"class": "TruncatedNormal", "fields": {
-        "mean": 0.35, "sd": 0.05, "low": 0.05, "high": 2.0, "repeat": "fresh"}}
+        "mean": 0.35, "sd": 0.05, "low": 0.0, "high": 10.0, "repeat": "fresh"}}
     assert start["generated"] == [{
         "block": "grid",
         "conditions": [
@@ -481,10 +483,10 @@ def _directed(folder: Path, draws: str, plans: str = "{}") -> Path:
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(P("target_ecc"), P("target_dir")),\n'
          '            radius=P("target_window"),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_ecc", unit="deg", low=0.0, high=16.0, start=8.0),\n'
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
     ):
         assert text.count(old) == 1, old
         text = text.replace(old, new)

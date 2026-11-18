@@ -665,7 +665,7 @@ def test_a_session_refuses_a_task_whose_setting_says_nothing_of_what_it_means(tm
     no meaning refuses the run before anything is strobed: the card carries only the head's
     fixation, which the fixture strobed (`_session`)."""
     text = Path("tasks/fixation_detection.py").read_text()
-    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    was = '        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),\n'
     assert text.count(was) == 1
     task = tmp_path / "unexplained.py"
     task.write_text(text.replace(
@@ -703,7 +703,7 @@ def test_each_run_names_its_task_by_its_content_never_its_path(tmp_path):
     copy of the task under another name is the same task; one with a start value moved is another
     (the research note's §3.1 found the path there)."""
     text = Path("tasks/fixation_detection.py").read_text()
-    was = 'Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3)'
+    was = 'Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10)'
     assert text.count(was) == 1
     same, moved = tmp_path / "same_task.py", tmp_path / "moved_task.py"
     same.write_text(text)
@@ -2182,19 +2182,19 @@ def test_a_live_write_past_a_parameters_declared_bound_is_refused_with_its_reaso
     outside its range was staged with a warning when nothing broke; **since the console settings
     plan's Task 4 every declared bound is a hard limit** (the PI, 2026-11-16, "Hard limits only
     where impossible"), so `set`, unchanged, refuses it through `_beyond_range` with the limit's
-    reason -- here none, the reference task's builder's 2 s -- whether or not a record is open,
+    reason -- here the state's 10 s a hold cannot outlast -- whether or not a record is open,
     nothing staged and no warning written."""
-    said = ("'fix_hold' at 8 is refused, and the previous value stands: past-limit: 'fix_hold' at "
-            "8 s is above its 2: the task gives no reason for this limit (unexplained-limit)")
+    said = ("'fix_hold' at 12 is refused, and the previous value stands: past-limit: 'fix_hold' at "
+            "12 s is above its 10: the state ends at 10 s, so a longer hold cannot finish")
     unopened = _session(_spec(tmp_path / "unopened", trials=4))
     with pytest.raises(Exceeded) as refused:
-        unopened.set("fix_hold", 8.0, by=Box("console"))
+        unopened.set("fix_hold", 12.0, by=Box("console"))
     assert str(refused.value) == said
     session = _session(_spec(tmp_path / "opened", trials=4))
     session.open()
 
     with pytest.raises(Exceeded) as refused:
-        session.set("fix_hold", 8.0, by=Box("console"))
+        session.set("fix_hold", 12.0, by=Box("console"))
 
     assert str(refused.value) == said
     assert not session.staged and _warned(session) == []
@@ -2206,20 +2206,23 @@ def test_a_live_wait_longer_than_any_the_task_declares_is_staged_with_its_warnin
     Task 4** a value past a declared highest is refused (`past-limit`), so the warning is a wait's
     with no highest, set longer than any the task's own starting values give (the planner's call):
     `fix_acquisition` open above, from 4 s, set to 60 s live -- past the 10 s the task's longest
-    wait is -- is staged with that warning, accepted by who sent it (`Session._laid_out`); on the
-    reference task, whose 10 s is its highest, 60 s is refused."""
+    wait is -- is staged with that warning, accepted by who sent it (`Session._laid_out`); on a
+    task that declares its 10 s as the highest, 60 s is refused. (The reference task declares none
+    since the console settings plan's Task 5, so it is the open one here.)"""
     path = tmp_path / "open_wait.py"
     text = Path("tasks/fixation_detection.py").read_text()
-    old = '        Param("fix_acquisition", unit="s", low=0.5, high=10.0, start=4.0),'
+    old = '        Param("fix_acquisition", unit="s", low=0.0, start=4.0),'
     assert text.count(old) == 1
-    path.write_text(text.replace(old, '        Param("fix_acquisition", unit="s", low=0.0, '
-                                      'start=4.0),'))
+    path.write_text(text)
+    capped_path = tmp_path / "capped_wait.py"
+    capped_path.write_text(text.replace(old, '        Param("fix_acquisition", unit="s", low=0.0, '
+                                             'high=10.0, start=4.0, why="a stand-in"),'))
     link = Simulated()
     link.queue(SetParameter(name="fix_acquisition", value=60.0, by=Box("jake")))
     session = _session(_spec(tmp_path / "open", trials=2, task=str(path)), link=link)
     capped = Simulated()
     capped.queue(SetParameter(name="fix_acquisition", value=60.0, by=Box("jake")))
-    refused = _session(_spec(tmp_path / "capped", trials=2), link=capped)
+    refused = _session(_spec(tmp_path / "capped", trials=2, task=str(capped_path)), link=capped)
 
     session.run()
     refused.run()
@@ -3741,9 +3744,10 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         None,
         None,
         None,
-        # Why each limit stands (schema 22; the console settings plan's Task 4): the reference
-        # task's builder's range, with no reason, until its Task 5.
-        {"low": None, "high": None},
+        # Why each limit stands (schema 22; the console settings plan's Task 4): the standard
+        # reason for a lowest of 0, and the task's for its state ending at 10 s (Task 5).
+        {"low": "below 0 cannot be",
+         "high": "the state ends at 10 s, so a longer hold cannot finish"},
     )
     assert by_name["reward_correct"] == (
         "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None, None, None, None,
@@ -3769,12 +3773,20 @@ def test_a_session_holds_its_task_to_the_setup_it_runs_in(tmp_path):
     """Check 8 and the setup check ran only in the tests until direct view part 2:
     `run()` called `check()` without a geometry. `fixation_detection` is written for
     direct view, so in the stereoscope it is refused, naming both."""
-    session = _session(_spec(tmp_path, geometry=STEREOSCOPE))
+    # Its starting 10° fits the mask now that no ±16° is declared (the PI, 2026-11-16, "Hard
+    # limits only where impossible"), so the task that starts at 16°, what the range reached, is
+    # the one refused: an open side is held at its start at load.
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = 'Param("target_x", unit="deg", start=10.0)'
+    assert text.count(old) == 1
+    far = tmp_path / "far.py"
+    far.write_text(text.replace(old, 'Param("target_x", unit="deg", start=16.0)'))
+    session = _session(_spec(tmp_path, geometry=STEREOSCOPE, task=str(far)))
 
     with pytest.raises(SystemExit) as refused:
         session.run()
 
-    # The setups' mismatch is a warning (XC-352's A12); its ±16° beyond the mask still refuses.
+    # The setups' mismatch is a warning (XC-352's A12); 16°, beyond the mask, still refuses.
     assert "stimulus-off-screen" in str(refused.value) and "wrong-setup" not in str(refused.value)
 
 
@@ -4077,39 +4089,43 @@ def _warned(session) -> list[dict]:
 def test_a_live_value_past_its_declared_bound_is_refused_saying_the_limits_reason(tmp_path):
     """XC-352's D2 (the PI, 2026-10-11) accepted a value outside its range with a warning that the
     task was not designed for it; **the PI's 2026-11-16 "Hard limits only where impossible"
-    replaces it** (the console settings plan's Task 4): a fixation window of 7°, past the 5° the
-    reference task declares, is refused as it is offered, saying the limit and its reason, the
-    previous value standing, no warning written and nothing on the feed but the refusal."""
+    replaces it** (the console settings plan's Task 4): a fixation point's luminance of 90, past
+    the PI's 80 cd/m2 (COL-29, the bound the reference task keeps), is refused as it is offered,
+    saying the limit and its reason, the previous value standing, no warning written and nothing
+    on the feed but the refusal."""
     link = Simulated()
-    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    link.queue(SetParameter(name="fix_luminance", value=90.0, by=Box("jake")))
     session = _session(_spec(tmp_path, trials=3), link=link)
 
     session.run()
 
-    assert session.refusals == [("fix_window", Box("jake"), (
-        "'fix_window' at 7 is refused, and the previous value stands: past-limit: 'fix_window' at "
-        "7 deg is above its 5: the task gives no reason for this limit (unexplained-limit)"))]
-    assert session.spec.values["fix_window"] == VALUES["fix_window"] and _warned(session) == []
+    assert session.refusals == [("fix_luminance", Box("jake"), (
+        "'fix_luminance' at 90 is refused, and the previous value stands: past-limit: "
+        "'fix_luminance' at 90 cd/m2 is above its 80: white on the default calibration, the "
+        "published sRGB 80 cd/m² (COL-29)"))]
+    assert session.spec.values["fix_luminance"] == 40.0 and _warned(session) == []
     assert not [c for c in session.controls if c[0] == "warning"]
 
 
 def test_a_live_value_that_would_put_the_target_off_screen_is_refused_saying_so(tmp_path):
     """XC-352's D2: "refuse only what would break the run (off screen, ...), saying what". A
-    target 40° out (declared ±16°) is off direct view's screen: refused, the previous value
-    stands, and no warning is recorded -- past its declared 16° first since the console settings
-    plan's Task 4 (`past-limit`); the same target with its range open is refused as off the field,
-    the layout at the value it leaves (`Session._laid_out`)."""
+    target 40° out is off direct view's screen: refused, the previous value stands, and no
+    warning is recorded. The reference task declares no range for it (the PI, 2026-11-16), so it
+    is refused as off the field, the layout at the value it leaves (`Session._laid_out`); a task
+    that declares ±16°, as this one did, refuses it past its declared 16° first since the
+    console settings plan's Task 4 (`past-limit`)."""
     link = Simulated()
     link.queue(SetParameter(name="target_x", value=40.0, by=Box("jake")))
-    session = _session(_spec(tmp_path, trials=3), link=link)
-    path = tmp_path / "open_target.py"
+    path = tmp_path / "ranged_target.py"
     text = Path("tasks/fixation_detection.py").read_text()
-    old = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
+    old = 'Param("target_x", unit="deg", start=10.0)'
     assert text.count(old) == 1
-    path.write_text(text.replace(old, 'Param("target_x", unit="deg", start=10.0)'))
+    path.write_text(text.replace(old, 'Param("target_x", unit="deg", low=-16.0, high=16.0, '
+                                      'start=10.0, why="a stand-in")'))
+    session = _session(_spec(tmp_path / "ranged", trials=3, task=str(path)), link=link)
     opened = Simulated()
     opened.queue(SetParameter(name="target_x", value=40.0, by=Box("jake")))
-    open_range = _session(_spec(tmp_path / "open", trials=3, task=str(path)), link=opened)
+    open_range = _session(_spec(tmp_path / "open", trials=3), link=opened)
 
     session.run()
     open_range.run()
@@ -4173,7 +4189,7 @@ def test_a_live_value_whose_widened_checks_raise_or_whose_warning_cannot_be_writ
     refuses the value, the session running on."""
     monkeypatch.setattr("wl_xcon.taskd.beyond_range", lambda *a, **k: 1 / 0)
     link = Simulated()
-    link.queue(SetParameter(name="fix_window", value=7.0, by=Box("jake")))
+    link.queue(SetParameter(name="fix_luminance", value=90.0, by=Box("jake")))
     raised = _session(_spec(tmp_path / "raised", trials=3), link=link)
     raised.run()
     monkeypatch.undo()
@@ -4220,9 +4236,11 @@ def test_a_live_value_is_checked_with_the_values_staged_ahead_of_it(tmp_path, mo
     """Task 11's minor (the final review, row 30): `_beyond_range` checks a value outside its
     range with every value staged ahead of it, so two queued values that break the run only
     together refuse the second. A stand-in check refuses the pair alone (the reference task has
-    no such pair); left out, the staged value was read as the session's own, and both staged."""
+    no such pair); left out, the staged value was read as the session's own, and both staged.
+    (Two lights past the PI's 80 cd/m2 stand for the two values outside their ranges: the
+    reference task keeps no other bound a window or a hold passes.)"""
     def judged(task, values, *args, **kwargs):
-        if values["fix_window"] == 7.0 and values["target_window"] == 9.0:
+        if values["fix_luminance"] == 85.0 and values["target_luminance"] == 90.0:
             return [Finding("overlapping-windows", "the two windows collide")]
         return [Finding("outside-range", "outside", blocking=False, accepted_in=SESSION_KINDS)]
 
@@ -4230,10 +4248,10 @@ def test_a_live_value_is_checked_with_the_values_staged_ahead_of_it(tmp_path, mo
     session = _session(_spec(tmp_path, trials=4))
     session.open()
 
-    session.set("fix_window", 7.0, by=Box("jake"))
+    session.set("fix_luminance", 85.0, by=Box("jake"))
     with pytest.raises(Exceeded, match="refuse it: overlapping-windows: the two windows collide"):
-        session.set("target_window", 9.0, by=Box("jake"))
-    assert [name for name, *_ in session.staged] == ["fix_window"]
+        session.set("target_luminance", 90.0, by=Box("jake"))
+    assert [name for name, *_ in session.staged] == ["fix_luminance"]
 
 
 def test_a_live_value_whose_warning_its_sessions_kind_does_not_accept_is_refused_saying_so(
@@ -4250,7 +4268,7 @@ def test_a_live_value_whose_warning_its_sessions_kind_does_not_accept_is_refused
 
     with pytest.raises(Exceeded, match="the load-time checks refuse it: color-on-default: names "
                                        "colors; the previous value stands"):
-        session.set("fix_window", 7.0, by=Box("jake"))
+        session.set("fix_luminance", 90.0, by=Box("jake"))
     assert not session.staged and _warned(session) == []
 
 

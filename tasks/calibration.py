@@ -54,6 +54,10 @@ from wl_xcon.task import (
     Window,
 )
 
+#: Why a hold keeps a highest: the state it is held in ends at a fixed 10 s, so a longer hold
+#: cannot finish (the engine C2a plan's O2; `hold-cut-short`).
+HOLD_WHY_10 = "the state ends at 10 s, so a longer hold cannot finish"
+
 TARGET = Stimulus(
     "cal_target", at=(P("target_x"), P("target_y")), looks=Disc(size=0.3, color=Gray(P("target_luminance")))
 )
@@ -74,26 +78,24 @@ calibration = Trial(
         )
     ],
     params=[
-        # Bounded to direct view's calibration region, ±15° × ±15° (direct-view spec
-        # §6), not to the constellation of the day: check 8 inspects the parameter
-        # *space*, and a range wider than the field is a task that can be scheduled
-        # off-screen. Direct view shows ±30.5° × ±18.4°, so the region is the tighter
-        # bound. It was ±12 in the interim, at the stereoscope's mask (2026-09-28), and
-        # ±14.5 × ±16.1 before that, 0.85 of the 31.5-inch panel's field.
-        Param("target_x", unit="deg", low=-15.0, high=15.0),
-        Param("target_y", unit="deg", low=-15.0, high=15.0),
+        # No range (the PI, 2026-11-16, "Hard limits only where impossible"): a target off
+        # the field is refused where it is set, and one past direct view's calibration region
+        # (±15°, direct-view spec §6) is warned of as extrapolation, not held by a guess.
+        Param("target_x", unit="deg"),
+        Param("target_y", unit="deg"),
         # Wider than an ordinary fixation window. A calibration window has to admit
         # gaze that is *wrong by the amount calibration is about to correct*; sized
         # for a good map it would reject every fixation on the uncalibrated animal
         # it exists to measure.
-        Param("cal_window", unit="deg", low=1.0, high=8.0),
-        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
-        Param("cal_hold", unit="s", low=0.1, high=2.0),
+        Param("cal_window", unit="deg"),
+        Param("fix_acquisition", unit="s", low=0.0),
+        Param("cal_hold", unit="s", low=0.0, high=10.0, why=HOLD_WHY_10),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
         # standard's), until a measured calibration and V9's brightness cap say otherwise
         # (engine spec §7.1, §7.7).
-        Param("target_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
+        Param("target_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0,
+              why="white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
     ],
     states=[
         State(

@@ -22,7 +22,8 @@ import pytest
 from _calibrations import LINEAR, SPECTRA
 from _rig import DIRECT, RIG, STEREOSCOPE
 from wl_xcon import exact, look, screen, viewport
-from wl_xcon.check import check
+from wl_xcon.check import check, check_task
+from wl_xcon.cli import _load_task
 from wl_xcon.photometry import DKL, RMS, SRGB, Calibration, ConeContrast, Gray, Michelson, Weber, xyY
 from wl_xcon.task import (
     After,
@@ -181,7 +182,10 @@ def test_each_reference_task_s_first_stimulus_is_drawn_at_its_starting_values(ta
     attribute, stimulus, calibration = REFERENCE[task]
     trial = _load(task, attribute)
     allocation = _load("allocation", "ALLOCATION")
-    assert [f for f in check(trial, allocation, geometry=DIRECT, calibration=calibration)
+    # At the values the task starts at: an open side is held there (the console settings design's
+    # §4), as `check` of the bare trial cannot, its places declaring no range.
+    assert [f for f in check_task(_load_task(Path("tasks") / f"{task}.py"), allocation,
+                                  geometry=DIRECT, calibration=calibration)
             if f.blocking] == []
     values = {p.name: p.start for p in trial.params if p.start is not None}
     # `calibration` declares no starting position yet (XC-183); straight ahead is one it allows.

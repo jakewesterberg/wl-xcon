@@ -143,13 +143,13 @@ def _sourced(folder: Path) -> Path:
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(P("target_ecc"), P("target_dir")),\n'
          '            radius=P("target_window"),'),
-        ('        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0),',
-         '        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0, live=False),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_window", unit="deg", start=3.0),',
+         '        Param("target_window", unit="deg", start=3.0, live=False),'),
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_ecc", unit="deg", low=0.0, high=16.0, start=8.0),\n'
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0),\n'
          '        Param("spare", unit="deg", low=0.0, high=1.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
         tail=("from wl_xcon.task import NEITHER, NOT_DIFFICULTY, STIMULUS, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={\n"
               "    **TASK.meanings,\n"
@@ -239,9 +239,9 @@ def _ceiling_named(folder: Path) -> Path:
     test material."""
     return _edited(
         _sessions.varied_task(folder, name="ceiling"),
-        ('        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),',
+        ('        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),',
          '        Param("reward_correct", unit="mL", low=0.0, high=1.0),\n'
-         '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),'),
+         '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),'),
         tail=("from wl_xcon.task import NEITHER, NOT_DIFFICULTY, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={'reward_correct': Meaning(\n"
               "    NOT_DIFFICULTY, NEITHER, note='named as a ceiling is, read by nothing')})\n"))

@@ -45,6 +45,11 @@ from wl_xcon.task import (
     Window,
 )
 
+#: Why a hold keeps a highest: the state it is held in ends at a fixed 10 s (3 s for the target's),
+#: so a longer hold cannot finish (the engine C2a plan's O2; `hold-cut-short`).
+HOLD_WHY_10 = "the state ends at 10 s, so a longer hold cannot finish"
+HOLD_WHY_3 = "the state ends at 3 s, so a longer hold cannot finish"
+
 FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
 
 adaptive_detection = Trial(
@@ -66,23 +71,22 @@ adaptive_detection = Trial(
         ),
     ],
     params=[
-        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
-        Param("fix_hold", unit="s", low=0.05, high=2.0),
-        Param("response_deadline", unit="s", low=0.1, high=3.0),
-        Param("target_hold", unit="s", low=0.05, high=1.0),
-        Param("fix_window", unit="deg", low=0.5, high=5.0),
-        Param("target_window", unit="deg", low=0.5, high=6.0),
-        # ±16° again (direct-view spec §8), checked against direct view's ±30.5° field.
-        # ±12 was the interim, at the stereoscope's mask, before direct view had a
-        # `Geometry` (2026-09-28).
-        Param("target_x", unit="deg", low=-16.0, high=16.0),
+        Param("fix_acquisition", unit="s", low=0.0),
+        Param("fix_hold", unit="s", low=0.0, high=10.0, why=HOLD_WHY_10),
+        Param("response_deadline", unit="s", low=0.0),
+        Param("target_hold", unit="s", low=0.0, high=3.0, why=HOLD_WHY_3),
+        Param("fix_window", unit="deg"),
+        Param("target_window", unit="deg"),
+        # No range (the PI, 2026-11-16): the field is judged where the value is set, against
+        # direct view's ±30.5° (direct-view spec §8).
+        Param("target_x", unit="deg"),
         # Its vertical place, which the PI asked for (2026-10-11: "shouldnt there also be a
         # target_y?"). Its range, `target_x`'s, and its start on the horizontal meridian were the
         # controller's choice, not his; direct view shows ±18.4°. On the extent he ruled the same
         # day: "all tasks should be able to use all of the screen, there can be a warning that the
         # gaze monitoring is most accurate up to ~15 deg (where the calibrated regions lies)"
         # (decisions.md TSK-38; XC-349).
-        Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0),
+        Param("target_y", unit="deg", start=0.0),
         # Appearance is a parameter, so switching circles among squares for
         # penguins among elephants is a value applied in an ITI -- not a new
         # task and not a new block.
@@ -94,16 +98,18 @@ adaptive_detection = Trial(
                 Square(size=1.0, color=Gray(P("target_luminance"))),
             ),
         ),
-        Param("target_contrast", unit="fraction", low=0.02, high=1.0),
+        Param("target_contrast", unit="fraction", low=0.0, high=1.0),
         # Held eccentricity was |target_x| while the target moved only along the horizontal
         # meridian, so the same bound.
-        Param("target_eccentricity", unit="deg", low=2.0, high=16.0),
+        Param("target_eccentricity", unit="deg", low=0.0),
         # Absolute luminance, D65 white (the PI, 2026-10-07: "Absolute cd/m²", starting
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
         # standard's), until a measured calibration and V9's brightness cap say otherwise
         # (engine spec §7.1, §7.7).
-        Param("fix_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
-        Param("target_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
+        Param("fix_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0,
+              why="white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
+        Param("target_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0,
+              why="white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
     ],
     states=[
         State(

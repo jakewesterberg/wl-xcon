@@ -344,7 +344,7 @@ def test_a_draw_its_setting_cannot_hold_is_refused():
     assert found[0].detail == (
         "the task's draw of 'fix_hold' can draw nan, and 'fix_hold' takes a finite number (s)")
     for setting, drawn in (("set_size", Uniform(2, 8, repeat=FRESH)),
-                           ("target_index", TruncatedNormal(0.5, 0.2, repeat=FRESH)),
+                           ("target_index", TruncatedNormal(0.5, 0.2, low=0.0, high=1.0, repeat=FRESH)),
                            ("set_size", NonAging(2, 4, 8, repeat=FRESH))):
         found = _found(_with(SEARCH, draws={setting: drawn}))
         assert [f.code for f in found] == ["bad-draw"], found

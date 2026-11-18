@@ -957,15 +957,21 @@ def test_an_array_crowded_further_is_a_warning_and_one_newly_crowded_is_refused(
 
 
 def _search(object_window: float = 1.0, targets: tuple = (), distractors: tuple = ()) -> Task:
-    """`tasks/visual_search.py`, its 1° objects on a ring 5-14° out, with its object windows
-    declared up to `object_window`° (1° as written; at 3° it loads with `crowded-array` among
-    its warnings) and `targets` and `distractors` added to the choices of each."""
+    """`tasks/visual_search.py`, its 1° objects on a ring declared 5-14° out, a set size 2-12 and
+    its object windows 0.5° up to `object_window`° (the ranges the builder gave it until the
+    console settings plan's Task 5 took them away, declared here so the widened checks have a
+    range to be widened from; at 3° it loads with `crowded-array` among its warnings) and
+    `targets` and `distractors` added to the choices of each."""
     task = _load_task(Path(__file__).resolve().parents[1] / "tasks" / "visual_search.py")
     trial = task.structures["search"]
 
     def declared(param: Param) -> Param:
         if param.name == "object_window":
-            return replace(param, high=object_window)
+            return replace(param, low=0.5, high=object_window)
+        if param.name == "array_eccentricity":
+            return replace(param, low=5.0, high=14.0)
+        if param.name == "set_size":
+            return replace(param, low=2)
         if param.name == "target_appearance":
             return replace(param, choices=(*param.choices, *targets))
         if param.name == "distractor_appearance":

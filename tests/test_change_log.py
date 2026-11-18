@@ -304,9 +304,9 @@ def _direction_task(folder: Path) -> Path:
          '"target", at=Polar(8.0, P("target_dir")), looks=P("target_appearance")'),
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(8.0, P("target_dir")),\n            radius=P("target_window"),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=90.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
         ("from wl_xcon.task import (", "from wl_xcon.task import (\n    Polar,"),
     ):
         assert text.count(old) == 1, old

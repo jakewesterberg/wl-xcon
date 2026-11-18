@@ -172,9 +172,9 @@ def _ceiling(folder: Path) -> Path:
     Engine test material."""
     return _edited(
         _sessions.varied_task(folder, name="ceiling"),
-        ('        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),',
+        ('        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),',
          '        Param("reward_correct", unit="mL", low=0.0, high=1.0),\n'
-         '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),'),
+         '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),'),
         tail=("from wl_xcon.task import NEITHER, NOT_DIFFICULTY, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={'reward_correct': Meaning(\n"
               "    NOT_DIFFICULTY, NEITHER, note='named as a ceiling is, read by nothing')})\n"))
@@ -733,9 +733,9 @@ def test_a_revert_judges_each_value_over_what_it_hands_back_and_restores(tmp_pat
     path = tmp_path / "wide_search.py"
     text = Path("tasks/visual_search.py").read_text()
     for old, new in (
-            ('Param("set_size", unit="objects", low=2, high=12)',
+            ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY)',
              'Param("set_size", unit="objects", low=2, high=20, why="a stand-in for its places")'),
-            ('Param("array_eccentricity", unit="deg", low=5.0, high=14.0)',
+            ('Param("array_eccentricity", unit="deg", low=0.0, start=8.0)',
              'Param("array_eccentricity", unit="deg", low=0.0, high=14.0)')):
         assert text.count(old) == 1, old
         text = text.replace(old, new)

@@ -52,12 +52,21 @@ from wl_xcon.task import (
     Window,
 )
 
+#: Why a hold keeps a highest: the state it is held in ends at a fixed 10 s (3 s for the target's),
+#: so a longer hold cannot finish (the engine C2a plan's O2; `hold-cut-short`).
+HOLD_WHY_10 = "the state ends at 10 s, so a longer hold cannot finish"
+HOLD_WHY_3 = "the state ends at 3 s, so a longer hold cannot finish"
+
 FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(P("fix_luminance"))))
 
 #: The sRGB red and green primaries' chromaticities (W3C sRGB v1.10), each at its own luminance:
 #: ordinary colors, with no claim about their luminance for any observer.
 RED = xyY(0.64, 0.33, P("red_luminance"))
 GREEN = xyY(0.30, 0.60, P("green_luminance"))
+
+#: Why a set size keeps a highest (`unbounded-set-size`): a run builds every object and its window
+#: before a trial's first frame, so an unbounded one could stall it; 12 is TSK-39's, no guess added.
+SET_SIZE_WHY = "a run builds every object before the first frame, so a set size needs a highest"
 
 ARRAY = Stimulus(
     "search",
@@ -88,30 +97,25 @@ search = Trial(
         ObjectWindows(of="search", radius=P("object_window")),
     ],
     params=[
-        Param("fix_acquisition", unit="s", low=0.5, high=10.0),
-        Param("fix_hold", unit="s", low=0.05, high=2.0),
-        Param("response_deadline", unit="s", low=0.1, high=3.0),
-        Param("target_hold", unit="s", low=0.05, high=1.0),
-        Param("fix_window", unit="deg", low=0.5, high=5.0),
-        # Bounded so that twelve objects on the smallest legal ring still cannot
-        # crowd: adjacent centres are 2 R sin(pi/n) = 2.59° apart at n=12, R=5, and
-        # two 1° windows sum to 2°. The first version of this task allowed 4°
-        # windows on a 3° ring, where adjacent windows overlapped by more than their
-        # own width -- so a saccade to one distractor would have been scored against
-        # another. It passed every check that existed at the time.
-        Param("object_window", unit="deg", low=0.5, high=1.0),
-        # Back to 14, what it was before the interim bound of 12 at the stereoscope's
-        # mask (2026-09-28), and checked against direct view: the ring reaches ±14°
-        # vertically as well, inside direct view's ±18.4°.
-        Param("array_eccentricity", unit="deg", low=5.0, high=14.0),
+        Param("fix_acquisition", unit="s", low=0.0),
+        Param("fix_hold", unit="s", low=0.0, high=10.0, why=HOLD_WHY_10),
+        Param("response_deadline", unit="s", low=0.0),
+        Param("target_hold", unit="s", low=0.0, high=3.0, why=HOLD_WHY_3),
+        Param("fix_window", unit="deg"),
+        # No range (the PI, 2026-11-16, "Hard limits only where impossible"; decisions.md
+        # TSK-39): windows that crowd at the values set are warned of by the layout, so a
+        # saccade to one distractor is not scored against another unseen (pitfalls P20).
+        Param("object_window", unit="deg", start=1.0),
+        # Its lowest is 0, a distance; the field is judged where it is set (direct view's
+        # ±18.4° vertically), not by a guessed highest.
+        Param("array_eccentricity", unit="deg", low=0.0, start=8.0),
         # The manipulation. A value, not a structure -- which is the entire point.
-        Param("set_size", unit="objects", low=2, high=12),
-        # `high` is one below `set_size`'s *lowest* legal value, because the checker
-        # reasons over ranges: a target index of 6 is illegal the moment set size
-        # can be 2, whatever it happens to be set to right now.
-        Param("target_index", unit="index", low=0, high=1),
+        Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY),
+        # No highest: an index past the array is refused where it is set (`check.laid_out`),
+        # against the set size it is set with, and the load holds it at its start, 0.
+        Param("target_index", unit="index", low=0, start=0),
         #: Randomised between trials so the animal cannot learn positions.
-        Param("array_rotation", unit="deg", low=0.0, high=360.0),
+        Param("array_rotation", unit="deg", start=0.0),
         # Feature as a value. Red-among-green and square-among-discs are the same
         # task with a different setting.
         Param(
@@ -132,12 +136,15 @@ search = Trial(
         # at "40 cd/m²"). Bounded at 80, the default calibration's white (the sRGB
         # standard's), until a measured calibration and V9's brightness cap say otherwise
         # (engine spec §7.1, §7.7).
-        Param("fix_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0),
+        Param("fix_luminance", unit="cd/m2", low=0.0, high=80.0, start=40.0,
+              why="white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
         # Each color's luminance, its own (Question 3), equal to start by the standard's numbers.
         # Bounded at its primary's full drive on the default calibration, floored: 17.0 and
         # 57.2 cd/m² at its 80 cd/m² white.
-        Param("red_luminance", unit="cd/m2", low=0.0, high=17.0, start=15.0),
-        Param("green_luminance", unit="cd/m2", low=0.0, high=57.0, start=15.0),
+        Param("red_luminance", unit="cd/m2", low=0.0, high=17.0, start=15.0,
+              why="the red primary at full drive on the default calibration (80 cd/m2 white)"),
+        Param("green_luminance", unit="cd/m2", low=0.0, high=57.0, start=15.0,
+              why="the green primary at full drive on the default calibration (80 cd/m2 white)"),
     ],
     states=[
         State(

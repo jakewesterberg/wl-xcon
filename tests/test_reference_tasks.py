@@ -18,7 +18,7 @@ from _rig import DIRECT, RIG
 from wl_xcon import screen
 from wl_xcon.calibration import constellation
 from wl_xcon.cli import _load_task
-from wl_xcon.check import UNEXPLAINED_LIMIT, check, check_task
+from wl_xcon.check import _at_start, check, check_task, laid_out
 from wl_xcon.cones import V_F10
 from wl_xcon.declarations import COMMON, OVERRIDE, OWN, SHARED, resolved
 from wl_xcon.findings import SESSION_KINDS
@@ -77,9 +77,7 @@ def detection() -> Trial:
 
 
 def test_the_reference_task_passes_every_load_time_check(detection):
-    allocation = _load("allocation", "ALLOCATION")
-
-    assert check(detection, allocation, geometry=GEOMETRY) == []
+    assert _laid_out("fixation_detection", geometry=GEOMETRY) == []
 
 
 def test_simulation_reaches_every_outcome_the_reference_task_declares(detection):
@@ -116,9 +114,7 @@ def adaptive() -> Trial:
 
 
 def test_the_adaptive_task_passes_every_load_time_check(adaptive):
-    allocation = _load("allocation", "ALLOCATION")
-
-    assert check(adaptive, allocation, geometry=GEOMETRY) == []
+    assert _laid_out("adaptive_detection", geometry=GEOMETRY) == []
 
 
 def test_the_adaptive_trial_is_the_detection_trial_with_more_parameters(adaptive, detection):
@@ -130,8 +126,8 @@ def test_the_adaptive_trial_is_the_detection_trial_with_more_parameters(adaptive
 
 def test_each_detection_task_places_its_target_at_its_x_and_y(adaptive, detection):
     """The PI, 2026-10-11: "shouldnt there also be a target_y?". The target and its window sit at
-    (`target_x`, `target_y`), each declared over ±16° and `target_y` starting on the horizontal
-    meridian; the target's computed position is the trial's to record (XC-348), not a setting."""
+    (`target_x`, `target_y`), each declaring no range (the PI, 2026-11-16: the field is judged
+    where a value is set) and `target_y` starting on the horizontal meridian; the target's computed position is the trial's to record (XC-348), not a setting."""
     where = (P("target_x"), P("target_y"))
     for trial in (detection, adaptive):
         shown = {action.stimulus.name: action.stimulus.at
@@ -139,7 +135,8 @@ def test_each_detection_task_places_its_target_at_its_x_and_y(adaptive, detectio
         windows = {window.name: window.at for window in trial.windows}
         assert shown["target"] == windows["target"] == where
         (y,) = [param for param in trial.params if param.name == "target_y"]
-        assert (y.low, y.high, y.start) == (-16.0, 16.0, 0.0) == (*_range(trial, "target_x"), 0.0)
+        (x,) = [param for param in trial.params if param.name == "target_x"]
+        assert (y.low, y.high, y.start) == (x.low, x.high, 0.0) == (None, None, 0.0)
 
 
 def test_the_staircase_converges_downward_on_success_and_backs_off_on_error():
@@ -222,17 +219,13 @@ def search() -> Trial:
 
 
 def test_the_search_task_passes_every_load_time_check(search):
-    allocation = _load("allocation", "ALLOCATION")
-
-    assert check(search, allocation, geometry=GEOMETRY, calibration=PANEL) == []
+    assert _laid_out("visual_search", geometry=GEOMETRY, calibration=PANEL) == []
 
 
 def test_the_search_task_runs_on_a_measured_display_without_spectra_with_a_warning(search):
     """XC-352's E3 (the PI, 2026-10-11): its cone colors convert as the default's do, with a
     warning in every kind; until then it was refused (call 8)."""
-    allocation = _load("allocation", "ALLOCATION")
-
-    found = check(search, allocation, geometry=GEOMETRY, calibration=replace(PANEL, spectra=None))
+    found = _laid_out("visual_search", geometry=GEOMETRY, calibration=replace(PANEL, spectra=None))
 
     assert [f for f in found if f.blocking] == []
     assert "cone-colors-without-spectra" in {f.code for f in found if f.is_warning}
@@ -318,6 +311,14 @@ REFERENCE = {
 }
 
 
+def _laid_out(name: str, **kwargs):
+    """The reference task's load-time checks at the values it starts at (`check_task`: an open
+    side is held at its start, the console settings design's §4), what the tests below asked of
+    `check(trial)` while the tasks declared their builder's ranges."""
+    return check_task(_load_task(TASKS / f"{name}.py"), _load("allocation", "ALLOCATION"),
+                      **kwargs)
+
+
 def _range(trial: Trial, name: str) -> tuple[float, float]:
     (param,) = [p for p in trial.params if p.name == name]
     return (param.low, param.high)
@@ -331,29 +332,31 @@ def test_every_reference_task_is_written_for_direct_view(name):
 
 
 def test_the_interim_narrowing_is_undone(detection, adaptive, search):
-    """The ranges the stereoscope's ±12° mask forced on 2026-09-28, back to what they
-    were, now that direct view's field is what they are checked against."""
-    assert _range(detection, "target_x") == (-16.0, 16.0)
-    assert _range(adaptive, "target_x") == (-16.0, 16.0)
-    assert _range(adaptive, "target_eccentricity") == (2.0, 16.0)
-    assert _range(search, "array_eccentricity") == (5.0, 14.0)
+    """The ranges the stereoscope's ±12° mask forced on 2026-09-28 are gone, and so are the ±16°
+    they went back to (the PI, 2026-11-16, "Hard limits only where impossible"): direct view's
+    field is judged where a value is set, so a position is declared with no range and a distance
+    only its lowest, 0."""
+    assert _range(detection, "target_x") == (None, None)
+    assert _range(adaptive, "target_x") == (None, None)
+    assert _range(adaptive, "target_eccentricity") == (0.0, None)
+    assert _range(search, "array_eccentricity") == (0.0, None)
 
 
 def test_the_calibration_task_passes_every_load_time_check_in_direct_view():
-    allocation = _load("allocation", "ALLOCATION")
-
-    assert check(_load("calibration", "calibration"), allocation, geometry=GEOMETRY) == []
+    assert _laid_out("calibration", geometry=GEOMETRY) == []
 
 
 def test_the_calibration_task_can_present_direct_views_whole_constellation():
-    """Its ranges are the ±15° region the constellation is placed over, so every
-    target the block schedules is one the task declares."""
-    task = _load("calibration", "calibration")
-    (x_low, x_high), (y_low, y_high) = _range(task, "target_x"), _range(task, "target_y")
+    """It declares no range for either place (the PI, 2026-11-16), so every target the block
+    schedules is one the task declares, and each, laid out at its own values, is on the field
+    (what the ±15° bound was for)."""
+    task = _load_task(TASKS / "calibration.py")
+    trial = task.trial
 
-    assert (x_low, x_high, y_low, y_high) == (-15.0, 15.0, -15.0, 15.0)
+    assert (_range(trial, "target_x"), _range(trial, "target_y")) == ((None, None), (None, None))
     for x, y in constellation(GEOMETRY):
-        assert x_low <= x <= x_high and y_low <= y <= y_high
+        assert [f for f in laid_out(task, {"target_x": x, "target_y": y}, geometry=GEOMETRY)
+                if f.blocking] == [], (x, y)
 
 
 def test_a_direct_view_task_is_refused_in_the_stereoscope_for_its_field_and_warned_for_its_setup(
@@ -362,11 +365,15 @@ def test_a_direct_view_task_is_refused_in_the_stereoscope_for_its_field_and_warn
     """What a session start says if the operator picks the stereoscope for this task: the ±16°
     its mask cannot show refuses (A15, kept), and the mismatch of setups is a warning (XC-352's
     A12; the PI, 2026-10-11)."""
-    allocation = _load("allocation", "ALLOCATION")
-    found = {f.code: f for f in check(detection, allocation, geometry=RIG.stereoscope(1.6))}
+    task = _load_task(TASKS / "fixation_detection.py")
+    stereoscope = RIG.stereoscope(1.6)
+    found = {f.code: f for f in _laid_out("fixation_detection", geometry=stereoscope)}
+    at_16 = {f.code: f for f in laid_out(task, {"target_x": 16.0, "target_y": 16.0},
+                                         geometry=stereoscope)}
 
-    assert set(found) == {"wrong-setup", "stimulus-off-screen"}
-    assert found["stimulus-off-screen"].blocking and found["wrong-setup"].is_warning
+    # At its starting 10° it fits the mask; at the ±16° the old range reached, it does not.
+    assert set(found) == {"wrong-setup"} and found["wrong-setup"].is_warning
+    assert set(at_16) == {"stimulus-off-screen"} and at_16["stimulus-off-screen"].blocking
 
 
 def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
@@ -385,7 +392,8 @@ def test_the_fixation_task_starts_from_the_values_the_console_mockup_shows():
     }
     for param in params:
         if param.start is not None:
-            assert param.low <= param.start <= param.high, param.name
+            assert param.low is None or param.low <= param.start, param.name
+            assert param.high is None or param.start <= param.high, param.name
 
 
 @pytest.mark.parametrize("module, attribute", [
@@ -409,8 +417,7 @@ def test_on_the_default_every_reference_task_runs_in_every_kind_with_its_warning
     isoluminant red and green are just outside the sRGB standard's gamut** (a primary weight of
     -0.003 to -0.006), which its isoluminance refusal hid until then: `unrealizable-color` warns of
     them, naming the light the panel shows (XC-352's A20)."""
-    found = check(_load(name, REFERENCE[name]), _load("allocation", "ALLOCATION"),
-                  geometry=GEOMETRY, calibration=SRGB)
+    found = _laid_out(name, geometry=GEOMETRY, calibration=SRGB)
 
     refusing = {f.code for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)}
     warned = {f.code for f in found if f.is_warning}
@@ -449,7 +456,7 @@ def test_the_training_variant_is_the_search_task_with_ordinary_colors(search, tr
 
 def test_the_training_variant_runs_on_the_default_in_every_kind_with_its_warnings(training):
     """COL-02, revised (the PI, 2026-10-11): a warning in recording too."""
-    found = check(training, _load("allocation", "ALLOCATION"), geometry=GEOMETRY, calibration=SRGB)
+    found = _laid_out("visual_search_training", geometry=GEOMETRY, calibration=SRGB)
 
     assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
     assert {f.code for f in found if f.is_warning} == {"color-on-default", "contrast-on-default"}
@@ -611,14 +618,15 @@ def test_each_reference_task_file_defines_one_task_object_over_its_trial(name):
 def test_each_reference_task_object_adds_no_finding_to_its_trials(name, calibration):
     """Its settings' meanings, its reaction time and its choice are declared and well formed: the
     task object's checks find nothing its one structure's did not, **but a limit with no reason**
-    (`unexplained-limit`, the console settings plan's Task 4): each reference task's builder's
-    ranges are warned of until the plan's Task 5 takes them away or gives them their reasons."""
+    (`unexplained-limit`, the console settings plan's Task 4) -- none now: each bound is
+    impossible or decided, with its reason (Task 5) -- and **an open side is held at its start**
+    (`check._at_start`), as the task's load holds it."""
     task = _load_task(TASKS / f"{name}.py")
     allocation = _load("allocation", "ALLOCATION")
+    held, unstarted = _at_start(task)
 
-    assert [f for f in check_task(task, allocation, geometry=GEOMETRY, calibration=calibration)
-            if f.code != UNEXPLAINED_LIMIT] == check(
-        task.trial, allocation, geometry=GEOMETRY, calibration=calibration)
+    assert check_task(task, allocation, geometry=GEOMETRY, calibration=calibration) == check(
+        held.trial, allocation, geometry=GEOMETRY, calibration=calibration, unstarted=unstarted)
 
 
 def test_the_shared_list_says_what_the_pi_confirmed():

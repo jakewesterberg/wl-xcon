@@ -14,7 +14,7 @@ import _sessions
 from _sessions import WALL, session
 from wl_xcon import preflight
 from wl_xcon.actor import Box
-from wl_xcon.check import PAST_LIMIT, UNEXPLAINED_LIMIT, parameters_used
+from wl_xcon.check import PAST_LIMIT, parameters_used
 from wl_xcon.cli import _load_allocation, _load_task
 from wl_xcon.findings import NOT_RECORDING, SESSION_KINDS
 from wl_xcon.link import NOTE_LIMIT, Preflight, PreflightItem
@@ -48,13 +48,17 @@ def test_a_task_that_passes_its_checks_in_the_sessions_setup_passes():
 
 
 def test_a_task_written_for_the_other_setup_fails_on_its_field_and_warns_of_its_setup():
-    """XC-352's A12: the setups' mismatch is a warning; the reference task's ±16° beyond the
-    stereoscope's mask still fails (A15, kept)."""
+    """XC-352's A12: the setups' mismatch is a warning; a target beyond the stereoscope's mask
+    still fails (A15, kept) -- at the run's value, as the reference task declares no ±16° range
+    now (the PI, 2026-11-16): its starting 10° fits the mask and passes, and 16° is refused where
+    the run is laid out."""
     item, _, findings = preflight.task(TASK, ALLOCATION, STEREOSCOPE, SRGB)
 
-    assert item.result == "fail" and "stimulus-off-screen" in item.said
-    assert "wrong-setup" not in item.said
+    assert item.result == "pass" and "wrong-setup" not in item.said
     assert [f.code for f in findings if f.is_warning and f.code == "wrong-setup"] == ["wrong-setup"]
+    laid = preflight.laid_out(_load_task(TASK), {"target_x": 16.0}, None, ALLOCATION,
+                              STEREOSCOPE, SRGB, None)
+    assert [(f.code, f.blocking) for f in laid] == [("stimulus-off-screen", True)]
 
 
 @pytest.mark.parametrize(
@@ -109,13 +113,12 @@ def test_a_task_with_a_window_placed_by_a_whole_point_setting_is_checked_and_war
 
 
 def test_the_task_item_returns_its_findings_checked_against_the_calibration():
-    """And the reference task's builder's ranges, each a limit with no reason
-    (`unexplained-limit`), until the console settings plan's Task 5 takes them away."""
+    """And no limit with no reason (`unexplained-limit`): the reference task's bounds are each
+    impossible or decided, with its reason (the console settings plan's Task 5)."""
     item, trial, findings = preflight.task(TASK, ALLOCATION, DIRECT, SRGB)
 
     assert item.result == "pass" and trial is not None
-    assert [f.code for f in findings if f.code != UNEXPLAINED_LIMIT] == ["contrast-on-default"]
-    assert UNEXPLAINED_LIMIT in {f.code for f in findings}
+    assert [f.code for f in findings] == ["contrast-on-default"]
 
 
 
@@ -656,20 +659,24 @@ def test_a_starting_value_outside_its_range_is_checked_widened_and_what_breaks_f
     the value (`preflight.beyond`); what breaks the run -- here the target off direct view's
     screen -- fails the starting values item, saying which value, and the rest are warnings.
     **Since the console settings plan's Task 4 every declared bound is hard**: a value past one
-    is refused first (`past-limit`), failing the item for that alone."""
+    is refused first (`past-limit`), failing the item for that alone. **Since its Task 5 the
+    reference task declares no target range**: a target at 40° is refused where the run is laid
+    out (`preflight.laid_out`), and the bound a value passes is the PI's 80 cd/m2 (COL-29)."""
     task = _load_task(TASK)
 
-    off = preflight.beyond(task, {"target_x": 40.0}, ALLOCATION, DIRECT, SRGB, None)
-    wide = preflight.beyond(task, {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
+    off = preflight.laid_out(task, {"target_x": 40.0}, None, ALLOCATION, DIRECT, SRGB, None)
+    wide = preflight.beyond(task, {"fix_luminance": 90.0}, ALLOCATION, DIRECT, SRGB, None)
     item = preflight.values(task, {"target_x": 40.0}, [f for f in off if f.blocking])
 
-    assert [(f.code, f.blocking) for f in wide] == [(PAST_LIMIT, True), ("outside-range", False)]
-    assert preflight.values(task, {"fix_window": 7.0}, [f for f in wide if f.blocking]).said == (
-        "past-limit: 'fix_window' at 7 deg is above its 5: the task gives no reason for this "
-        "limit (unexplained-limit)")
-    assert {f.code for f in off if f.blocking} == {PAST_LIMIT, "stimulus-off-screen"}
+    assert [(f.code, f.blocking) for f in wide] == [
+        (PAST_LIMIT, True), ("outside-range", False), ("unrealizable-color", True)]
+    assert preflight.values(task, {"fix_luminance": 90.0}, [f for f in wide if f.blocking]).said.startswith(
+        "past-limit: 'fix_luminance' at 90 cd/m2 is above its 80: white on the default "
+        "calibration, the published sRGB 80 cd/m² (COL-29)")
+    assert {f.code for f in off if f.blocking} == {"stimulus-off-screen"}
+    assert preflight.beyond(task, {"target_x": 40.0}, ALLOCATION, DIRECT, SRGB, None) == []
     assert item.result == "fail"
-    assert "stimulus-off-screen: with 'target_x' at 40, outside its declared range: " in item.said
+    assert "stimulus-off-screen" in item.said
 
 
 def test_a_check_that_cannot_run_widened_fails_closed(tmp_path, monkeypatch):
@@ -678,7 +685,7 @@ def test_a_check_that_cannot_run_widened_fails_closed(tmp_path, monkeypatch):
     never that a value is outside its range, which none may be (Task 10's review, M3)."""
     monkeypatch.setattr(preflight, "beyond_range", lambda *a, **k: 1 / 0)
 
-    (refusal,) = preflight.beyond(_load_task(TASK), {"fix_window": 7.0}, ALLOCATION, DIRECT, SRGB, None)
+    (refusal,) = preflight.beyond(_load_task(TASK), {"fix_luminance": 90.0}, ALLOCATION, DIRECT, SRGB, None)
 
     assert refusal.blocking and refusal.code == "outside-range"
     assert refusal.detail.startswith(
@@ -727,7 +734,7 @@ def test_a_task_file_from_before_the_task_object_fails_its_preflight_saying_why(
 
 def test_a_task_whose_setting_says_nothing_of_what_it_means_fails_its_preflight(tmp_path):
     text = TASK.read_text()
-    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    was = '        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),\n'
     assert text.count(was) == 1
     unexplained = tmp_path / "unexplained.py"
     unexplained.write_text(text.replace(
@@ -861,24 +868,27 @@ def test_each_conditions_values_are_held_to_their_ranges_as_starting_values_are(
     outside its range is a warning naming the condition, and one that would break the run -- a
     target off the screen -- fails the starting values, naming it too. **Since the console
     settings plan's Task 4** a value past its bound is refused first (`past-limit`), naming the
-    condition, so each fails the starting values."""
+    condition, so each fails the starting values. **Since its Task 5 the reference task declares no
+    target range**, so the condition that puts the target off the screen is refused by the layout
+    (`preflight.laid_out`), and the value past a bound is a light above the PI's 80 cd/m2."""
     path = _sessions.planned_task(tmp_path, (
-        '{"wide": Plan([Block("b", [Condition("near", {"target_x": 5.0}, target=1), '
-        'Condition("past", {"target_x": 17.0}, target=1)])]), '
+        '{"wide": Plan([Block("b", [Condition("near", {"fix_luminance": 50.0}, target=1), '
+        'Condition("past", {"fix_luminance": 90.0}, target=1)])]), '
         '"off": Plan([Block("b", [Condition("away", {"target_x": 16.0, "target_y": 40.0}, '
         'target=1)])])}'))
     task = _load_task(path)
 
     wide = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="wide")
-    off = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="off")
+    off = preflight.laid_out(task, {}, "off", ALLOCATION, DIRECT, SRGB, None)
 
-    assert [f.code for f in wide] == [PAST_LIMIT, "outside-range"]
-    assert all(f.detail.startswith("in plan 'wide', block 'b', condition 'past': 'target_x'")
-               for f in wide)
-    assert [f.blocking for f in wide] == [True, False]
+    assert [f.code for f in wide] == [PAST_LIMIT, "outside-range", "unrealizable-color"]
+    assert all(f.detail.startswith("in plan 'wide', block 'b', condition 'past': 'fix_luminance'")
+               for f in wide[:2])
+    assert [f.blocking for f in wide] == [True, False, True]
     assert preflight.values(task, {}, [f for f in wide if f.blocking], plan="wide").result == (
         "fail")
     refused = [f for f in off if f.blocking]
     assert refused and all("condition 'away'" in f.detail for f in refused)
     assert preflight.values(task, {}, refused, plan="off").result == "fail"
+    assert preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="off") == []
     assert preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None) == []

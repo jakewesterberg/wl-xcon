@@ -35,7 +35,6 @@ from _frames import idle
 from _calibrations import BACKGROUND, OBSERVER, PRIMARIES
 import _sessions
 from wl_xcon import cli
-from wl_xcon.check import UNEXPLAINED_LIMIT
 from wl_xcon import link as _link
 from wl_xcon.actor import Box
 from wl_xcon.bounds import Exceeded
@@ -390,8 +389,8 @@ def _either_task(tmp_path, reach: float) -> str:
     axis."""
     text = Path("tasks/fixation_detection.py").read_text(encoding="utf-8")
     written_for = 'view="direct"'
-    across = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
-    up = 'Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0)'
+    across = 'Param("target_x", unit="deg", start=10.0)'
+    up = 'Param("target_y", unit="deg", start=0.0)'
     assert text.count(written_for) == 1 and text.count(across) == 1 and text.count(up) == 1
     text = text.replace(written_for, 'view="either"').replace(
         across, f'Param("target_x", unit="deg", low={-reach}, high={reach}, start=10.0)'
@@ -504,11 +503,9 @@ def test_wlx_run_says_the_calibration_and_every_warning_its_flag_accepts(tmp_pat
     assert "  calibration: srgb-standard (the sRGB standard, measured by nobody)" in out
     assert [line for line in out if line.startswith("  warning accepted: ")] == [
         f"  warning accepted: {row['code']}: {row['detail']}" for row in rows]
-    # And the reference task's builder's ranges, each a limit with no reason, until the console
-    # settings plan's Task 5 takes them away (`unexplained-limit`, its Task 4).
-    assert [row["code"] for row in rows if row["code"] != UNEXPLAINED_LIMIT] == [
-        "default calibration", "contrast-on-default"]
-    assert UNEXPLAINED_LIMIT in {row["code"] for row in rows}
+    # And no limit with no reason: each bound the reference task keeps is impossible or decided,
+    # with its reason (`unexplained-limit`; the console settings plan's Task 5).
+    assert [row["code"] for row in rows] == ["default calibration", "contrast-on-default"]
 
 
 def test_wlx_run_accepts_and_records_a_position_its_task_file_computes_from_cos_and_sin(tmp_path):
@@ -577,7 +574,12 @@ def test_wlx_check_view_checks_one_setup(tmp_path, capsys):
     wide = _either_task(tmp_path, 16.0)
 
     assert main(["check", wide, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "direct"]) == 0
-    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "stereoscope"]) == 1
+    # The task starts at 10°, which the stereoscope's mask shows: only its mismatch is said. The
+    # ±16° it reached before the PI took the range away (2026-11-16) is a value it is refused at.
+    assert main(["check", wide, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view",
+                 "stereoscope"]) == 1
+    assert "stimulus-off-screen" in capsys.readouterr().out
+    assert main(["check", GOOD, "--rig", RIG_FILE, "--allocation", ALLOCATION, "--view", "stereoscope"]) == 0
     assert "wrong-setup" in capsys.readouterr().out
 
 
@@ -2596,12 +2598,21 @@ def test_wlx_run_refuses_a_task_the_other_setups_field_cannot_show_before_anythi
     argv = _run_args(tmp_path, "--out-of-cage-at", _hhmm())
     argv[argv.index("direct")] = "stereoscope"
     argv += ["--subject-settings", "tasks/reference_subject.py"]
+    text = Path("tasks/fixation_detection.py").read_text(encoding="utf-8")
+    old = 'Param("target_x", unit="deg", start=10.0)'
+    assert text.count(old) == 1
+    far = tmp_path / "far_detection.py"
+    far.write_text(text.replace(old, 'Param("target_x", unit="deg", start=16.0)'), encoding="utf-8")
+    argv[1] = str(far)
+    argv[argv.index("target_x=10.0")] = "target_x=16.0"
 
     with pytest.raises(SystemExit) as refused:
         main(argv)
 
-    # The setups' mismatch is a warning (XC-352's A12); the reference task's ±16° beyond the
-    # stereoscope's ±12° mask still refuses, before anything is recorded.
+    # The setups' mismatch is a warning (XC-352's A12); the reference task starting at ±16°,
+    # beyond the stereoscope's ±12° mask, still refuses, before anything is recorded (the range
+    # that reached 16° is gone, so the task that starts there stands for it: an open side is held
+    # at its start at load).
     assert "stimulus-off-screen" in str(refused.value) and "wrong-setup" not in str(refused.value)
     assert not (tmp_path / "2027-01-14_01").exists()
 
@@ -2633,7 +2644,7 @@ def test_wlx_check_holds_the_task_object_to_its_declarations(tmp_path, capsys):
     """`wlx check` is the guardrail a person runs (this file's docstring): a setting with no meaning
     is refused there too."""
     text = Path("tasks/fixation_detection.py").read_text()
-    was = '        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),\n'
+    was = '        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),\n'
     assert text.count(was) == 1
     unexplained = tmp_path / "unexplained.py"
     unexplained.write_text(text.replace(
@@ -2727,9 +2738,7 @@ def test_wlx_run_records_the_warnings_its_flag_accepted(tmp_path):
 
     rows = [json.loads(line) for line in
             (tmp_path / "2027-01-14_01" / "xcon" / "warnings.jsonl").read_text().splitlines()]
-    # The reference task's limits with no reason left out (`unexplained-limit`; the console
-    # settings plan's Task 4, until its Task 5): accepted alike.
-    assert [(r["code"], r["how"], r["by"]) for r in rows if r["code"] != UNEXPLAINED_LIMIT] == [
+    assert [(r["code"], r["how"], r["by"]) for r in rows] == [
         ("default calibration", "--accept-warnings", {"kind": "box", "name": "jake"}),
         ("contrast-on-default", "--accept-warnings", {"kind": "box", "name": "jake"})]
     assert {(r["how"], r["by"]["name"]) for r in rows} == {("--accept-warnings", "jake")}

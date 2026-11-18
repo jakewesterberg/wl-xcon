@@ -154,7 +154,7 @@ def test_each_block_end_says_what_varied_by_condition_draw_and_person(tmp_path):
             'Condition("a", {"target_luminance": 30.0, "fix_luminance": 40.0, '
             '"target_y": 2.0}, target=2), '
             'Condition("b", {"target_luminance": 60.0, "fix_luminance": 40.0}, target=2)], '
-            'draws={"target_window": TruncatedNormal(3.0, 0.25, repeat=FRESH)}), '
+            'draws={"target_window": TruncatedNormal(3.0, 0.25, low=0.5, high=6.0, repeat=FRESH)}), '
             'Block("still", [Condition("c", {}, target=2)])])}'))
     link = _Drained({2: [SetParameter(name="target_x", value=-10.0, by=JAKE)],
                      4: [HandBack(name="target_x", by=JAKE),
@@ -225,10 +225,10 @@ def test_a_direction_drawn_varied_from_its_range_written_from_0_to_360(tmp_path)
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(P("target_ecc"), P("target_dir")),\n'
          '            radius=P("target_window"),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_ecc", unit="deg", low=0.0, high=16.0, start=8.0),\n'
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
     ):
         assert text.count(old) == 1, old
         text = text.replace(old, new)

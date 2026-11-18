@@ -602,10 +602,10 @@ def directed(path):
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(P("target_ecc"), P("target_dir")),\n'
          '            radius=P("target_window"),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_ecc", unit="deg", low=0.0, high=16.0, start=8.0),\n'
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
     ):
         assert text.count(old) == 1, old
         text = text.replace(old, new)

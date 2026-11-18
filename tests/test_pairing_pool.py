@@ -81,16 +81,10 @@ def _source(stages: list[str], order: str, *, pool: str = POOL, low: str = "1",
             meaning: str = "Meaning(NOT_DIFFICULTY, NEITHER, note='which pairings are drawn')",
             extra: str = "") -> str:
     """`visual_search`'s source with a pool over its two looks, its pool setting `pairings`
-    declared from 1 to 7 starting at `start`, its set size allowed down to one object (its target
-    index then always 0), and one plan, `train`, of `stages` in `order`; `extra`, more source
+    declared from 1 to 7 starting at `start`, its set size allowed down to one object (as the task
+    declares it now, its target index open above and starting at 0), and one plan, `train`, of `stages` in `order`; `extra`, more source
     after it. Engine test material."""
     text = Path(SEARCH).read_text()
-    for old, new in (('Param("set_size", unit="objects", low=2, high=12)',
-                      'Param("set_size", unit="objects", low=1, high=12)'),
-                     ('Param("target_index", unit="index", low=0, high=1)',
-                      'Param("target_index", unit="index", low=0, high=0)')):
-        assert text.count(old) == 1, old
-        text = text.replace(old, new)
     started = "" if start is None else f", start={start}"
     return text + (
         "\n\nimport dataclasses as _dataclasses\n"

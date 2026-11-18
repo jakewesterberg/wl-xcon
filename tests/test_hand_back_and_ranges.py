@@ -181,12 +181,12 @@ def _directed(folder: Path, draws: str, plans: str) -> Path:
         ('            at=(P("target_x"), P("target_y")),\n            radius=P("target_window"),',
          '            at=Polar(P("target_ecc"), P("target_dir")),\n'
          '            radius=P("target_window"),'),
-        ('        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0),',
-         '        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0, live=False),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_window", unit="deg", start=3.0),',
+         '        Param("target_window", unit="deg", start=3.0, live=False),'),
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_ecc", unit="deg", low=0.0, high=16.0, start=8.0),\n'
          '        Param("target_dir", unit="deg", low=-180.0, high=180.0, start=0.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
         tail=("from wl_xcon.task import NOT_DIFFICULTY, STIMULUS, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={\n"
               "    **TASK.meanings,\n"
@@ -201,9 +201,9 @@ def _ceiling(folder: Path) -> Path:
     test material."""
     return _edited(
         _sessions.varied_task(folder, name="ceiling"),
-        ('        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),',
+        ('        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),',
          '        Param("reward_correct", unit="mL", low=0.0, high=1.0),\n'
-         '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),'),
+         '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),'),
         tail=("from wl_xcon.task import NEITHER, NOT_DIFFICULTY, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={'reward_correct': Meaning(\n"
               "    NOT_DIFFICULTY, NEITHER, note='named as a ceiling is, read by nothing')})\n"))
@@ -295,9 +295,9 @@ def test_a_hand_back_of_a_setting_the_run_gives_no_value_leaves_it_without_one(t
     began: absent from the trial's values and the line's `params`."""
     path = _edited(
         _sessions.varied_task(tmp_path),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("spare", unit="deg", low=0.0, high=1.0),\n'
-         '        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),'),
+         '        Param("target_x", unit="deg", start=10.0),'),
         tail=("from wl_xcon.task import NEITHER, NOT_DIFFICULTY, Meaning\n"
               "TASK = _dataclasses.replace(TASK, meanings={\n"
               "    **TASK.meanings,\n"
@@ -512,37 +512,37 @@ def test_a_live_range_past_its_declared_range_is_refused_as_a_value_is(tmp_path)
     """TSK-51 and the C3 spec §6 ("numbers outside the declared range are re-checked widened, as a
     value is"): each extreme of a new range outside its setting's declared range is checked as a
     typed value outside it is (`Session._beyond_range`). **Since the console settings plan's Task
-    4 every declared bound is hard**: `visual_search`'s ring drawn from 3°, below its 5°, and a
-    fixation hold drawn up to 2.5 s, past its 2 s, are each refused as past its limit, saying
-    the limit, nothing of either written and no warning accepted; the trials run on the block's
-    own draws."""
+    4 every declared bound is hard**: `visual_search`'s ring drawn from below 0°, and a fixation
+    point's luminance drawn up to 90, past the PI's 80 cd/m2 (COL-29), are each refused as past its limit,
+    saying the limit and its reason, nothing of either written and no warning accepted; the trials
+    run on the block's own draws. (A ring from 3°, below the 5° the builder's range held it to
+    before Task 5, is no limit now: the layout at the values judges it.)"""
     blocks = [Block("drawn", [Condition("any", {}, target=4)],
                     draws={"array_eccentricity": Uniform(6.0, 9.0, repeat=FRESH),
-                           "fix_hold": Uniform(0.2, 0.4, repeat=FRESH)})]
-    link = _Drained({2: [SetRange(name="array_eccentricity", numbers={"low": 3.0}, by=JAKE),
-                         SetRange(name="fix_hold", numbers={"high": 2.5}, by=JAKE)]})
+                           "fix_luminance": Uniform(30.0, 50.0, repeat=FRESH)})]
+    link = _Drained({2: [SetRange(name="array_eccentricity", numbers={"low": -1.0}, by=JAKE),
+                         SetRange(name="fix_luminance", numbers={"high": 90.0}, by=JAKE)]})
     session = _session(_spec(tmp_path, "tasks/visual_search.py", blocks=blocks,
                              values={**SEARCHED, "set_size": 12}), link, world=None)
 
     session.run()
 
-    unexplained = "the task gives no reason for this limit (unexplained-limit)"
     assert session.refusals == [
         ("array_eccentricity", JAKE, (
-            f"the range of 'array_eccentricity' is not changed: 'array_eccentricity' at 3 is "
-            f"refused, and the previous value stands: past-limit: 'array_eccentricity' at 3 deg is "
-            f"below its 5: {unexplained}")),
-        ("fix_hold", JAKE, (
-            f"the range of 'fix_hold' is not changed: 'fix_hold' at 2.5 is refused, and the "
-            f"previous value stands: past-limit: 'fix_hold' at 2.5 s is above its 2: "
-            f"{unexplained}"))]
+            "the range of 'array_eccentricity' is not changed: 'array_eccentricity' at -1 is "
+            "refused, and the previous value stands: past-limit: 'array_eccentricity' at -1 deg "
+            "is below its 0: below 0 cannot be")),
+        ("fix_luminance", JAKE, (
+            "the range of 'fix_luminance' is not changed: 'fix_luminance' at 90 is refused, and "
+            "the previous value stands: past-limit: 'fix_luminance' at 90 cd/m2 is above its 80: "
+            "white on the default calibration, the published sRGB 80 cd/m² (COL-29)"))]
     written = session.directory / "warnings.jsonl"
     assert not [row for row in (_rows(session, "warnings.jsonl") if written.exists() else [])
-                if "fix_hold" in row["detail"] or "array_eccentricity" in row["detail"]]
+                if "fix_luminance" in row["detail"] or "array_eccentricity" in row["detail"]]
     assert _changes(session) == []
     lines = _lines(session)
     assert len(lines) > 2 and all(
-        line["drawn"] == {"array_eccentricity": "block", "fix_hold": "block"}
+        line["drawn"] == {"array_eccentricity": "block", "fix_luminance": "block"}
         and 6.0 <= line["params"]["array_eccentricity"] <= 9.0 for line in lines)
 
 
@@ -817,9 +817,9 @@ def test_a_value_offered_after_a_pending_range_is_judged_with_its_extremes(tmp_p
     path = tmp_path / "wide_search.py"
     text = Path("tasks/visual_search.py").read_text()
     for old, new in (
-            ('Param("set_size", unit="objects", low=2, high=12)',
+            ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY)',
              'Param("set_size", unit="objects", low=2, high=20, why="a stand-in for its places")'),
-            ('Param("array_eccentricity", unit="deg", low=5.0, high=14.0)',
+            ('Param("array_eccentricity", unit="deg", low=0.0, start=8.0)',
              'Param("array_eccentricity", unit="deg", low=0.0, high=14.0)')):
         assert text.count(old) == 1, old
         text = text.replace(old, new)
@@ -961,13 +961,13 @@ def _windows(folder: Path) -> Path:
     folder.mkdir()
     return _edited(
         _sessions.varied_task(folder, draws='{"target_window": Uniform(1.0, 3.0, repeat=FRESH)}'),
-        ('        Param("fix_window", unit="deg", low=0.5, high=5.0, start=2.0),',
+        ('        Param("fix_window", unit="deg", start=2.0),',
          '        Param("fix_window", unit="deg", low=0.5, high=3.0, start=2.0),'),
-        ('        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0),',
+        ('        Param("target_window", unit="deg", start=3.0),',
          '        Param("target_window", unit="deg", low=0.5, high=3.0, start=3.0),'),
-        ('        Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0),',
+        ('        Param("target_x", unit="deg", start=10.0),',
          '        Param("target_x", unit="deg", low=8.0, high=16.0, start=10.0),'),
-        ('        Param("target_y", unit="deg", low=-16.0, high=16.0, start=0.0),',
+        ('        Param("target_y", unit="deg", start=0.0),',
          '        Param("target_y", unit="deg", low=-1.0, high=1.0, start=0.0),'),
         ('                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),',
          '                On(SaccadeTo("target"), "verify", do=[Mark(4098)]),\n'

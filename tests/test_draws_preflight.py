@@ -192,10 +192,16 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
     appearances, a block type's draw in a plain run, and a draw the load refuses. **Since the
     console settings plan's Task 4 every declared bound is hard**, so each extreme past one is
     refused first (`past-limit`), naming where and which draw; what follows is the widened
-    checks', unchanged, read here with those refusals set aside."""
+    checks', unchanged, read here with those refusals set aside. **Since its Task 5 the reference
+    task declares no range for a window, a place or a wait for fixation** (the PI, 2026-11-16,
+    "Hard limits only where impossible"), so a luminance drawn past the PI's 80 cd/m2 (COL-29)
+    is the bound a draw reaches (a hold drawn past its state's 10 s is refused at load as an
+    impossible trial), and a target drawn off the screen is judged by the layout at the draw's ends
+    (`preflight.laid_out`), refused, naming where and which draw: what the ±16° range was asked
+    to catch."""
     appearances = next(p for p in _task().params if p.name == "target_appearance").choices
     task = _task(draws={
-        "fix_hold": Uniform(0.2, 2.5, repeat=FRESH),
+        "fix_luminance": Uniform(20.0, 90.0, repeat=FRESH),
         "fix_acquisition": NonAging(1.0, 2.0, 12.0, repeat=FRESH),
         "target_window": Uniform(1.0, 4.0, repeat=FRESH),
         "target_x": Weighted((10.0, 40.0, -40.0), (1, 1, 0), repeat=SAME),
@@ -205,33 +211,24 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
 
     found = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None)
     past = [f.detail.split(": ")[0] for f in found if f.code == PAST_LIMIT]
-    assert past == [
-        "in the plain run, the task's draw of 'fix_hold' at 2.5",
-        "in the plain run, the task's draw of 'fix_acquisition' at 12",
-        "in the plain run, the task's draw of 'target_x' at 40"]
+    assert past == ["in the plain run, the task's draw of 'fix_luminance' at 90"]
     assert all(f.blocking for f in found if f.code == PAST_LIMIT)
     found = [f for f in found if f.code != PAST_LIMIT]
 
     warned = [(f.code, f.detail.split(": ")[0]) for f in found if not f.blocking]
     assert warned == [
-        ("outside-range", "in the plain run, the task's draw of 'fix_hold' at 2.5"),
-        ("outside-range", "in the plain run, the task's draw of 'fix_acquisition' at 12"),
-        ("longer-than-declared", "in the plain run, the task's draw of 'fix_acquisition' at 12"),
-        ("outside-range", "in the plain run, the task's draw of 'target_x' at 40"),
+        ("outside-range", "in the plain run, the task's draw of 'fix_luminance' at 90"),
     ]
     assert found[0].detail == (
-        "in the plain run, the task's draw of 'fix_hold' at 2.5: 'fix_hold' is 2.5 s, outside "
-        "the [0.05, 2.0] the task declares, so the task was not designed for it: its load-time "
-        "checks were proved only over its declared range, and were run again with the range "
-        "widened to 2.5")
-    refused = [f for f in found if f.blocking]
+        "in the plain run, the task's draw of 'fix_luminance' at 90: 'fix_luminance' is 90 "
+        "cd/m2, outside the [0.0, 80.0] the task declares, so the task was not designed for it: "
+        "its load-time checks were proved only over its declared range, and were run again with "
+        "the range widened to 90")
+    laid = preflight.laid_out(task, {}, None, ALLOCATION, DIRECT, SRGB, None)
+    refused = [f for f in laid if f.blocking]
     assert refused and {f.code for f in refused} == {"stimulus-off-screen"}
-    assert all(f.detail.startswith(
-        "in the plain run, the task's draw of 'target_x' at 40: with 'target_x' at 40, outside "
-        "its declared range: ") for f in refused)
     item = preflight.values(task, {}, refused)
-    assert item.result == "fail" and "stimulus-off-screen: in the plain run, the task's draw" in (
-        item.said)
+    assert item.result == "fail" and "stimulus-off-screen" in item.said
 
     planned = _task(plans={"p": Plan([
         Block("b", [Condition("c", {}, target=1), Condition("d", {"fix_window": 5.5}, target=1)],
@@ -241,21 +238,12 @@ def test_a_draw_past_its_declared_range_is_warned_and_one_that_breaks_the_run_re
     ])})
     assert not _blocking(planned)
 
-    found = [f for f in preflight.beyond(planned, {}, ALLOCATION, DIRECT, SRGB, None, plan="p")
-             if f.code != PAST_LIMIT]
-
-    assert [(f.code, f.detail.split(": ")[0]) for f in found if not f.blocking] == [
-        ("outside-range", "in plan 'p', block 'b', condition 'd'"),
-        ("outside-range",
-         "in plan 'p', block 'b', condition 'c', the block's draw of 'fix_hold' at 0.01"),
-        ("outside-range",
-         "in plan 'p', block 'own', condition 'far', its own range of 'target_x' at -40"),
-    ], "each said once, where the run first reaches it"
-    refused = [f for f in found if f.blocking]
+    assert preflight.beyond(planned, {}, ALLOCATION, DIRECT, SRGB, None, plan="p") == [], (
+        "inside every declared range: no window or hold here is past one")
+    laid = preflight.laid_out(planned, {}, "p", ALLOCATION, DIRECT, SRGB, None)
+    refused = [f for f in laid if f.blocking]
     assert refused and {f.code for f in refused} == {"stimulus-off-screen"}
-    assert all(f.detail.startswith(
-        "in plan 'p', block 'own', condition 'far', its own range of 'target_x' at -40: ")
-        for f in refused)
+    assert all("block 'own', condition 'far'" in f.detail for f in refused), refused
     assert preflight.beyond(planned, {}, ALLOCATION, DIRECT, SRGB, None) == [], (
         "a block type's draws are not the plain run's")
 
@@ -277,19 +265,20 @@ def test_a_draw_over_many_conditions_is_checked_once_and_said_once(monkeypatch):
         return real(task, values, *args, **kwargs)
 
     monkeypatch.setattr(preflight, "beyond_range", counted)
-    task = _task(draws={"fix_hold": Uniform(0.2, 2.5, repeat=FRESH)}, plans={"p": Plan([
+    task = _task(draws={"fix_luminance": Uniform(20.0, 90.0, repeat=FRESH)}, plans={"p": Plan([
         Block("b", [], factorial=Factorial({
             "target_x": (-6.0, -4.0, -2.0, 2.0, 4.0, 6.0), "target_y": (-1.0, 1.0)}))])})
     assert not _blocking(task)
 
     found = preflight.beyond(task, {}, ALLOCATION, DIRECT, SRGB, None, plan="p")
 
-    assert len(asked) == 2 and asked[1]["fix_hold"] == 2.5
+    assert len(asked) == 2 and asked[1]["fix_luminance"] == 90.0
     # Refused as past its limit first since the console settings plan's Task 4, said once too.
-    assert [f.code for f in found] == [PAST_LIMIT, "outside-range"]
-    assert [f.detail.split(": ")[0] for f in found if f.code != PAST_LIMIT] == [
+    # (A light past the white of the default calibration is also not makeable on it.)
+    assert [f.code for f in found] == [PAST_LIMIT, "outside-range", "unrealizable-color"]
+    assert {f.detail.split(": ")[0] for f in found if f.code != PAST_LIMIT} == {
         "in plan 'p', block 'b', condition 'target_x=-6.0, target_y=-1.0', the task's draw of "
-        "'fix_hold' at 2.5"]
+        "'fix_luminance' at 90"}
 
 
 def test_a_draws_extremes_are_its_least_and_greatest_finite_numbers():

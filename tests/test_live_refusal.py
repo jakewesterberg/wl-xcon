@@ -58,17 +58,17 @@ SEARCHED = {"fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6,
             "array_eccentricity": 8.0, "set_size": 6, "target_index": 0,
             "array_rotation": 0.0, "fix_luminance": 40.0,
             "target_appearance": RED, "distractor_appearance": GREEN}
-#: Its blocks: one whose conditions hold the ring at 4°, below its declared 5° ('near' and
+#: Its blocks: one whose conditions hold the ring at -1°, below its declared 0° ('near' and
 #: 'near_again'), at 8° ('far'), or swap the looks ('swapped', a green square among red), and one
-#: drawing the ring from 4° to 9°.
-RINGS = [Block("set", [Condition("near", {"array_eccentricity": 4.0}, target=2),
-                       Condition("near_again", {"array_eccentricity": 4.0,
+#: drawing the ring from -1° to 9°.
+RINGS = [Block("set", [Condition("near", {"array_eccentricity": -1.0}, target=2),
+                       Condition("near_again", {"array_eccentricity": -1.0,
                                                 "array_rotation": 30.0}, target=2),
                        Condition("far", {"array_eccentricity": 8.0}, target=2),
                        Condition("swapped", {"target_appearance": GREEN_SQUARE,
                                              "distractor_appearance": RED}, target=2)]),
          Block("drawn", [Condition("any", {}, target=2)],
-               draws={"array_eccentricity": Uniform(4.0, 9.0, repeat=FRESH)})]
+               draws={"array_eccentricity": Uniform(-1.0, 9.0, repeat=FRESH)})]
 
 
 def _deadline_task(folder: Path, *, fixed: bool = False, ceiling: bool = False) -> Path:
@@ -83,13 +83,13 @@ def _deadline_task(folder: Path, *, fixed: bool = False, ceiling: bool = False) 
     edits = [("                On(After(3.0), Outcome.NO_RESPONSE),",
               '                On(After(P("response_deadline")), Outcome.NO_RESPONSE),')]
     if fixed:
-        edits.append(('        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2),',
-                      '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2,'
+        edits.append(('        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3),',
+                      '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3,'
                       ' live=False),'))
     if ceiling:
-        edits.append(('        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2',
+        edits.append(('        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3',
                       '        Param("reward_correct", unit="mL", low=0.0, high=1.0),\n'
-                      '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2'))
+                      '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3'))
     for old, new in edits:
         assert text.count(old) == 1, old
         text = text.replace(old, new)
@@ -322,22 +322,22 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
 ):
     """The spec's §11 ("Live, `Session._beyond_range` learns conditions and draws"; call 27):
     `visual_search` at 13 objects, past its 12, is checked with the conditions 'near' and
-    'near_again', holding the ring at 4°, below its 5°, and block 'drawn', drawing the ring from
-    4°. **Since the console settings plan's Task 4 every declared bound is hard**, so it is refused
+    'near_again', holding the ring at -1°, below its 0°, and block 'drawn', drawing the ring from
+    -1°. **Since the console settings plan's Task 4 every declared bound is hard**, so it is refused
     as past its limit, and the ring those places hold past its own is said too, naming each place,
-    no warning written; a fixation hold of 2.5 s, past its 2 s, is refused likewise. Each is still
+    no warning written; a fixation point's luminance of 90, past its 80, is refused likewise. Each is still
     checked once for the session's own values and once for the set of values outside their ranges
     the three places share (the outline review's M-11), never once per condition or extreme."""
     checked = []
     real = taskd.beyond_range
 
     def counted(task, these, *args, **kwargs):
-        checked.append((these["set_size"], these["fix_hold"], these["array_eccentricity"]))
+        checked.append((these["set_size"], these["fix_luminance"], these["array_eccentricity"]))
         return real(task, these, *args, **kwargs)
 
     monkeypatch.setattr(taskd, "beyond_range", counted)
     link = _Drained({2: [SetParameter(name="set_size", value=13, by=JAKE)],
-                     3: [SetParameter(name="fix_hold", value=2.5, by=JAKE)]})
+                     3: [SetParameter(name="fix_luminance", value=90.0, by=JAKE)]})
     session = _session(_spec(tmp_path, "tasks/visual_search.py", values=dict(SEARCHED),
                              blocks=RINGS), link)
 
@@ -346,21 +346,23 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
     assert session.stop_kind == "completed"
     places = ("(on the trials of block 'set', condition 'near'; block 'set', condition "
               "'near_again'; block 'drawn', condition 'any', block 'drawn''s draw of "
-              "'array_eccentricity' at 4)")
-    unexplained = "the task gives no reason for this limit (unexplained-limit)"
+              "'array_eccentricity' at -1)")
+    why = "a run builds every object before the first frame, so a set size needs a highest"
     (refusal, held) = session.refusals
     assert refusal[:2] == ("set_size", JAKE)
     assert refusal[2] == (
         f"'set_size' at 13 is refused, and the previous value stands: past-limit: 'set_size' at "
-        f"13 objects is above its 12: {unexplained}; past-limit: 'array_eccentricity' at 4 deg is "
-        f"below its 5: {unexplained} {places}")
-    assert held[:2] == ("fix_hold", JAKE)
-    assert held[2].startswith(f"'fix_hold' at 2.5 is refused, and the previous value stands: "
-                              f"past-limit: 'fix_hold' at 2.5 s is above its 2: {unexplained}")
-    assert checked == [(13, 0.3, 8.0), (13, 0.3, 4.0), (6, 2.5, 8.0), (6, 2.5, 4.0)]
+        f"13 objects is above its 12: {why}; past-limit: 'array_eccentricity' at -1 deg is "
+        f"below its 0: below 0 cannot be {places}")
+    assert held[:2] == ("fix_luminance", JAKE)
+    assert held[2].startswith(
+        "'fix_luminance' at 90 is refused, and the previous value stands: past-limit: "
+        "'fix_luminance' at 90 cd/m2 is above its 80: white on the default calibration, the "
+        "published sRGB 80 cd/m² (COL-29)")
+    assert checked == [(13, 40.0, 8.0), (13, 40.0, -1.0), (6, 90.0, 8.0), (6, 90.0, -1.0)]
     assert not [row for row in _rows(session, "warnings.jsonl")
-                if "'set_size'" in row["detail"] or "'fix_hold'" in row["detail"]]
-    assert session.spec.values["set_size"] == 6 and session.spec.values["fix_hold"] == 0.3
+                if "'set_size'" in row["detail"] or "'fix_luminance'" in row["detail"]]
+    assert session.spec.values["set_size"] == 6 and session.spec.values["fix_luminance"] == 40.0
 
     # Where a person holds the ring, no condition or draw moves it; and a live range's extreme is
     # its own.
@@ -368,9 +370,9 @@ def test_a_value_outside_its_range_is_rechecked_with_each_condition_and_draw_onc
     session._edited = frozenset({"array_eccentricity"})
     assert session._outside_sets("set_size", values) == [(values, [])]
     session._edited = frozenset()
-    session._ranges = {("block", "drawn", "array_eccentricity"): (Uniform(3.0, 9.0), 5)}
+    session._ranges = {("block", "drawn", "array_eccentricity"): (Uniform(-3.0, 9.0), 5)}
     assert [places for _, places in session._outside_sets("set_size", values)][-1] == [
-        "block 'drawn', condition 'any', block 'drawn''s draw of 'array_eccentricity' at 3"]
+        "block 'drawn', condition 'any', block 'drawn''s draw of 'array_eccentricity' at -3"]
 
 
 def test_wlx_run_given_values_that_make_an_impossible_trial_does_not_start(tmp_path, capsys):
@@ -548,12 +550,12 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
     draw by the one rule a run's start does), with the final whole-branch review's Minor 1 (the
     controller's revised ruling): a direction draw is judged against its declared range on the
     circle by arc containment. `Uniform(-45, 45)`, declared [0, 360] or in signed terms [-180,
-    180], is inside the whole turn, so a person's `fix_hold` of 2.5, outside its own, is said for
+    180], is inside the whole turn, so a person's `fix_luminance` of 90, outside its own, is said for
     that setting alone and nothing of `target_dir`. Declared [0, 180] it reaches past at -45, as
     drawn; declared [-30, 30], at -45 and 45; and `Uniform(100, 120)`, declared [0, 90], is wholly
     past it, at 100 and 120. Each the start says and the live check says too, once. **Since the
     console settings plan's Task 4 every declared bound is hard**: each is refused as past its
-    limit (`past-limit`), at the start and live, the person's `fix_hold` among them, and no
+    limit (`past-limit`), at the start and live, the person's `fix_luminance` among them, and no
     warning row is written."""
     from test_draws_in_runs import _directed, _right, _rows as _run_rows
     from test_draws_in_runs import _session as _run_session, _spec as _run_spec
@@ -572,7 +574,7 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
     start = [f for f in preflight.beyond(task, {}, _load_allocation(Path("tasks/allocation.py")),
                                          DIRECT, _SRGB, None, plan="p")
              if "target_dir" in f.detail]
-    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)]})
+    link = _Drained({2: [SetParameter(name="fix_luminance", value=90.0, by=JAKE)]})
     session = _run_session(_run_spec(tmp_path, path, plan="p", trials=3), link,
                            world=lambda trial, values, index: _right(values))
 
@@ -580,9 +582,10 @@ def test_a_live_value_outside_its_range_widens_a_direction_draw_as_the_runs_star
 
     written = session.directory / "warnings.jsonl"
     rows = _run_rows(session, "warnings.jsonl") if written.exists() else []
-    assert not [row for row in rows if "target_dir" in row["detail"] or "fix_hold" in row["detail"]]
+    assert not [row for row in rows if "target_dir" in row["detail"] or "fix_luminance" in row["detail"]]
     ((name, _, refusal),) = session.refusals
-    assert name == "fix_hold" and "past-limit: 'fix_hold' at 2.5 s is above its 2" in refusal
+    assert name == "fix_luminance" and (
+        "past-limit: 'fix_luminance' at 90 cd/m2 is above its 80" in refusal)
     past = [f for f in start if f.code == "past-limit"]
     assert [f.blocking for f in past] == [True] * len(shown)
     for end, finding in zip(shown, past):
@@ -596,7 +599,7 @@ def _choosing_task(folder: Path) -> Path:
     reads, written into `folder` as `choosing.py`. Engine test material, run only in the
     simulator."""
     text = Path("tasks/fixation_detection.py").read_text()
-    old = '        Param("target_hold", unit="s", low=0.05, high=1.0, start=0.2'
+    old = '        Param("target_hold", unit="s", low=0.0, high=3.0, start=0.2, why=HOLD_WHY_3'
     assert text.count(old) == 1
     path = Path(folder) / "choosing.py"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -648,23 +651,24 @@ def test_a_live_value_outside_its_range_beside_a_wait_of_any_length_is_staged_wi
         tmp_path):
     """XC-423's fix round 1 (the review's I1 and m3), driven through a session: a task whose
     fixation wait declares a highest of infinity, a wait of any length, refused every live value
-    outside its range, a fixation hold of 2.5 s past its 2 s among them ("a wait the task declares,
+    outside its range, a fixation point's luminance of 90 past its 80 among them ("a wait the task declares,
     can be inf s ... cannot be judged"). **Since the console settings plan's Task 4** a value past
     its bound is refused for that alone (`past-limit`), saying the limit, never that a wait cannot
-    be judged; one inside, 1.5 s, is staged, the endless wait refusing nothing."""
+    be judged; one inside, 60, is staged, the endless wait refusing nothing."""
     text = Path("tasks/fixation_detection.py").read_text()
-    old = '        Param("fix_acquisition", unit="s", low=0.5, high=10.0, start=4.0),'
+    old = '        Param("fix_acquisition", unit="s", low=0.0, start=4.0),'
     assert text.count(old) == 1
     task = tmp_path / "endless.py"
-    task.write_text(text.replace(old, old.replace("high=10.0", 'high=float("inf")')))
-    link = _Drained({2: [SetParameter(name="fix_hold", value=2.5, by=JAKE)],
-                     3: [SetParameter(name="fix_hold", value=1.5, by=JAKE)]})
+    task.write_text(text.replace(old, old.replace("start=4.0", 'high=float("inf"), start=4.0')))
+    link = _Drained({2: [SetParameter(name="fix_luminance", value=90.0, by=JAKE)],
+                     3: [SetParameter(name="fix_luminance", value=60.0, by=JAKE)]})
     session = _session(_spec(tmp_path, task), link)
 
     session.run()
 
     assert session.stop_kind == "completed"
     ((name, _, refusal),) = session.refusals
-    assert name == "fix_hold" and "past-limit: 'fix_hold' at 2.5 s is above its 2" in refusal
+    assert name == "fix_luminance" and (
+        "past-limit: 'fix_luminance' at 90 cd/m2 is above its 80" in refusal)
     assert "cannot be judged" not in refusal
-    assert session.spec.values["fix_hold"] == 1.5
+    assert session.spec.values["fix_luminance"] == 60.0

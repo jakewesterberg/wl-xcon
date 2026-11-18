@@ -558,12 +558,13 @@ def _ten_inputs(folder: Path) -> Path:
 
 
 def _off_the_field(folder: Path) -> Path:
-    """The reference task whose target may be placed 80° out, past any field a rig shows."""
+    """The reference task whose target starts 80° out, past any field a rig shows (its range, which
+    reached 80° here, is gone; an open side is judged at its start)."""
     text = (ROOT / "tasks" / "fixation_detection.py").read_text()
-    old = 'Param("target_x", unit="deg", low=-16.0, high=16.0, start=10.0)'
+    old = 'Param("target_x", unit="deg", start=10.0)'
     assert text.count(old) == 1
     path = folder / "off_the_field.py"
-    path.write_text(text.replace(old, old.replace("high=16.0", "high=80.0")))
+    path.write_text(text.replace(old, old.replace("start=10.0", "start=80.0")))
     return path
 
 

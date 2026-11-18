@@ -520,6 +520,11 @@ the run will hold after it (`Session._laid_out`), compared with the layout at th
 (`Session._laid`): a new refusal refuses the change, nothing staged, and each new warning is
 accepted by who made it and said on the feed. Between trials, never in a frame. The checks
 widened to a value outside its range (XC-352's D2) still run, behind the refusal (XC-516).
+**The reference tasks keep only the bounds that stand** (the console settings plan's Task 5):
+luminance's 80 cd/m² (the PI's, COL-29) and the training variant's primaries' full drive, a hold's
+highest (its state ends at a fixed 10 s, or 3 s for the target's), a set size's highest, and the
+standard 0 and 1; every size, window, place, ring, wait for fixation and rotation is open, and a
+draw of one gives its own `low` and `high` (`bad-draw` otherwise).
 
 **Counting and repeats, since engine build C2a.** Each trial structure declares its counting table
 (`task.Counting`; engine spec §16.1-16.2), naming the state its stimulus appears in: every answer

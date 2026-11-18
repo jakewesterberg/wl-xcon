@@ -240,9 +240,9 @@ def test_a_changed_choice_is_read_by_its_raising(tmp_path):
     eases it. The fixation hold's raise harder: the person's 0.2 s, shorter than the trial's
     0.3 s, does not."""
     path = _meant(tmp_path, edits=(
-        ('        Param("fix_hold", unit="s", low=0.05, high=2.0, start=0.3),',
+        ('        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),',
          '        Param("fix_hold", unit="s", choices=(0.2, 0.3, 0.4), start=0.3),'),
-        ('        Param("fix_window", unit="deg", low=0.5, high=5.0, start=2.0),',
+        ('        Param("fix_window", unit="deg", start=2.0),',
          '        Param("fix_window", unit="deg", choices=(1.0, 2.0, 3.0), start=2.0),')))
     link = _Drained({2: [SetParameter(name="fix_window", value=1.0, by=JAKE)],
                      4: [HandBack(name="fix_window", by=JAKE),
@@ -807,13 +807,15 @@ def test_an_expected_range_typed_back_to_its_written_numbers_counts_as_put_back(
     numbers again as a way to put a range back): an expected setting's range is compared by the
     numbers that place its draws, as the change row's `went` is, not as objects. The target window,
     read as expected, is drawn as a normal about 4° with no written cut (its setting's own
-    stands in); its cut is lowered live, which keeps its trials out ("No, after any change"), and
+    stands in; the task here declares the window 0.5° to 6°, as the reference task no longer does); its cut is lowered live, which keeps its trials out ("No, after any change"), and
     sent back as the setting's own cut, which counts them again, its row saying `went: null`."""
     path = _meant(tmp_path, meanings=(
         "'target_window': Meaning(EXPECTED, CRITERION, raising=EASIER, "
         "note='a wider window accepts a less accurate landing', "
         "overrides='read as the search tasks read their object window')"),
-        draws='{"target_window": TruncatedNormal(4.0, 0.5, repeat=FRESH)}')
+        draws='{"target_window": TruncatedNormal(4.0, 0.5, repeat=FRESH)}',
+        edits=(('        Param("target_window", unit="deg", start=3.0),',
+                '        Param("target_window", unit="deg", low=0.5, high=6.0, start=3.0),'),))
     declared = next(p for p in _load_task(path).params if p.name == "target_window")
     link = _Drained({2: [SetRange(name="target_window", numbers={"low": 3.0}, by=JAKE)],
                      4: [SetRange(name="target_window", numbers={"low": declared.low}, by=JAKE)]})
