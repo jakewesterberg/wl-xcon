@@ -273,7 +273,7 @@ def test_at_values_pins_a_number_or_a_span():
     assert declared["fix_hold"] == {p.name: p for p in task.params}["fix_hold"]
     assert LAYOUT == ("stimulus-off-screen", "overlapping-windows", "crowded-array",
                       "answer-window-reaches-objects", "window-inside-object", "objects-touch",
-                      "scaled-small")
+                      "scaled-small", "color-set-desaturated", "color-set-unreachable")
 
 
 def test_the_layout_is_judged_at_the_values_on_every_change(tmp_path):
@@ -381,6 +381,46 @@ def test_touching_discs_are_warned(ring):
                                                              geometry=DIRECT)}
 
 
+
+@pytest.mark.parametrize(("path", "setting"), [
+    ("tasks/fixation_detection.py", "fix_window"),
+    ("tasks/fixation_detection.py", "target_window"),
+    ("tasks/visual_search.py", "object_window"),
+    ("tasks/calibration.py", "cal_window"),
+])
+@pytest.mark.parametrize("value", [0.0, -2.0])
+def test_a_reference_tasks_window_of_no_size_is_refused_at_the_values_set(path, setting, value):
+    """The whole-build review's I1 (§4: "a size below zero" cannot be, nor 0): a reference task's
+    gaze window, each leaving its lowest open, set to 0 or below is refused at the values set
+    (`bad-window-radius`, blocking, naming the window and the setting) -- live and at a run's start
+    alike, both reading `check.laid_out` -- and at 1° it is not. A window's radius, a gaze
+    window's or an array's object windows' in degrees, is the same rule."""
+    task = _load_task(Path(path))
+
+    found = [f for f in laid_out(task, {setting: value}, allocation=ALLOCATION, geometry=DIRECT)
+             if f.code == "bad-window-radius"]
+
+    assert found and all(f.blocking for f in found), found
+    assert all(f"({setting!r})" in f.detail and f"{value:g}°" in f.detail for f in found)
+    assert not [f for f in laid_out(task, {setting: 1.0}, allocation=ALLOCATION, geometry=DIRECT)
+                if f.code == "bad-window-radius"]
+
+
+def test_a_declared_range_reaching_no_size_is_refused_at_load(tmp_path, ring):
+    """I1 at load: a window's range declared at both ends is read over them, every value in it one
+    a console can send, so a range reaching 0 is refused there, as a look's size reaching 0 is
+    (`bad-block`); one leaving its lowest open is read at its start, and loads (the fixture's)."""
+    assert "bad-window-radius" not in {f.code for f in check_task(ring, ALLOCATION,
+                                                                   geometry=DIRECT)}
+    closed = _load_task(_ring_task(tmp_path, name="closed", over=(
+        '_OPEN["fix_window"] = Param("fix_window", unit="deg", low=0.0, high=5.0, start=2.0, '
+        'why="a test\'s")')))
+
+    (found,) = [f for f in check_task(closed, ALLOCATION, geometry=DIRECT)
+                if f.code == "bad-window-radius" and f.subjects == ("window 'fix'",)]
+    assert found.blocking
+    assert found.detail.startswith("window 'fix': its radius can be 0° ('fix_window')")
+
 @pytest.mark.skipif(XTASKS is None, reason="no wl-xtasks checkout holding the pop-out search")
 def test_the_fixation_window_reaching_the_discs_is_still_warned():
     """§4, already a warning, on the PI's pop-out: its window about the center, whose exit starts
@@ -447,6 +487,25 @@ def test_the_preflight_judges_the_layout_at_the_runs_values(ring):
         "in plan 'p', block 'near', condition 'c': array 'search' can put 8 objects ('set_size') "
         "on a 3° ring")
 
+
+
+def test_a_layout_the_preflight_cannot_judge_is_refused_under_its_own_code(ring, monkeypatch):
+    """The whole-build review's m2: a layout check that raises at a run's start is a blocking
+    finding saying so, under a code of its own, `layout-unjudged` -- not `stimulus-off-screen`,
+    which would name a cause nobody found in the pre-flight item and the warnings record -- and it
+    fails the starting values item."""
+    def broken(*args, **kwargs):
+        raise ZeroDivisionError("division by zero")
+
+    monkeypatch.setattr(preflight, "check_laid_out", broken)
+    (found,) = preflight.laid_out(ring, {}, None, ALLOCATION, DIRECT, SRGB, None)
+
+    assert (found.code, found.blocking) == ("layout-unjudged", True)
+    assert found.detail == ("the layout at the run's values could not be judged "
+                            "(ZeroDivisionError: division by zero), so whether a stimulus leaves "
+                            "the field is unknown")
+    item = preflight.values(ring, {}, [found])
+    assert item.result == "fail" and "layout-unjudged: " in item.said
 
 def dataclass_plan(task, block):
     """`task` with one plan, `p`, of `block`."""

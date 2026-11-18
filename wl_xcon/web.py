@@ -3961,13 +3961,15 @@ _SCRIPT = """
   var timers = {};
   var heldParams = null;
   var heldMoments = null;
-  // The Training tab's cards (the console settings build's Task 10), held while a field of theirs
-  // is typed in, as the Task parameters tab's are.
+  // The Training tab's cards (the console settings build's Task 10), held as the Task parameters
+  // tab's are, by every protection theirs have (the whole-build review's I3: a field typed in, a
+  // number typed and not sent, a pointer down, a press out): the bars, staircases and margin moved
+  // there from `#params`, and in WebKit a frame landing under a press there lost it.
   var heldTraining = null;
-  function typingTraining() {
-    var focused = document.activeElement;
-    return Boolean(focused && focused.matches &&
-      focused.matches("#training-params input, #training-params select"));
+  // **The two tabs of setting cards**, which every hold and every card lookup reads alike.
+  var CARDS = ["#params", "#training-params"];
+  function inCards(selector) {
+    return CARDS.map(function (root) { return root + " " + selector; }).join(", ");
   }
   var pressedAt = null;
   var PRESS_MS = 10000;
@@ -4054,20 +4056,20 @@ _SCRIPT = """
     return raw === "" || !isFinite(value) || value !== Number(input.defaultValue);
   }
   function rangeEdited() {
-    var fields = document.querySelectorAll("#params input[data-number]");
+    var fields = document.querySelectorAll(inCards("input[data-number]"));
     return Array.prototype.some.call(fields, rangeChanged) || formEdited();
   }
   // A drawn side's number typed and not yet applied holds the cards as a range's does (the
   // console settings build), for the same reason: WebKit takes focus off the field as the mouse
   // goes down on *apply*.
   function formEdited() {
-    var fields = document.querySelectorAll("#params input[data-form]");
+    var fields = document.querySelectorAll(inCards("input[data-form]"));
     return Array.prototype.some.call(fields, function (input) {
       return input.value !== input.defaultValue;
     });
   }
   function cardOf(name) {
-    var button = document.querySelector('#params [data-switch][data-name="' + CSS.escape(name) + '"]');
+    var button = document.querySelector(inCards('[data-switch][data-name="' + CSS.escape(name) + '"]'));
     return button ? button.closest(".param") : null;
   }
   function showSide(card, which) {
@@ -4087,49 +4089,56 @@ _SCRIPT = """
       group.hidden = group.getAttribute("data-fields") !== shape;
     });
   }
-  // **The sections of the Task parameters tab** (the console settings design's §7; the PI,
-  // 2026-11-16, "As you last left them"): each opens as it was last left, per task, in
-  // the browser's own storage under `wlx.sections.<task>` -- the names of those left closed. Every access is
-  // inside `try`: a store that throws (a private window, blocked site data) leaves every section
-  // open, and a click still opens and closes them. The find box filters the cards by name and
+  // **The sections of the Task parameters tab and the Training tab** (the console settings
+  // design's §7 and §8; the PI, 2026-11-16, "As you last left them"): each opens as it was last
+  // left, per task and per tab, in the browser's own storage under `wlx.sections.<task>` for the
+  // Task parameters tab and `wlx.training-sections.<task>` for the Training tab (the whole-build
+  // review's I3) -- the names of those left closed. Every access is inside `try`: a store that
+  // throws (a private window, blocked site data) leaves every section open, and a click still
+  // opens and closes them. The find box, the Task parameters tab's, filters its cards by name and
   // opens the sections of those it finds, without touching what is kept.
   var SECTIONS_KEY = "wlx.sections.";
-  function readSections(task) {
+  var TRAINING_SECTIONS_KEY = "wlx.training-sections.";
+  function sectionsKey(root) {
+    return (root.closest("#training-params") ? TRAINING_SECTIONS_KEY : SECTIONS_KEY) +
+      root.getAttribute("data-task");
+  }
+  function readSections(key) {
     try {
-      var raw = window.localStorage.getItem(SECTIONS_KEY + task);
+      var raw = window.localStorage.getItem(key);
       var kept = raw ? JSON.parse(raw) : null;
       return kept && typeof kept === "object" && !Array.isArray(kept) ? kept : {};
     } catch (e) { return {}; }
   }
-  function writeSections(task, kept) {
-    try { window.localStorage.setItem(SECTIONS_KEY + task, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
+  function writeSections(key, kept) {
+    try { window.localStorage.setItem(key, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
   }
   function applySections() {
-    var root = document.querySelector("#params .secs");
-    if (!root) { return; }
-    var kept = readSections(root.getAttribute("data-task"));
-    var find = el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
-    Array.prototype.forEach.call(root.querySelectorAll(".param"), function (card) {
-      var name = card.querySelector(".pn span");
-      var found = find === "" || (name !== null && name.textContent.toLowerCase().indexOf(find) !== -1);
-      card.classList.toggle("nofind", !found);
-    });
-    Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-      var matches = section.querySelector(".param:not(.nofind)") !== null;
-      section.classList.toggle("nofind", find !== "" && !matches);
-      section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
+      var kept = readSections(sectionsKey(root));
+      var find = root.closest("#params") && el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
+      Array.prototype.forEach.call(root.querySelectorAll(".param"), function (card) {
+        var name = card.querySelector(".pn span");
+        var found = find === "" || (name !== null && name.textContent.toLowerCase().indexOf(find) !== -1);
+        card.classList.toggle("nofind", !found);
+      });
+      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
+        var matches = section.querySelector(".param:not(.nofind)") !== null;
+        section.classList.toggle("nofind", find !== "" && !matches);
+        section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
+      });
     });
   }
   // A section a person opened or closed is kept (the click is on its summary, before it toggles).
   function keepSection(e) {
-    var summary = e.target.closest("#params details.sec > summary");
+    var summary = e.target.closest(inCards("details.sec > summary"));
     if (!summary) { return; }
     var section = summary.parentNode;
-    var root = section.closest(".secs");
-    var kept = readSections(root.getAttribute("data-task"));
+    var key = sectionsKey(section.closest(".secs"));
+    var kept = readSections(key);
     if (section.open) { kept[section.getAttribute("data-sec")] = true; }
     else { delete kept[section.getAttribute("data-sec")]; }
-    writeSections(root.getAttribute("data-task"), kept);
+    writeSections(key, kept);
   }
   if (el("pfind")) { el("pfind").addEventListener("input", applySections); }
   applySections();
@@ -4145,7 +4154,7 @@ _SCRIPT = """
       if (card) { showShape(card, shapes[name]); }
     });
     Object.keys(colorSets).forEach(function (name) {
-      var select = document.querySelector('#params select[data-colorset="' + CSS.escape(name) + '"]');
+      var select = document.querySelector(inCards('select[data-colorset="' + CSS.escape(name) + '"]'));
       if (select) { showHues(select, colorSets[name]); }
     });
     restoreNewColors();
@@ -4265,7 +4274,7 @@ _SCRIPT = """
   // A number typed and not sent is marked pending, and, while a frame is held because of it,
   // its card says so under the editor: never a silent freeze of the cards (fix round 2).
   function markRanges() {
-    Array.prototype.forEach.call(document.querySelectorAll("#params .param"), function (card) {
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".param")), function (card) {
       var fields = card.querySelectorAll("input[data-number]");
       var edited = false;
       Array.prototype.forEach.call(fields, function (input) {
@@ -4274,7 +4283,8 @@ _SCRIPT = """
         edited = edited || changed;
       });
       var line = card.querySelector(".rhold");
-      if (line) { line.hidden = !(edited && heldParams !== null); }
+      var held = card.closest("#training-params") ? heldTraining : heldParams;
+      if (line) { line.hidden = !(edited && held !== null); }
     });
   }
   // A pointer down inside the cards or the moments pane holds them until it is up (fix round 2:
@@ -4289,13 +4299,13 @@ _SCRIPT = """
   // what the press did.
   function busy() {
     var focused = document.activeElement;
-    return Boolean(focused && focused.matches && focused.matches("#params input, #params select")) ||
+    return Boolean(focused && focused.matches && focused.matches(inCards("input") + ", " + inCards("select"))) ||
       rangeEdited() || pressing() || Object.keys(timers).length > 0;
   }
   function swap(id, html) {
     if (id === "params" && busy()) { heldParams = html; return; }
     if (id === "moments" && pressing()) { heldMoments = html; return; }
-    if (id === "training-params" && typingTraining()) { heldTraining = html; return; }
+    if (id === "training-params" && busy()) { heldTraining = html; return; }
     if (id === "training-params") { heldTraining = null; }
     // A frame shown is the newest: an older one held meanwhile must never be written back over
     // it by a later release (fix round 3 of the C3 plan's Task 18).
@@ -4306,7 +4316,7 @@ _SCRIPT = """
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
     if (node) { node.innerHTML = html; }
     if (chosen !== null) { choose(node, chosen); }
-    if (id === "params") { restoreSides(); }
+    if (id === "params" || id === "training-params") { restoreSides(); }
     // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
     applySignIn();
     if (id === "controls") { holdReward(); }
@@ -4324,9 +4334,10 @@ _SCRIPT = """
       restoreSides();
       applySignIn();
     }
-    if (heldTraining !== null && !typingTraining()) {
+    if (heldTraining !== null && !busy()) {
       el("training-params").innerHTML = heldTraining;
       heldTraining = null;
+      restoreSides();
       applySignIn();
     }
     if (heldMoments !== null && !pressing()) {
@@ -5458,7 +5469,7 @@ _SCRIPT = """
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });
   document.addEventListener("input", function (e) {
-    if (e.target && e.target.matches && e.target.matches("#params input[data-number]")) {
+    if (e.target && e.target.matches && e.target.matches(inCards("input[data-number]"))) {
       markRanges();
       release();
     }
@@ -5475,7 +5486,7 @@ _SCRIPT = """
   // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).
   document.addEventListener("pointerdown", function (e) {
     if (e.button === 0 && e.target && e.target.closest &&
-        e.target.closest("#params, #moments")) {
+        e.target.closest("#params, #training-params, #moments")) {
       pressedAt = performance.now();
       setTimeout(release, PRESS_MS + 50);
     }

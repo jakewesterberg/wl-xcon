@@ -1989,6 +1989,12 @@ def make_handler(
 
             latest, _ = self._hub.snapshot(on_box=on_box(self.client_address[0]),
                                            stale_after_s=self._stale_after_s)
+            # **At most 16 fields** (TSK-75: a fixed number says its reason): any viewer may ask
+            # for a preview, so the parse is bounded rather than left to the query's length; a
+            # well-formed one names at most five -- `set`, `method` and a method's numbers, at most
+            # three (`colordef.NUMBERS`, `OPTIONAL`, `FRAMING`). Why 16 rather than five was not
+            # written down when the console settings build's Task 8 chose it: a margin above
+            # five, the builder's.
             try:
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True,
                                  max_num_fields=16)

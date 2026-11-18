@@ -169,6 +169,7 @@ def check(
         + _unreachable_timeouts(valued)
         + _crowded_arrays(valued)
         + _unsized_windows(valued)
+        + _sizeless_windows(valued)
         + _windows_inside_objects(valued)
         + _objects_touch(valued)
         + _answer_windows_reach(valued)
@@ -618,9 +619,17 @@ def at_values(task: Task, values) -> Task:
 #: set, recomputed whenever a value changes"): judged at the values set (`laid_out`) at a run's
 #: start (`preflight.laid_out`) and on every change (`taskd.Session._laid_out`), each finding
 #: compared with those at the values in force. Off the field refuses; the rest are warnings.
+#: **A color set shown less saturated than asked at the luminance set** (`color-set-desaturated`)
+#: and **a drawn luminance whose upper part the panel cannot show** (`color-set-unreachable`, always
+#: a warning; a single value past the reachable top is refused as impossible, `unshowable`) are
+#: among them (the whole-build review's I2; XC-518): the load judges an open luminance at its start,
+#: so without them a trainer brightening the colors live was told nothing (the design's third
+#: anti-goal, "a color picked on the page that differs from what the rig draws, with nothing saying
+#: so"). Each names its set (`Finding.subjects`), so a set already warned of at the values in force
+#: is not warned of again for another luminance (`taskd.Session._laid_out`).
 LAYOUT = ("stimulus-off-screen", "overlapping-windows", "crowded-array",
           "answer-window-reaches-objects", "window-inside-object", "objects-touch",
-          "scaled-small")
+          "scaled-small", "color-set-desaturated", "color-set-unreachable")
 
 #: **A size scaled by eccentricity that the center leaves small** (the console settings design's
 #: §5: "eccentricity 0 gives size 0, so the load check warns for a scaled stimulus at or near the
@@ -4765,7 +4774,8 @@ def _color_set_faults(trial: Trial, params: dict[str, Param], panel: Calibration
                 f"(the pop-out search spec §3.2); shown as "
                 f"{', '.join(f'{c} x={x:.4f}, y={y:.4f}' for c, (x, y) in shown.xy.items())}; "
                 f"asked for by {'; '.join(whats)}"),
-                blocking=False, accepted_in=SESSION_KINDS))
+                blocking=False, accepted_in=SESSION_KINDS,
+                subjects=(f"color set {colorset.name!r}",)))
     if sets and not panel.standard and panel.spectra is None:
         findings.append(Finding("color-set-without-spectra", (
             f"calibration {name} was measured without spectra, so this task's color-set lights "
@@ -4821,7 +4831,8 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
             f"panel's reachable top for it is about {top:.3g} cd/m², and a value above that is "
             f"refused when a trainer sets it live or a run starts with it; the task runs at any "
             f"value up to it; asked for by {'; '.join(whats)}"),
-            blocking=False, accepted_in=SESSION_KINDS))
+            blocking=False, accepted_in=SESSION_KINDS,
+            subjects=(f"color set {colorset.name!r}",)))
     shown_high = share(top)
     if not shown_high:
         return findings
@@ -4847,7 +4858,7 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
         f"at {at} as "
         f"{', '.join(f'{c} x={x:.4f}, y={y:.4f}' for c, (x, y) in shown.xy.items())}; asked for "
         f"by {'; '.join(whats)}"),
-        blocking=False, accepted_in=SESSION_KINDS)]
+        blocking=False, accepted_in=SESSION_KINDS, subjects=(f"color set {colorset.name!r}",))]
 
 
 def reachable_top(colorset, panel: Calibration, low: float, high: float) -> float | None:
@@ -6973,6 +6984,61 @@ def _window_reach(declared: ObjectWindows, array: Array,
     narrowest = min(_narrowest(array.looks, params), _narrowest(array.among, params))
     least = low * narrowest / 2.0 if math.isfinite(narrowest) else 0.0
     return (least, high * max(widest) / 2.0)
+
+
+#: **A window of no size** (`_sizeless_windows`): a gaze window's radius, or an array's object
+#: windows' radius or scale, at or below 0.
+WINDOW_RADIUS = "bad-window-radius"
+
+
+def _sizeless_windows(trial: Trial) -> list[Finding]:
+    """**`bad-window-radius`: a gaze window's radius, or an array's object windows' radius or
+    scale, that can be 0 or below** (the console settings build's whole-build review, I1; the
+    console settings design's §4: "a size or a time below zero" is what cannot be, and a window of
+    no size is none either), refused in every kind: no gaze is inside a window of radius 0 or
+    less (`gaze.Tracked.in_window` compares the gaze's separation with it), so every trial after
+    it ends with no fixation or no answer, and the animal works unrewarded until someone notices.
+    Read as a size is read for `bad-block`: a literal, each choice of a setting, a declared lowest
+    (`Param.low`). **A side left open is read at the setting's start at load and at the value set
+    on every change** (`_at_start`, `at_values`), so `laid_out`'s new-refusal rule refuses a 0 or
+    a -2 typed live, and `preflight.laid_out` one a run starts with. A value that is no finite
+    number is `bad-placement`'s (`_position_kind_faults`, XC-426); nothing here raises on it."""
+    params = {p.name: p for p in trial.params}
+    findings: list[Finding] = []
+
+    def least(value: object) -> "float | None":
+        if not isinstance(value, P):
+            return float(value) if _finite(value) and value <= 0.0 else None
+        param = params.get(value.name)
+        if param is None:
+            return None  # refused as undeclared (`_undeclared_parameters`)
+        if param.choices:
+            below = [float(c) for c in param.choices if _finite(c) and c <= 0.0]
+            return min(below) if below else None
+        return float(param.low) if _finite(param.low) and param.low <= 0.0 else None
+
+    for window in trial.windows:
+        if isinstance(window, Window):
+            subject, what, value = f"window {window.name!r}", "its radius", window.radius
+            unit, fix = "°", "a radius above 0"
+        elif isinstance(window, ObjectWindows):
+            subject = f"the object windows of {window.of!r}"
+            value = _window_setting(window)
+            what, unit, fix = (("their radius", "°", "a radius above 0") if window.scale is None
+                               else ("their scale", " times each object's radius",
+                                     "a scale above 0"))
+        else:
+            continue
+        found = least(value)
+        if found is None:
+            continue
+        said = (f"can be {found:g}{unit} ({value.name!r})" if isinstance(value, P)
+                else f"is {found:g}{unit}")
+        give = f"give {value.name!r} {fix}" if isinstance(value, P) else f"give it {fix}"
+        findings.append(Finding(WINDOW_RADIUS, (
+            f"{subject}: {what} {said}, and a window of no size holds no gaze, so every trial "
+            f"would end with no fixation or no answer; {give}"), subjects=(subject,)))
+    return findings
 
 
 def _unsized_windows(trial: Trial) -> list[Finding]:

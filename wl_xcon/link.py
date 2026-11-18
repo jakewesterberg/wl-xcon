@@ -265,7 +265,9 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: be `scaled`. **Colors by set, hue and two levels** (the design's §6; the build's Task 7):
 #: `ParamRow.color`, a color setting's card -- each set its choices show, with its apex,
 #: luminance, `design` and each hue's xy and sRGB swatch, the set and hue of the run's value, and
-#: its saturation and luminance levels, each `{"setting", "value", "cd_m2"}` -- else `None`; and
+#: its saturation level `{"setting", "value", "cd_m2"}` and its luminance level `{"setting",
+#: "value", "cd_m2", "set_wide"}`, `set_wide` true where the setting moves every light of the set --
+#: else `None`; and
 #: `ParamRow.words`, **a value that is an appearance or a color in the rig's words**
 #: (`review.appearance_words`; XC-420 closed), `value` `None` beside it, as a staged row's `was`
 #: and `now` carry one; and a `color` command on the wire (`SetColor`). **New colors, three ways** (the design's §6; the
@@ -523,10 +525,12 @@ class ParamRow:
     #: "design", "hues"}`, each hue the choices offer `{"xy", "srgb"}`, its chromaticity as the set
     #: writes it and its swatch on the sRGB standard (`photometry.srgb_hex`), `approximate` always
     #: true since no swatch is the rig's measured panel; `set` and `hue` the run's value's, `None`
-    #: where the pool draws it; and the two levels of its light, each `{"setting", "value",
-    #: "cd_m2"}` -- the setting a person types it by (`None` where the task file writes a
-    #: number), its value in that setting's own unit, and the light's macaque luminance in cd/m².
-    #: `None` for every other card.
+    #: where the pool draws it; and the two levels of its light, `saturation` `{"setting",
+    #: "value", "cd_m2"}` and `luminance` `{"setting", "value", "cd_m2", "set_wide"}` -- the
+    #: setting a person types it by (`None` where the task file writes a number), its value in that
+    #: setting's own unit, the light's macaque luminance in cd/m², and, the luminance's alone,
+    #: `set_wide`: true where its setting is the set's luminance, which moves every light of the set
+    #: that reads it, not this light's fraction (the card says so). `None` for every other card.
     color: dict | None = None
     #: **The value in the rig's words, where it is an appearance or a color** (schema 22; XC-420,
     #: closed by the console settings build): `review.appearance_words`, `value` then `None`, as

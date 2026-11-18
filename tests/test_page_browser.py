@@ -3531,3 +3531,76 @@ def test_a_store_that_throws_leaves_every_section_open(rig):
 
     assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
     assert not [e for e in errors if "storage is blocked" in e], errors
+
+
+def _training_rows(gain, step=0.1):
+    """A Training tab's cards: a bar a person holds (*hand back* live on it), the run's gain, and
+    a stage's step in a section nested under Training, so a frame can change each."""
+    from wl_xcon.link import ParamRow
+
+    return tuple(dataclasses.replace(row, section=section) for row, section in (
+        (ParamRow("move_up_bar", "fraction", 0.5, 1.0, 0.9, False, None, "person", ("near",)),
+         "Training"),
+        (ParamRow("gain", "", None, None, gain, False, None, "run"), "Training"),
+        (ParamRow.of("fade_in_step", "fraction", 0.05, 1.0, step, False), "Training/Fade-in"),
+    ))
+
+
+def _training_open(page, name: str) -> bool:
+    return page.evaluate(
+        "(n) => document.querySelector('#training-params details.sec[data-sec=\"' + n + '\"]')"
+        ".open", name)
+
+
+def test_a_press_on_a_training_card_is_not_lost_when_a_frame_lands_under_it(rig):
+    """The whole-build review's I3: the Training tab's cards are held while a pointer is down
+    inside them, as the Task parameters tab's are (fix round 2 of the C3 plan's Task 18), so a
+    frame that changes them mid-press does not replace *hand back* under the mouse -- WebKit never
+    focuses a clicked button. The press arrives, and the frame held under it is shown once it is
+    up. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import HandBack
+
+    _offer(rig, 40, params=_training_rows(2.0))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-training"]')
+
+    page.hover('#training-params [data-cmd="hand_back"][data-name="move_up_bar"]')
+    page.mouse.down()
+    _offer(rig, 41, params=_training_rows(3.0))
+    _arrived(page, 41)
+    assert "2.00" in page.inner_text("#training-params")  # held under the press
+    page.mouse.up()
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
+    rig.wait_for(lambda: "3.00" in page.inner_text("#training-params"))
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.by.name) == (HandBack, "move_up_bar", "Jake Westerberg")
+
+
+def test_a_collapsed_training_section_stays_collapsed_across_a_frame(rig):
+    """The whole-build review's I3: a Training section a person closed stays closed across a frame
+    that changes the Training tab's cards and across a reload, kept for its task under the Training
+    tab's own key, `wlx.training-sections.<task>`; the Task parameters tab's are not touched. In a
+    real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    _offer(rig, 40, params=_training_rows(2.0))
+    page = rig.browser_page()
+    page.click('label[for="t-training"]')
+    assert _training_open(page, "Training") and _training_open(page, "Training/Fade-in")
+
+    page.click('#training-params details.sec[data-sec="Training/Fade-in"] > summary')
+    assert not _training_open(page, "Training/Fade-in")
+    _offer(rig, 41, params=_training_rows(2.0, step=0.3))
+    _arrived(page, 41)
+    _until(page, "document.querySelector('#training-params').textContent.indexOf('0.30') !== -1")
+
+    assert not _training_open(page, "Training/Fade-in"), "the section stays as it was last left"
+    assert _training_open(page, "Training")
+    kept = page.evaluate("JSON.parse(window.localStorage.getItem('wlx.training-sections.tasks/"
+                         "fixation_detection.py'))")
+    assert kept == {"Training/Fade-in": True}
+    assert page.evaluate("window.localStorage.getItem('wlx.sections.tasks/"
+                         "fixation_detection.py')") is None
+    page.reload()
+    page.click('label[for="t-training"]')
+    assert not _training_open(page, "Training/Fade-in") and _training_open(page, "Training")

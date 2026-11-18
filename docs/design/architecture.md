@@ -526,15 +526,19 @@ with no start left to the run's; a setting with both bounds is judged over them,
 still declares its highest (`unbounded-set-size`, the PI's "Refuse at load" of 2026-10-14). **The
 layout is judged at the values set** (`check.laid_out`): off the field, overlapping windows, a
 crowded array, a window whose exit starts the answer reaching the objects, an object window
-smaller than its object, touching objects (`check.LAYOUT`), each naming the settings beside their
-values; any refusal a structure's checks newly give at the values (a target index past its array,
-a correlation past 1, a size of 0); and a wait longer than any the task's own starting values give
+smaller than its object, touching objects, and a color set shown less saturated than asked or
+past what the panel can show over a drawn luminance (`color-set-desaturated`,
+`color-set-unreachable`; the whole-build review's I2) (`check.LAYOUT`), each naming the settings
+beside their values; any refusal a structure's checks newly give at the values (a target index
+past its array, a correlation past 1, a size of 0, a gaze window's radius or an object window's
+ratio at or below 0, `bad-window-radius`, the whole-build review's I1); and a wait longer than any the task's own starting values give
 (`longer-than-declared`). It is asked at a run's start, over each block, condition and each
 draw's and staircase's two ends (`preflight.laid_out`, in `wlx taskd`'s pre-flight), and on every
 change as it is offered -- a value, a range, a person's draw, a hand-back and a revert -- at what
 the run will hold after it (`Session._laid_out`), compared with the layout at the values in force
 (`Session._laid`): a new refusal refuses the change, nothing staged, and each new warning is
-accepted by who made it and said on the feed. Between trials, never in a frame. The checks
+accepted by who made it and said on the feed; a layout check that raises at a run's start is
+refused as `layout-unjudged`. Between trials, never in a frame. The checks
 widened to a value outside its range (XC-352's D2) still run, behind the refusal (XC-516).
 **The reference tasks keep only the bounds that stand** (the console settings plan's Task 5):
 luminance's 80 cd/m² (the PI's, COL-29) and the training variant's primaries' full drive, a hold's
@@ -978,7 +982,8 @@ apex refuses it -- **but where a setting gives the luminance, the part of its ra
 show at all is a warning naming the reachable top** (`color-set-unreachable`, `check.reachable_top`;
 the PI's warnings over refusals), and only a value above it is refused, as a person sets it live
 (`taskd.Session._impossible`, ahead of the listed `Session.set`) or a run starts with it
-(`check.unshowable`); over the range, `color-set-desaturated` says which part desaturates. The set is realized between trials, once for each luminance a run draws it at on
+(`check.unshowable`); over the range, `color-set-desaturated` says which part desaturates, and at a
+value set live the share given up there, each a layout warning naming its set (`check.LAYOUT`). The set is realized between trials, once for each luminance a run draws it at on
 each calibration (`photometry.realized`), never in a frame. **The record
 names a color-set light's set by its name alone** (`record._written`; REC-27, revised 2026-11-07 by
 the build's final fixes), and each run's start row defines every set its task declares once

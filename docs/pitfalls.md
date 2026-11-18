@@ -398,6 +398,10 @@ reading a setting's declared bounds, as if the highest a value could be were its
 build removed the caps the PI never set (hard only where impossible), and each such check then either refused
 every task, or, written to pass on no bound, passed quietly: the pop-out search and the reference tasks loaded
 with `unexplained-limit` warnings, `bad-plan` and `bad-staircase` refused a bar or a window whose setting had an
-open side (XC-519), and a live color_luminance past the panel's saturation went unwarned (XC-518). Mitigation:
-judge a layout at the values a setting can take (`laid_out`, `check.LAYOUT`), where an open side is held at its
-start, and test it at the values with the cap removed, not with the cap in place.
+open side (XC-519), and a live color_luminance past the panel's saturation went unwarned, its code not among
+the layout's (the whole-build review's I2, closed as XC-518). A floor taken away goes the same way: a gaze
+window's radius lost its 0.5° lowest, and nothing else said that 0 is no radius, so 0 or -2 typed live was taken
+silently and every trial after it no fixation (I1, now `bad-window-radius`). Mitigation: judge a layout at the
+values a setting can take (`laid_out`, `check.LAYOUT`), where an open side is held at its start; give every
+value that cannot be a structure check of its own rather than leaving it to a bound; and test it at the values
+with the cap or the floor removed, not with it in place.

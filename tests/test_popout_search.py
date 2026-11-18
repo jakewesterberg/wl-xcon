@@ -277,7 +277,8 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     (`window-inside-object`) and discs touching (`objects-touch`) are each said where a value set
     makes it so -- every limit has its reason (`unexplained-limit`), and the colors, judged at
     their start, 15 cd/m², are shown as written on the sRGB standard (`color-set-desaturated`, said
-    over the old range above about 26 cd/m²; a live value is not judged for it, XC-518)."""
+    over the old range above about 26 cd/m², is judged at a value set live since the whole-build
+    review's I2: `test_brightening_the_colors_past_what_the_panel_shows_warns_live`)."""
     allocation = _load_allocation(Path(ALLOCATION))
 
     on_default = check_task(task, allocation, geometry=DIRECT, calibration=SRGB,
@@ -1138,6 +1139,52 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
         assert line["params"]["color_luminance"] in found
 
 
+
+class _Sets(Simulated):
+    """**A trainer who sets `setting` to each of `values` in turn**, one every `EVERY` drains from
+    the first, and stops the run `EVERY` drains after the last."""
+
+    EVERY = 2
+
+    def __init__(self, setting: str, values: tuple) -> None:
+        super().__init__()
+        self.setting, self.values, self.drains = setting, values, 0
+
+    def drain(self) -> list:
+        self.drains += 1
+        sent, due = divmod(self.drains - 1, self.EVERY)
+        if due == 0 and sent < len(self.values):
+            self.queue(SetParameter(self.setting, self.values[sent], JAKE))
+        if self.drains == self.EVERY * (len(self.values) + 1):
+            self.queue(Stop(by=JAKE))
+        return super().drain()
+
+
+def test_brightening_the_colors_past_what_the_panel_shows_warns_live(tmp_path):
+    """The whole-build review of the console settings build, I2 (XC-518): the load judges an open
+    `color_luminance` at its start, 15 cd/m², where the sRGB standard shows the set as written; a
+    trainer raising it to 28 cd/m² live is told, `color-set-desaturated`, the share of chroma every
+    color gives up there, a warning he accepts by making the change (`warnings.jsonl`, `how`
+    `set`) and said on the changes feed. Lowering it to 27, the same set still paler than asked,
+    and then back to 15, adds nothing new. The value applies: a warning, never a refusal."""
+    trainer = _Sets("color_luminance", (28.0, 27.0, 15.0))
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+
+    session.run()
+
+    assert session.refusals == []
+    warned = [row for row in _rows(session, "warnings.jsonl")
+              if row["code"] == "color-set-desaturated"]
+    assert [(row["how"], row["by"]) for row in warned] == [("set", {"kind": "box",
+                                                                    "name": "jake"})]
+    assert ("calibration srgb-standard cannot show color set 'isohue' as written at 28 cd/m² of "
+            "macaque luminance") in warned[0]["detail"]
+    fed = [said for kind, _, _, said in session.controls
+           if kind == "warning" and said.startswith("color-set")]
+    assert fed == [f"color-set-desaturated: {warned[0]['detail']}"]
+    lines = _rows(session, "trials.jsonl")
+    assert {line["params"]["color_luminance"] for line in lines} == {15.0, 28.0, 27.0}
+
 def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_reads_it(tmp_path):
     """XC-491, wl-preproc's answer of 2026-11-14, accepted with one rename: **the trial line's key
     is `color_realized`** -- "A bare `realized` beside a trial's other fields reads as if the trial
@@ -1484,6 +1531,61 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
                              deployment=Deployment.RIG_FIXED)
         assert [f.detail for f in at_starts if f.code in LAYOUT] == []
 
+
+
+# --- A gaze window of no size (the whole-build review's I1) -------------------------------------
+
+
+#: A gaze window's radius, or the object windows' ratio, that cannot be: 0, and below.
+NO_SIZE = [("fix_window", 0.0), ("fix_window", -1.0), ("object_window", 0.0)]
+
+
+@pytest.mark.parametrize(("setting", "value"), NO_SIZE)
+def test_a_window_of_no_size_is_refused_live_with_nothing_staged(tmp_path, setting, value):
+    """The whole-build review of the console settings build, I1; the design's §4, "a size below
+    zero" is what cannot be, and 0 too: **a gaze window's radius, or an object window's ratio, at
+    or below 0 is refused where a trainer sets it** (`bad-window-radius`, a structure check that
+    `check.laid_out`'s new-refusal rule refuses), its sentence naming the setting and the value,
+    the previous value standing and nothing staged. The pop-out leaves both windows' lowest open,
+    so no range refuses either; on main their floor was 0.5°, and a trainer's 0 or -2 for 2 was
+    taken silently, every trial after it no fixation."""
+    trainer = _Locks(setting, value, stop_at=4)
+    session = _opened(_spec(tmp_path, seed=5), trainer)
+    trainer.session = session
+
+    session.run()
+
+    ((name, by, why),) = session.refusals
+    assert (name, by) == (setting, JAKE)
+    assert why.startswith(f"{setting!r} at {value:g} is refused, and the previous value stands: "
+                          f"the layout it leaves refuses it: bad-window-radius: "), why
+    assert f"{setting!r}" in why.partition("bad-window-radius: ")[2]
+    start = {param.name: param.start for param in session._task.params}[setting]
+    assert session.spec.values[setting] == start and setting not in session._edited
+    assert not [row for row in _rows(session, "parameter_changes.jsonl")
+                if row.get("name") == setting]
+    lines = _rows(session, "trials.jsonl")
+    assert len(lines) >= 2 and all(line["params"][setting] == start for line in lines)
+
+
+@pytest.mark.parametrize(("setting", "value"), NO_SIZE)
+def test_a_window_of_no_size_is_refused_in_the_preflight(task, setting, value):
+    """I1, at a run's start: the pre-flight judges the layout at the run's values
+    (`preflight.laid_out`), and a window of no size is a blocking finding there, failing the
+    starting values item; at the pop-out's own starts, none."""
+    from wl_xcon import preflight
+
+    allocation = _load_allocation(Path(ALLOCATION))
+    found = preflight.laid_out(task, {setting: value}, "training", allocation, DIRECT, SRGB,
+                               Deployment.RIG_FIXED)
+    refused = [f for f in found if f.blocking]
+
+    assert {f.code for f in refused} == {"bad-window-radius"}, [f.detail for f in found]
+    assert all(f"{setting!r}" in f.detail for f in refused)
+    item = preflight.values(task, {setting: value}, refused, plan="training", calibration=SRGB)
+    assert item.result == "fail" and "bad-window-radius: " in item.said
+    assert not [f for f in preflight.laid_out(task, {}, "training", allocation, DIRECT, SRGB,
+                                              Deployment.RIG_FIXED) if f.blocking]
 
 def test_isohue_carries_its_design_frame(task):
     """§6 of the console settings design: **wl-xtasks' isohue says how its hues were made**, the

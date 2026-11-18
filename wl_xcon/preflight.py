@@ -62,6 +62,11 @@ EYE_TRACKER = "eye tracker"
 #: A demo's alone (demo mode §3.4): whether each input the task waits on has a number key.
 DEMO_INPUTS = "demo inputs"
 
+#: **A layout the pre-flight could not judge** (`laid_out`): a check that raised, refused under a
+#: code of its own so the starting values item and the warnings record name no cause nobody found
+#: (the console settings build's whole-build review, m2).
+LAYOUT_UNJUDGED = "layout-unjudged"
+
 
 def _said(refused: SystemExit, path: Path) -> str:
     """What a file's `sys.exit` said. A bare `sys.exit()` says nothing, and a fail with
@@ -253,7 +258,8 @@ def laid_out(task: Task | None, given: dict, plan: str | None, allocation, geome
     item** (`values`'s `refused`; a stimulus off the field), and **each warning is offered for
     acceptance at the start** with the run's others (`Service._preflight`), each naming the plan,
     block and condition where the run first meets it, and one met at several said once. A check
-    that raises is a blocking finding saying it could not be run. Returns the findings, as
+    that raises is a blocking finding saying it could not be run (`LAYOUT_UNJUDGED`). Returns the
+    findings, as
     `beyond` does. Between runs, never in a frame."""
     if task is None:
         return []
@@ -294,7 +300,7 @@ def laid_out(task: Task | None, given: dict, plan: str | None, allocation, geome
                                                                      f"{finding.detail}"))
         return found
     except Exception as broken:  # noqa: BLE001 -- the checks run on code; their fault refuses
-        return [Finding("stimulus-off-screen", (
+        return [Finding(LAYOUT_UNJUDGED, (
             f"the layout at the run's values could not be judged ({type(broken).__name__}: "
             f"{broken}), so whether a stimulus leaves the field is unknown"))]
 
