@@ -498,6 +498,11 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
                 wrong.append(f"{name!r} takes a number ({param.unit}), and {value!r} is not one")
             elif not math.isfinite(value):
                 wrong.append(f"{name!r} is {value!r}, which is not a real number")
+            elif param.whole and not float(value).is_integer():
+                # **A whole setting's starting value that is a fraction** (`Param.whole`; the
+                # console interface plan's Task 4, the controller's ruling: a run's starting values
+                # judged whole, as a live value is in `Session._value_faults`), ahead of its bounds.
+                wrong.append(f"{name!r} is a whole number of {param.unit}, and {value:g} is not one")
             elif (param.low is not None and value < param.low) or (
                 param.high is not None and value > param.high
             ):

@@ -753,7 +753,9 @@ class Control:
     `set`, `hand_back`, `range` and `revert` applied, or said dropped as a run ends before it
     applies -- `suggestion` (the rig's suggestion of a move under a confirmed progression, or its
     withdrawal as its bar stops holding) and `decline` (a person's hold of one; the pop-out
-    search build, 2026-11-07), or `warning` (a warning said as it
+    search build, 2026-11-07), `withdrawn` (a waiting change taken back by a person, each setting
+    of the act; the console interface rework, which the change log records as a `withdrawn` row),
+    or `warning` (a warning said as it
     happens, since the PI's rulings on XC-352, 2026-10-11);
     `by` is who sent it, `None` for a mark's stamp, whose sender arrives with its note;
     `at` is on the session's anchored clock; `said` is the sentence after the kind.
@@ -3052,6 +3054,52 @@ class SetColor:
     cid: str | None = None
 
 
+#: **The most changes one `ApplyMany` may carry** (the console interface plan's Task 4): a bound on
+#: one packet's reach into the refusals, the record and every frame, as `VALUES_LIMIT` is, not a rule
+#: about boxes -- no task here declares half as many settings.
+APPLY_LIMIT = 64
+
+#: **The kinds of change an `ApplyMany` carries** (the console interface design's goal 2): a value,
+#: a drawn range, a person's draw and a color's pick, each as its own command's fields. A hand-back,
+#: a revert and every other command are sent on their own.
+APPLY_KINDS = ("set", "range", "form", "color")
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyMany:
+    """**Several changes applied together** (the console interface design's goal 2; the PI, 2026-11-19,
+    "Apply per box, plus Apply all"): a group box's Apply or an Apply all, one act, **judged together
+    and staged together, or refused whole** (`taskd.Session._apply_many`), as a revert is judged: a
+    change that only works with another goes with it, and one refused refuses them all, none staged.
+    `changes` are 1 to `APPLY_LIMIT` of `SetParameter`, `SetRange`, `SetForm` and `SetColor`, each
+    with this command's `by` and no command id of its own, each decoded by its own kind's rule, so
+    every value and number passes `_setting`, M8's rule, welfare-listed and called unchanged. **A
+    reward size is never among them** (XC-527): a welfare ceiling's name in one refuses the whole,
+    with a sentence. `cid` is the page's command id for the press, required, which every staged row
+    and every refusal of it echoes, and which a `Withdraw` names."""
+
+    KIND: ClassVar[str] = "apply_many"
+
+    changes: tuple
+    cid: str
+    by: Actor
+
+
+@dataclass(frozen=True, slots=True)
+class Withdraw:
+    """**A change waiting for the next trial, taken back** (the console interface design's goal 3; the
+    PI, 2026-11-19, "Yes, a withdraw button"): every change the act of command id `cid` staged --
+    a box's Apply, a group box's or an Apply all, which is one act -- removed before it applies, and
+    recorded as a `withdrawn` change row for each setting it covered (`taskd.Session._withdraw`;
+    XC-529). Refused, writing no row, once it has applied ("already in force from trial N"), where
+    nothing of that id waits, and for a reward size, which is never withdrawn (XC-527)."""
+
+    KIND: ClassVar[str] = "withdraw"
+
+    cid: str
+    by: Actor
+
+
 @dataclass(frozen=True, slots=True)
 class DefineColor:
     """**A person defines a new color from a color card's panel** (the console settings design's
@@ -3126,6 +3174,8 @@ Command = (
     | SetRange
     | SetForm
     | SetColor
+    | ApplyMany
+    | Withdraw
     | DefineColor
     | Revert
     | Decline
@@ -3199,8 +3249,10 @@ def _encode_command(command: Command) -> bytes:
     since P4d-2b b3a `OpenSession`, `CheckRun`, `StartRun` and `EndSession`, since
     XC-026 `ResumeSession`, since engine build C2a `ClearOwed`, `Drum` and `Training`, since C2b
     `NextBlock` and `BackBlock`, since C3 `HandBack`, `SetRange` and `Revert`, and since the
-    pop-out search build `Decline` and the `suggestion` a `NextBlock` or a `BackBlock` confirms --
-    tagged by kind so `_decode_command` knows which dataclass to rebuild.
+    pop-out search build `Decline` and the `suggestion` a `NextBlock` or a `BackBlock` confirms,
+    and since the console interface rework `ApplyMany`, its changes each by its own kind's fields
+    (`_change_fields`), and `Withdraw` -- tagged by kind so `_decode_command` knows which dataclass
+    to rebuild.
 
     Private, unlike `encode`/`decode`: its callers are `ZmqConsole.send` and
     `ZmqCommands.deliver`, both in this same file, so this is an implementation detail
@@ -3310,9 +3362,31 @@ def _encode_command(command: Command) -> bytes:
                    "method": command.method, "numbers": dict(command.numbers)}
     elif isinstance(command, Revert):
         payload = {"kind": "revert", "by": actors.to_map(command.by), "change": command.change}
+    elif isinstance(command, ApplyMany):
+        payload = {"kind": "apply_many", "by": actors.to_map(command.by), "cid": command.cid,
+                   "changes": [_change_fields(change) for change in command.changes]}
+    elif isinstance(command, Withdraw):
+        payload = {"kind": "withdraw", "by": actors.to_map(command.by), "cid": command.cid}
     else:
         raise TypeError(f"no wire encoding for {command!r}")
     return msgpack.packb(payload, use_bin_type=True)
+
+
+def _change_fields(change) -> dict:
+    """**One change of an `ApplyMany`, as its own kind's fields** (`_encode_command`), with no `by`
+    and no `cid`: the act's are the command's own."""
+    if isinstance(change, SetParameter):
+        return {"kind": "set", "name": change.name, "value": change.value}
+    if isinstance(change, SetRange):
+        return {"kind": "range", "name": change.name, "numbers": dict(change.numbers)}
+    if isinstance(change, SetForm):
+        return {"kind": "form", "name": change.name, "shape": change.shape,
+                "numbers": dict(change.numbers), "values": list(change.values),
+                "weights": list(change.weights)}
+    if isinstance(change, SetColor):
+        return {"kind": "color", "name": change.name, "colorset": change.colorset,
+                "color": change.color}
+    raise TypeError(f"an apply of several carries values, ranges, draws and colors, not {change!r}")
 
 
 class CommandRefused(ValueError):
@@ -3468,8 +3542,9 @@ def _word(data: dict, key: str, kind: str, by: Actor, *, optional: bool = False)
 
 
 #: **The kinds a page's box sends that carry its command id** (`_cid`; schema 23; the console
-#: interface design's goal 4): a value, a hand-back, a range, a person's draw and a color's pick.
-CID_KINDS = frozenset({"set", "hand_back", "range", "form", "color"})
+#: interface design's goal 4): a value, a hand-back, a range, a person's draw and a color's pick, and
+#: since its plan's Task 4 an apply of several and a withdrawal, which require one (`_named_cid`).
+CID_KINDS = frozenset({"set", "hand_back", "range", "form", "color", "apply_many", "withdraw"})
 
 
 def _is_cid(value: object) -> bool:
@@ -3494,6 +3569,52 @@ def _cid(data: dict, kind: str, by: Actor) -> str | None:
             f"{_quoted(value)} is not, so it is refused",
         )
     return value
+
+
+def _named_cid(data: dict, kind: str, by: Actor) -> str:
+    """**The command id an `ApplyMany` or a `Withdraw` names**, required: `_cid`'s rule, and refused
+    where absent, since the act it stages, or takes back, is known by it alone."""
+    cid = _cid(data, kind, by)
+    if cid is None:
+        raise CommandRefused(
+            kind, by,
+            f"a {kind!r} command names its act by a cid, printable text of 1 to {CID_LIMIT} "
+            f"characters, and it names none, so it is refused",
+        )
+    return cid
+
+
+def _changes(data: dict, by: Actor) -> tuple:
+    """**An `ApplyMany`'s changes**: 1 to `APPLY_LIMIT` of them, each an object of one of
+    `APPLY_KINDS` holding no `by` and no `cid` of its own (the act's are the command's), each
+    decoded by its own kind's rule in `_command_from` -- a value by `_setting`, a range's and a
+    draw's numbers by `_numbers` and `_listed`, each through `_setting`, M8's rule, called
+    unchanged -- with the command's `by`. Anything else is refused, naming it."""
+    changes = data.get("changes")
+    if not isinstance(changes, (list, tuple)) or not 1 <= len(changes) <= APPLY_LIMIT:
+        raise CommandRefused(
+            "apply_many", by,
+            f"an 'apply_many' command's changes are 1 to {APPLY_LIMIT} in a list, and "
+            f"{_quoted(changes)} is not that, so it is refused",
+        )
+    decoded = []
+    for change in changes:
+        if not isinstance(change, dict) or change.get("kind") not in APPLY_KINDS:
+            kind = change.get("kind") if isinstance(change, dict) else change
+            raise CommandRefused(
+                "apply_many", by,
+                f"an 'apply_many' command's changes are each a {', '.join(APPLY_KINDS[:-1])} or "
+                f"{APPLY_KINDS[-1]}, and {_quoted(kind)} is none of them, so it is refused",
+            )
+        own = sorted(key for key in ("by", "cid") if key in change)
+        if own:
+            raise CommandRefused(
+                "apply_many", by,
+                f"a change in an 'apply_many' command takes no {' or '.join(own)} of its own: the "
+                f"act's are the command's, so it is refused",
+            )
+        decoded.append(_command_from({**change, "by": data.get("by")}))
+    return tuple(decoded)
 
 
 def _values(data: dict, kind: str, by: Actor) -> dict:
@@ -3901,6 +4022,13 @@ def _command_from(data: dict) -> Command:
                 f"run's start or a change id, and {_quoted(change)} is not one, so it is refused",
             )
         return Revert(change=change, by=by)
+    if kind == ApplyMany.KIND:
+        by = _actor(data.get("by"), kind)
+        cid = _named_cid(data, kind, by)
+        return ApplyMany(changes=_changes(data, by), cid=cid, by=by)
+    if kind == Withdraw.KIND:
+        by = _actor(data.get("by"), kind)
+        return Withdraw(cid=_named_cid(data, kind, by), by=by)
     raise ValueError(f"unknown command kind on the wire: {_quoted(kind)}")
 
 
@@ -4145,6 +4273,8 @@ _COMMAND_EXPOSURE = {
     "range": ("both", "change a drawn range"),
     "form": ("both", "draw a timing setting each trial from a shape a person gives"),
     "color": ("both", "pick a color setting's hue by its set"),
+    "apply_many": ("both", "apply several setting changes together, to the same trial"),
+    "withdraw": ("both", "withdraw a setting change still waiting for the next trial"),
     "revert": ("both", "take the run's settings and ranges back to an earlier change"),
     "open": ("taskd", "open a session, recording the animal's departure time and the fluid it has already had today, and accepting warnings"),
     "check": ("taskd", "take a run's pre-flight"),

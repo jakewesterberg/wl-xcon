@@ -4273,6 +4273,77 @@ def test_a_box_command_carries_its_cid_beside_it_never_inside_its_value():
         parse_command({"kind": "stop", "by": "jake", "cid": "box-9"})
 
 
+def test_apply_many_and_withdraw_round_trip_and_call_setting(monkeypatch):
+    """The console interface plan's Task 4: an apply of several -- a value, a range, a draw and a
+    color's pick -- and a withdrawal cross the wire and a page's body (`serve.parse_command`) as
+    made, under their required command id, **each decoded change through `link._setting`**, M8's
+    rule, welfare-listed and called unchanged: counted here, every value and number once. Each
+    change takes the command's `by` and no `by` or `cid` of its own; 1 to `APPLY_LIMIT` of them, of
+    the four kinds; and an act with no id is refused, before any session sees it."""
+    import re
+
+    import wl_xcon.link as link
+    from wl_xcon.link import APPLY_LIMIT, ApplyMany, SetColor, SetRange, Withdraw
+    from wl_xcon.serve import BadCommand, parse_command
+
+    calls = []
+    real = link._setting
+
+    def counted(value, name, by):
+        calls.append((name, value))
+        return real(value, name, by)
+
+    monkeypatch.setattr(link, "_setting", counted)
+    jake = Box("jake")
+    applied = ApplyMany(changes=(
+        SetParameter(name="fix_hold", value=0.35, by=jake),
+        SetRange(name="fix_acquisition", numbers={"low": 3.0, "high": 5.0}, by=jake),
+        SetForm(name="response_deadline", shape="list", numbers={}, by=jake, values=(0.6, 0.8)),
+        SetColor(name="odd_color", colorset="isohue", color="red", by=jake),
+    ), cid="all-1", by=jake)
+    withdraw = Withdraw(cid="all-1", by=jake)
+    assert (ApplyMany.KIND, Withdraw.KIND, APPLY_LIMIT) == ("apply_many", "withdraw", 64)
+
+    assert _decode_command(_encode_command(applied)) == applied
+    assert sorted(calls) == sorted([("fix_hold", 0.35), ("fix_acquisition", 3.0),
+                                    ("fix_acquisition", 5.0), ("response_deadline", 0.6),
+                                    ("response_deadline", 0.8)])
+    assert _decode_command(_encode_command(withdraw)) == withdraw
+    calls.clear()
+    body = {"kind": "apply_many", "by": "jake", "cid": "all-1", "changes": [
+        {"kind": "set", "name": "fix_hold", "value": 0.35},
+        {"kind": "range", "name": "fix_acquisition", "numbers": {"low": 3.0, "high": 5.0}},
+        {"kind": "form", "name": "response_deadline", "shape": "list", "values": [0.6, 0.8]},
+        {"kind": "color", "name": "odd_color", "colorset": "isohue", "color": "red"}]}
+    assert parse_command(body) == applied
+    assert len(calls) == 5
+    assert parse_command({"kind": "withdraw", "by": "jake", "cid": "all-1"}) == withdraw
+
+    refused = [
+        ({"changes": []}, "changes are 1 to 64 in a list"),
+        ({"changes": [{"kind": "set", "name": "fix_hold", "value": 0.3}] * (APPLY_LIMIT + 1)},
+         "changes are 1 to 64 in a list"),
+        ({"changes": [{"kind": "hand_back", "name": "fix_hold"}]}, "'hand_back' is none of them"),
+        ({"changes": [{"kind": "set", "name": "fix_hold", "value": 0.3, "cid": "x"}]},
+         "takes no cid of its own"),
+        ({"changes": [{"kind": "set", "name": "fix_hold", "value": True}]},
+         "'fix_hold' was sent True"),
+        ({"changes": [{"kind": "set", "name": "fix_hold", "value": 0.3}], "cid": None},
+         "names its act by a cid"),
+    ]
+    for over, said in refused:
+        fields = {"kind": "apply_many", "by": JAKE, "cid": "all-1", **over}
+        with pytest.raises(CommandRefused, match=re.escape(said)):
+            _decode_command(_packed(**fields))
+    with pytest.raises(CommandRefused, match="a 'withdraw' command names its act by a cid"):
+        _decode_command(_packed(kind="withdraw", by=JAKE))
+    with pytest.raises(BadCommand, match="a set change in an apply_many takes no by"):
+        parse_command({**body, "changes": [{"kind": "set", "name": "fix_hold", "value": 0.3,
+                                            "by": "kim"}]})
+    with pytest.raises(BadCommand, match="a withdraw command takes no name"):
+        parse_command({"kind": "withdraw", "by": "jake", "cid": "all-1", "name": "fix_hold"})
+
+
 def _xtasks_or_skip():
     """The wl-xtasks checkout holding the pop-out search, as `tests/test_popout_search.py` looks
     for it; skipped where there is none, failed under `WLX_REQUIRE_XTASKS=1`."""

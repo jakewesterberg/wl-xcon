@@ -25,7 +25,9 @@ already runs, so no new dependency:
   since engine build C2a (`clear`, `drum`, `training`), since C3 a setting handed back,
   a drawn range changed live and a revert (`hand_back`, `range`, `revert`), and since the
   pop-out search build a block moved on or back naming the rig's suggestion it confirms, and a
-  hold of one (`next_block`, `back_block`, `decline`; `_WIRE_KINDS`).
+  hold of one (`next_block`, `back_block`, `decline`; `_WIRE_KINDS`), and since the console
+  interface rework several changes applied together and a waiting change withdrawn
+  (`apply_many`, `withdraw`), each naming its page's `cid`.
 - `POST /gaze` (demo mode §4.5) -- one pointer report from a demo's page, **gated exactly as
   `/commands` is** (`_writer`, the write checks factored out of `_command`; §14 item 13), never
   by `may_write`, then checked (`parse_gaze`), and, while the latest frame is a demo session's
@@ -799,7 +801,15 @@ _SHAPES = {
     # And a new color defined three ways, saved as its set's proposed file (`link.DefineColor`; the
     # design's §6, the build's Task 8).
     "define_color": frozenset({"colorset", "new_set", "name", "method", "numbers"}),
+    # The console interface rework's Task 4 (the PI, 2026-11-19, "Apply per box, plus Apply all",
+    # and "Yes, a withdraw button"): several changes applied together, each a `set`, `range`,
+    # `form` or `color` by its own fields (`_APPLIED`), and a waiting act withdrawn by its `cid`.
+    "apply_many": frozenset({"changes"}),
+    "withdraw": frozenset(),
 }
+#: **The kinds one change of an `apply_many` may be**, each by the fields its own command takes
+#: (`_SHAPES`), its `kind` among them, and never a `by` or a `cid`: the act's are the command's.
+_APPLIED = {kind: _SHAPES[kind] | {"kind"} for kind in _link.APPLY_KINDS}
 _SCHEDULES = {"at": "clock", "trials": "trials", "ml": "fluid"}
 #: The kinds `wlx taskd` takes (open, check, start, end and resume_session) that the page sends by the wire's own field names, built
 #: by the wire's own function (`link._command_from`; the b3a-2 plan, decision 3).
@@ -810,12 +820,13 @@ _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
 #: `training`, since C3 its `hand_back`, `range` and `revert`, and since the pop-out search build
 #: `next_block`, `back_block` and `decline`, whose `suggestion` the wire checks
 #: (`link._suggestion`), which go to the run as any control does, and since the console settings
-#: build `form`, `color`, `define_color` and `shaping`. A range's numbers, a form's numbers, values and weights,
+#: build `form`, `color`, `define_color` and `shaping`, and since the console interface rework
+#: `apply_many` and `withdraw`. A range's numbers, a form's numbers, values and weights,
 #: and a new color's numbers, are decoded there by `link._setting`, as a setting's value is; a
 #: color's set and hue are words (`link._word`).
 _WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training", "hand_back", "range", "revert",
                                 "next_block", "back_block", "decline", "form", "color",
-                                "define_color", "shaping"}
+                                "define_color", "shaping", "apply_many", "withdraw"}
 
 
 def _finite(value: int | float) -> bool:
@@ -958,6 +969,15 @@ def parse_command(data: object, actor: Member | None = None):
     extra = set(data) - allowed - _SHAPES[kind]
     if extra:
         raise BadCommand(f"a {kind} command takes no {', '.join(sorted(extra))}")
+    if kind == "apply_many" and isinstance(data.get("changes"), list):
+        # Each change by its own kind's fields, as a command of that kind is refused one it does
+        # not take; what each is, and how many, the wire's rule says (`link._changes`).
+        for change in data["changes"]:
+            named = change.get("kind") if isinstance(change, dict) else None
+            taken = _APPLIED.get(named) if isinstance(named, str) else None
+            if taken is not None and set(change) - taken:
+                raise BadCommand(f"a {change['kind']} change in an apply_many takes no "
+                                 f"{', '.join(sorted(set(change) - taken))}")
     if kind in _WIRE_KINDS:
         try:
             return _link._command_from({**data, "by": actors.to_map(by)})

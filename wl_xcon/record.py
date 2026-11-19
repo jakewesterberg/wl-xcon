@@ -117,16 +117,23 @@ CONTROLS = "controls.jsonl"
 #: switched to drawn on its card, `now` its draw every field, its `shape` beside; XC-513, the ask in
 #: `docs/pending-wl-preproc-amendments.md`), and **the training switch** (`shaping`, which the
 #: build's Task 10 writes: `name` `"shaping"`, `was` and `now` its positions, `meaning` null, no
-#: `sequence`). **Appended only**: a reader keys on the
+#: `sequence`). **Since the console interface rework (2026-11-19), a change withdrawn while it
+#: waited** (`withdrawn`, which `taskd.Session._withdraw` writes; XC-529, the ask in
+#: `docs/pending-wl-preproc-amendments.md`): one row for each setting the withdrawn act covered,
+#: sharing one fresh `change` id taken as it is withdrawn, `was` and `now` equal -- what the setting
+#: held and holds, null where a draw, a staircase, a pool or the conditions give it -- `meaning`
+#: null, no `sequence`, `event_code` null, and its own `cid` (the page's id for the Apply taken
+#: back), `withdrawn` (`{"kind", "now"}`: the row it would have been) and `staged_by` (who sent it,
+#: an actor map or null). **Appended only**: a reader keys on the
 #: names, and `STROBED` names its kinds.
 KINDS = ("set", "hand_back", "range", "revert", "clear", "drum", "training", "suggested",
-         "declined", "form", "shaping")
+         "declined", "form", "shaping", "withdrawn")
 
 #: **The kinds that strobe `PARAM_CHANGED`**, once for each row, and so carry its `sequence`, which
 #: joins the n-th such row to the n-th such code (XC-288 §3.4), **by name** (it was the first four
 #: `KINDS` by place until `form`, appended after `declined`, strobed too; XC-513): a person's
 #: value, a hand-back, a live range, a revert's rows and a person's form. A clear, a switch, a
-#: suggestion, a hold and the training switch strobe nothing.
+#: suggestion, a hold, the training switch and a withdrawal strobe nothing.
 STROBED = ("set", "hand_back", "range", "revert", "form")
 
 #: One row when each run starts and one when it ends (P4d-2b spec §6.3), joined by

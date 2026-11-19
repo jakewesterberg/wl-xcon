@@ -1259,6 +1259,10 @@ saturation and a luminance a person may move.
 
 # OPEN — the console interface rework: a withdrawn change, and Apply all (new, 2026-11-19)
 
+> **Built to the names below, unanswered, on 2026-11-19** (the console interface plan's Task 4:
+> `record.KINDS` gains `withdrawn`, written by `taskd.Session._withdrawn`); renamed here and there if
+> you rename them, and the build's merge waits on your answer.
+
 Opened 2026-11-19 on the PI's approved design (`docs/superpowers/specs/2026-11-19-console-interface-design.md`, "The
 record": "wl-preproc is told first, as XC-513 was"), backlog XC-529, **before the shape is written**. One change kind and
 nothing else, read against our source on 2026-11-19 (`wl_xcon/record.py`'s `KINDS`, `STROBED` and `change()`,

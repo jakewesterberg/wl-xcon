@@ -780,8 +780,31 @@ FROZEN = "frozen"
 _SWITCH_SAID = {"on": "on", "frozen": "frozen", "full": "the full task"}
 
 #: **The commands a setting's box sends** (`link.CID_KINDS`; telemetry schema 23), each carrying
-#: the command id its page made, which what it stages or refuses answers (`Session._answering_for`).
-_BOX = (_link.SetParameter, _link.HandBack, _link.SetRange, _link.SetForm, _link.SetColor)
+#: the command id its page made, which what it stages or refuses answers (`Session._answering_for`),
+#: and since the console interface plan's Task 4 an apply of several and a withdrawal.
+_BOX = (_link.SetParameter, _link.HandBack, _link.SetRange, _link.SetForm, _link.SetColor,
+        _link.ApplyMany, _link.Withdraw)
+
+#: **How many acts' command ids a run keeps once they apply** (`Session._in_force_cids`), so a
+#: withdrawal arriving after its act applied is answered "already in force from trial N": the most
+#: recent, the oldest let go first. A withdrawal is pressed in the seconds before a trial starts, and
+#: one naming an id older than this many applied acts is answered as finding nothing waiting. A bound
+#: on what a peer's presses can grow, an engineering default, not a measurement.
+IN_FORCE_KEPT = 256
+
+#: **What an apply of several says of a reward size in it** (XC-527; the console interface design:
+#: "A reward size ... keeps its own Apply only"), the sentence `Session._apply_many` refuses with.
+REWARD_SENT_ALONE = ("is a reward size, a welfare ceiling, which is sent alone with its own Apply "
+                     "and never applied with other settings (XC-527)")
+
+
+def _about(name: str, warnings: tuple, names: list) -> tuple:
+    """**The warnings of an apply of several that a row of `name` carries** (`Staged.warnings`; the
+    console interface plan's Task 4, the controller's ruling): each that names it, `'name'` as the
+    rig's sentences quote a setting, and each that names none of the act's settings (`names`), which
+    every row of the act carries."""
+    return tuple(said for said in warnings
+                 if f"'{name}'" in said or not any(f"'{other}'" in said for other in names))
 
 
 def pool_members(pool, value: object) -> tuple:
@@ -1470,6 +1493,11 @@ class Session:
     #: warnings)` -- the index of the first trial it applied to, who made it and the warnings it
     #: carried -- the last to apply. Empty as each run starts.
     _applied: dict[str, tuple] = field(init=False, default_factory=dict, repr=False)
+    #: **The trial each act's command id took effect at** (the console interface plan's Task 4;
+    #: `_withdraw`): each `cid` of a change of the run in progress that applied (`_apply_staged`), to
+    #: the index of its first trial, as `_applied`'s, the newest `IN_FORCE_KEPT`. Empty as each run
+    #: starts.
+    _in_force_cids: dict[str, int] = field(init=False, default_factory=dict, repr=False)
     #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
     #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
     _act_moments: dict[int, int] = field(init=False, default_factory=dict, repr=False)
@@ -2458,17 +2486,40 @@ class Session:
 
         **And a whole setting given a fraction** (`Param.whole`; the console interface design's goal
         6; telemetry schema 23), refused here ahead of its bounds, never in `set`."""
-        if name in self.spec.bounds.ceilings:
+        declared = self._value_faults(name, value)
+        if declared is None:
             return
+        why = self._possible({name: value})
+        said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
+        if why is not None:
+            raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: {why}")
+        if declared.choices or not _outside(declared, value):
+            try:
+                self._laid_out({name: value}, by=by)
+            except Exceeded as refused:
+                raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: "
+                               f"{refused}") from refused
+
+    def _value_faults(self, name: str, value: object) -> Param | None:
+        """**What `_impossible` refuses of a value on its own**, before the run is judged with it
+        (`_possible`, `_laid_out`): a whole setting given a fraction, a pool naming no pairing, a
+        luminance the panel cannot show, each `Exceeded` with its sentence. Returns the setting's
+        declaration to judge it further, or `None` where it is left to `set`, unjudged -- a
+        ceiling's name, a name the task does not declare or not live, a choice it does not offer,
+        and for a setting of numbers a value that is no finite number -- so `set` refuses each by
+        its own sentence. What an apply of several asks of each of its values, judging the run once
+        with all of them (`_apply_many`). Between trials, never in a frame."""
+        if name in self.spec.bounds.ceilings:
+            return None
         declared = self._params().get(name)
         if declared is None or not declared.live:
-            return
+            return None
         if declared.choices:
             if value not in declared.choices:
-                return
+                return None
         elif (isinstance(value, bool) or not isinstance(value, (int, float))
               or not math.isfinite(value)):
-            return
+            return None
         elif declared.whole and not float(value).is_integer():
             # **A whole setting given a fraction** (`Param.whole`; the console interface design's
             # goal 6, the PI: "for necessary whole numbers ... there should not be a decimal
@@ -2493,16 +2544,7 @@ class Session:
             if dark:
                 raise Exceeded(f"{name!r} at {value:g} is refused, and the previous value stands: "
                                f"{dark[0][1]}")
-        why = self._possible({name: value})
-        said = _shown(value, declared.choices) if declared.choices else f"{value:g}"
-        if why is not None:
-            raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: {why}")
-        if declared.choices or not _outside(declared, value):
-            try:
-                self._laid_out({name: value}, by=by)
-            except Exceeded as refused:
-                raise Exceeded(f"{name!r} at {said} is refused, and the previous value stands: "
-                               f"{refused}") from refused
+        return declared
 
     def _laid_out(self, changed: dict | None = None, *, handed: frozenset = frozenset(),
                   ranges: dict | None = None, forms: dict | None = None, shaping=None,
@@ -4519,9 +4561,12 @@ class Session:
           (XC-445);
         - a weighted set or a prepared list (XC-443), and a number its kind does not change live
           (`variation.LIVE_NUMBERS`);
-        - numbers that cannot be drawn (`check.undrawable`), that would leave trials no animal can
-          get right (`_possible`; the C3 spec §9), or whose extreme is past a declared bound, a
-          hard limit since the console settings plan's Task 4 (`_beyond_range`: `past-limit`);
+        - numbers that cannot be drawn (`check.undrawable`), and for a whole setting an end that is
+          no whole number (`_whole_ends`; the console interface plan's Task 4), each judged alone
+          (`_range_new`, which an apply of several asks too);
+        - numbers that would leave trials no animal can get right (`_possible`; the C3 spec §9), or
+          whose extreme is past a declared bound, a hard limit since the console settings plan's
+          Task 4 (`_beyond_range`: `past-limit`);
         - numbers whose layout refuses them, a stimulus off the field at one of the draw's ends,
           the new layout warnings otherwise accepted by who sent it and said (`_laid_out`). §9 is
           asked first, so a range it refuses writes no warning.
@@ -4535,50 +4580,7 @@ class Session:
         `_command`'s."""
         name = command.name
         try:
-            if name in self.spec.bounds.ceilings:
-                raise Exceeded("it is a welfare ceiling, which is never drawn")
-            declared = self._declared.get(name)
-            if declared is None:
-                raise Exceeded("it is not a setting this task declares")
-            block = self._scheduler.block
-            in_force = variation.in_force(self._task, block)
-            if name not in in_force:
-                own = [condition.name for condition in block.conditions
-                       if name in variation.own_ranges(condition)]
-                if own:
-                    raise Exceeded(
-                        f"in block {block.name!r} it is drawn from condition {own[0]!r}'s own "
-                        f"range, and a condition's own range is not changed live in engine build "
-                        f"C3 (the PI, 2026-10-30, \"Not in C3\"): set one value over it, or hand "
-                        f"it back; editing it is a condition edit, the rig-edit build's")
-                raise Exceeded(f"block {block.name!r} does not draw it, by its own draw or the "
-                               f"task's")
-            if not declared.live:
-                raise Exceeded("it is declared not live-editable by this task")
-            if name in variation.directions(self._task):
-                raise Exceeded(
-                    "it places a direction, whose range is not changed live in engine build C3 "
-                    "(XC-445): the task declares it in its own terms, and the console shows it "
-                    "from 0 to 360")
-            drawn, key = in_force[name]
-            _, _, ranges, _ = self._ahead()
-            if ranges.get(key) is not None:
-                drawn = ranges[key]
-            kind = type(drawn).__name__
-            fields = variation.LIVE_NUMBERS.get(type(drawn))
-            if fields is None:
-                raise Exceeded(
-                    f"it is drawn from a {kind}, which is not changed live in engine build C3 "
-                    f"(XC-443): only a Uniform's, a TruncatedNormal's and a NonAging's numbers "
-                    f"are")
-            unknown = [number for number in command.numbers if number not in fields]
-            if unknown:
-                raise Exceeded(f"{', '.join(map(repr, unknown))} is no number of a {kind} changed "
-                               f"live; its live numbers are {', '.join(fields)}")
-            new = variation.with_numbers(drawn, dict(command.numbers))
-            cannot = undrawable(new, declared)
-            if cannot is not None:
-                raise Exceeded(f"{variation.words(new, declared.unit)} cannot be drawn: {cannot}")
+            declared, key, drawn, new = self._range_new(command)
             why = self._possible(ranges={key: new})
             if why is not None:
                 raise Exceeded(why)
@@ -4602,6 +4604,78 @@ class Session:
                 f"the range of {name!r} could not be checked ({type(broken).__name__}: "
                 f"{broken}), so it is refused and the session runs on"))
 
+    def _range_new(self, command) -> tuple:
+        """**What `_range` refuses of a range on its own**, before the run is judged with it, and the
+        draw it would put in force: `(declared, key, drawn, new)`, the setting's declaration, its
+        draw's key (`variation.in_force`'s), the draw in force over all offered ahead of it and the
+        new one. `Exceeded` with its sentence, in `_range`'s order through numbers that cannot be
+        drawn (`check.undrawable`), and **for a whole setting an end that is no whole number**
+        (`Param.whole`; the console interface plan's Task 4, the controller's ruling: a range's
+        ends judged whole, as a value is; whether its draw gives whole values between them is not
+        this build's). What an apply of several asks of each of its ranges (`_apply_many`). Between
+        trials, never in a frame."""
+        name = command.name
+        if name in self.spec.bounds.ceilings:
+            raise Exceeded("it is a welfare ceiling, which is never drawn")
+        declared = self._declared.get(name)
+        if declared is None:
+            raise Exceeded("it is not a setting this task declares")
+        block = self._scheduler.block
+        in_force = variation.in_force(self._task, block)
+        if name not in in_force:
+            own = [condition.name for condition in block.conditions
+                   if name in variation.own_ranges(condition)]
+            if own:
+                raise Exceeded(
+                    f"in block {block.name!r} it is drawn from condition {own[0]!r}'s own "
+                    f"range, and a condition's own range is not changed live in engine build "
+                    f"C3 (the PI, 2026-10-30, \"Not in C3\"): set one value over it, or hand "
+                    f"it back; editing it is a condition edit, the rig-edit build's")
+            raise Exceeded(f"block {block.name!r} does not draw it, by its own draw or the "
+                           f"task's")
+        if not declared.live:
+            raise Exceeded("it is declared not live-editable by this task")
+        if name in variation.directions(self._task):
+            raise Exceeded(
+                "it places a direction, whose range is not changed live in engine build C3 "
+                "(XC-445): the task declares it in its own terms, and the console shows it "
+                "from 0 to 360")
+        drawn, key = in_force[name]
+        _, _, ranges, _ = self._ahead()
+        if ranges.get(key) is not None:
+            drawn = ranges[key]
+        kind = type(drawn).__name__
+        fields = variation.LIVE_NUMBERS.get(type(drawn))
+        if fields is None:
+            raise Exceeded(
+                f"it is drawn from a {kind}, which is not changed live in engine build C3 "
+                f"(XC-443): only a Uniform's, a TruncatedNormal's and a NonAging's numbers "
+                f"are")
+        unknown = [number for number in command.numbers if number not in fields]
+        if unknown:
+            raise Exceeded(f"{', '.join(map(repr, unknown))} is no number of a {kind} changed "
+                           f"live; its live numbers are {', '.join(fields)}")
+        new = variation.with_numbers(drawn, dict(command.numbers))
+        cannot = undrawable(new, declared)
+        if cannot is not None:
+            raise Exceeded(f"{variation.words(new, declared.unit)} cannot be drawn: {cannot}")
+        self._whole_ends(declared, new)
+        return declared, key, drawn, new
+
+    def _whole_ends(self, declared: Param, draw) -> None:
+        """**A whole setting's draw refused where an end is no whole number** (`Param.whole`; the
+        console interface plan's Task 4, the controller's ruling: a range's and a form's ends are
+        judged whole, as a value is in `_value_faults`): `Exceeded` naming the end. Its ends only
+        (`variation.extremes`): whether the draw gives whole values between them is not this
+        build's (filed for the build's Task 10)."""
+        if not declared.whole:
+            return
+        for end in variation.extremes(draw, declared):
+            if not float(end).is_integer():
+                raise Exceeded(f"{declared.name} is a whole number of {declared.unit}, and "
+                               f"{variation.words(draw, declared.unit)} reaches {end:g}, which is "
+                               f"not one")
+
     def _form(self, command, index: int) -> None:
         """**A person switches a timing setting to drawn on its card** (`link.SetForm`; the console
         settings design's §3; the PI, 2026-11-16: every timing setting "fixed or drawn", "staged
@@ -4623,7 +4697,9 @@ class Session:
         - numbers its shape does not take, and a shortest not below its longest
           (`variation.formed`);
         - a draw that cannot be drawn (`check.undrawable`), or that gives one value only, which is
-          the card's fixed side;
+          the card's fixed side, and for a whole setting one an end of which is no whole number
+          (`_whole_ends`; the console interface plan's Task 4) -- each judged alone (`_form_new`,
+          which an apply of several asks too);
         - a draw that would leave trials no animal can get right, judged at what it can give
           (`_possible`'s `forms`; the C3 spec §9);
         - a draw whose extreme is past a declared bound, a hard limit since the console settings
@@ -4640,58 +4716,18 @@ class Session:
         and no reward size is ever drawn."""
         name = command.name
         try:
-            if name in self.spec.bounds.ceilings:
-                raise Exceeded("it is a welfare ceiling, which is never drawn")
-            declared = self._declared.get(name)
-            if declared is None:
-                raise Exceeded("it is not a setting this task declares")
-            if not declared.live:
-                raise Exceeded("it is declared not live-editable by this task")
-            if command.shape == "scaled":
-                self._scale(command, declared)
-                return
-            if command.shape not in SHAPES:
-                raise Exceeded(f"{command.shape!r} is not a shape a setting is drawn in: one of "
-                               f"{', '.join(SHAPES)}")
-            if not self._drawable(declared):
-                unit = declared.unit or "no unit"
-                raise Exceeded(f"it is in {unit}, and only a timing setting, in s, is drawn from "
-                               f"its card")
-            try:
-                form = variation.formed(command.shape, dict(command.numbers),
-                                        tuple(command.values), tuple(command.weights),
-                                        repeat=FRESH)
-            except ValueError as wrong:
-                raise Exceeded(str(wrong)) from wrong
-            said = variation.words(form, declared.unit)
-            cannot = undrawable(form, declared)
-            if cannot is not None:
-                raise Exceeded(f"{said} cannot be drawn: {cannot}")
-            ends = variation.extremes(form, declared)
-            if len(ends) < 2:
-                raise Exceeded(f"{said} gives one value only; make the card fixed at that value "
-                               f"instead")
+            declared, form = self._form_new(command)
             why = self._possible(forms={name: form})
             if why is not None:
                 raise Exceeded(why)
-            for end in ends:
-                if _outside(declared, end):
-                    self._beyond_range(name, end, command.by)
+            if not isinstance(form, Scaled):
+                for end in variation.extremes(form, declared):
+                    if _outside(declared, end):
+                        self._beyond_range(name, end, command.by)
             # And the layout it leaves, judged at both its ends (`_laid_out`; the console settings
             # design's §4).
             self._laid_out(forms={name: form}, by=command.by)
-            values, held, _, formed = self._ahead()
-            before = formed.get(name)
-            if before is not None:
-                was = variation.recorded(before, declared)
-            elif name in held:
-                was = values.get(name)
-            else:
-                was = None if self._given_by(name, self._scheduler.block) else values.get(name)
-            self._pending.append(Pending(
-                "form", name, was=was, now=variation.recorded(form, declared), by=command.by,
-                after=len(self._staged), form=form,
-            ))
+            self._pending.append(self._form_offered(name, declared, form, command.by))
         except Exceeded as refused:
             how = "scaled" if command.shape == "scaled" else "drawn"
             why = f"{name!r} is not {how} as asked: {refused}"
@@ -4702,7 +4738,62 @@ class Session:
                 f"the draw of {name!r} could not be checked ({type(broken).__name__}: "
                 f"{broken}), so it is refused and the session runs on"))
 
-    def _scale(self, command, declared: Param) -> None:
+    def _form_new(self, command) -> tuple:
+        """**What `_form` refuses of a person's draw on its own**, before the run is judged with it,
+        and the draw: `(declared, form)`, the setting's declaration and the distribution, or a
+        size's `task.Scaled` (`_scale`). `Exceeded` with its sentence, in `_form`'s order through a
+        draw that gives one value only, and **for a whole setting an end that is no whole number**
+        (`_whole_ends`; the console interface plan's Task 4). What an apply of several asks of each
+        of its draws (`_apply_many`). Between trials, never in a frame."""
+        name = command.name
+        if name in self.spec.bounds.ceilings:
+            raise Exceeded("it is a welfare ceiling, which is never drawn")
+        declared = self._declared.get(name)
+        if declared is None:
+            raise Exceeded("it is not a setting this task declares")
+        if not declared.live:
+            raise Exceeded("it is declared not live-editable by this task")
+        if command.shape == "scaled":
+            return declared, self._scale(command, declared)
+        if command.shape not in SHAPES:
+            raise Exceeded(f"{command.shape!r} is not a shape a setting is drawn in: one of "
+                           f"{', '.join(SHAPES)}")
+        if not self._drawable(declared):
+            unit = declared.unit or "no unit"
+            raise Exceeded(f"it is in {unit}, and only a timing setting, in s, is drawn from "
+                           f"its card")
+        try:
+            form = variation.formed(command.shape, dict(command.numbers),
+                                    tuple(command.values), tuple(command.weights),
+                                    repeat=FRESH)
+        except ValueError as wrong:
+            raise Exceeded(str(wrong)) from wrong
+        said = variation.words(form, declared.unit)
+        cannot = undrawable(form, declared)
+        if cannot is not None:
+            raise Exceeded(f"{said} cannot be drawn: {cannot}")
+        if len(variation.extremes(form, declared)) < 2:
+            raise Exceeded(f"{said} gives one value only; make the card fixed at that value "
+                           f"instead")
+        self._whole_ends(declared, form)
+        return declared, form
+
+    def _form_offered(self, name: str, declared: Param, form, by: Actor) -> Pending:
+        """**A person's draw, offered** (`_form`, `_apply_many`): its `Pending`, whose `was` is what
+        gives the setting before it over all offered ahead of it (`_ahead`) -- a person's draw, a
+        value a person holds, else the run's, or none where a draw or the conditions give it."""
+        values, held, _, formed = self._ahead()
+        before = formed.get(name)
+        if before is not None:
+            was = variation.recorded(before, declared)
+        elif name in held:
+            was = values.get(name)
+        else:
+            was = None if self._given_by(name, self._scheduler.block) else values.get(name)
+        return Pending("form", name, was=was, now=variation.recorded(form, declared), by=by,
+                       after=len(self._staged), form=form)
+
+    def _scale(self, command, declared: Param) -> Scaled:
         """**A person switches a size setting to scaled by eccentricity on its card** (`link.SetForm`
         shape `"scaled"`; the console settings design's §5; the PI, 2026-11-16, "Size = factor x
         eccentricity", 0.3 dva per dva as in his arrays [@westerberg2020priming]; STE-31): from the
@@ -4716,7 +4807,8 @@ class Session:
         alike); and the layout it leaves (`_laid_out`), a size past its bound at some object refused
         (`past-limit`), a stimulus at the center not drawn or one drawn smaller than its fixed
         value warned (`scaled-small`), each accepted by who sent it. Raises `Exceeded` for `_form`
-        to refuse; between trials, never in a frame."""
+        to refuse, else returns the scaling, which `_form` judges and offers as any draw
+        (`_form_new`); between trials, never in a frame."""
         name = command.name
         if name not in size_settings(self._task) or declared.choices:
             raise Exceeded(
@@ -4732,23 +4824,7 @@ class Session:
                 and math.isfinite(factor) and factor > 0):
             raise Exceeded(f"its factor, {factor!r}, is no number above 0: a size is a positive "
                            f"width, so it scales by a factor above 0")
-        form = Scaled(float(factor))
-        why = self._possible(forms={name: form})
-        if why is not None:
-            raise Exceeded(why)
-        self._laid_out(forms={name: form}, by=command.by)
-        values, held, _, formed = self._ahead()
-        before = formed.get(name)
-        if before is not None:
-            was = variation.recorded(before, declared)
-        elif name in held:
-            was = values.get(name)
-        else:
-            was = None if self._given_by(name, self._scheduler.block) else values.get(name)
-        self._pending.append(Pending(
-            "form", name, was=was, now=variation.recorded(form, declared), by=command.by,
-            after=len(self._staged), form=form,
-        ))
+        return Scaled(float(factor))
 
     def _to(self, name: str) -> str:
         """**What takes `name` back in the open block once a person's hold of it ends** (the C3
@@ -4989,18 +5065,7 @@ class Session:
         picked here, and `set` judges the value as ever."""
         name, by = command.name, command.by
         try:
-            declared = self._params().get(name)
-            choices = None if declared is None else color_choices(declared)
-            if choices is None:
-                raise Exceeded(
-                    f"{name!r} is no color setting this task declares, whose every choice shows a "
-                    f"color set's light, so no hue is picked for it")
-            choice = choices.get((command.colorset, command.color))
-            if choice is None:
-                offered = ", ".join(f"{colorset}'s {hue}" for colorset, hue in choices)
-                raise Exceeded(
-                    f"{name!r} offers no choice in {command.colorset}'s {command.color}, so the "
-                    f"pick is refused and the previous value stands; it offers {offered}")
+            choice = self._color_choice(command)
             self._impossible(name, choice, by=by)
             self.set(name, choice, by=by)
         except Exceeded as refused:
@@ -5010,6 +5075,26 @@ class Session:
                 f"the pick of {command.colorset}'s {command.color} for {name!r} could not be "
                 f"checked ({type(broken).__name__}: {broken}), so it is refused and the session "
                 f"runs on"))
+
+    def _color_choice(self, command) -> object:
+        """**The one choice a color's pick names** (`_color`, `_apply_many`): the choice setting
+        `command.name` declares whose color-set light is `command.color` of `command.colorset`
+        (`task.color_choices`), or `Exceeded` with its sentence, for a setting with no such card or
+        a set and hue none of its choices names. Between trials, never in a frame."""
+        name = command.name
+        declared = self._params().get(name)
+        choices = None if declared is None else color_choices(declared)
+        if choices is None:
+            raise Exceeded(
+                f"{name!r} is no color setting this task declares, whose every choice shows a "
+                f"color set's light, so no hue is picked for it")
+        choice = choices.get((command.colorset, command.color))
+        if choice is None:
+            offered = ", ".join(f"{colorset}'s {hue}" for colorset, hue in choices)
+            raise Exceeded(
+                f"{name!r} offers no choice in {command.colorset}'s {command.color}, so the "
+                f"pick is refused and the previous value stands; it offers {offered}")
+        return choice
 
     def _declared_draw(self, key: tuple) -> Distribution:
         """The draw `key` names as the task declares it (`variation.in_force`'s keys): the task's,
@@ -5299,6 +5384,299 @@ class Session:
                                    for offer in self._pending[pending:]]
         self._answering, self._warned_now = None, None
 
+    def _split(self, at: tuple[int, int], names: list) -> None:
+        """**An apply of several's warnings, each on the rows it names** (`_about`; the console
+        interface plan's Task 4, the controller's ruling): after `_answered` gave every row the act
+        staged all the warnings judging it gave, each keeps those naming its setting and those naming
+        none of the act's (`names`). Never raises."""
+        staged, pending = at
+        for place in range(staged, len(self._staged)):
+            cid, warnings = self._answers.get(place, (None, ()))
+            self._answers[place] = (cid, _about(self._staged[place][0], warnings, names))
+        self._pending[pending:] = [
+            dataclasses.replace(offer, warnings=_about(offer.name, offer.warnings, names))
+            for offer in self._pending[pending:]]
+
+    def _took_effect(self, cid: str | None, index: int) -> None:
+        """**An act's command id, kept as its change applies** (`_in_force_cids`; `_apply_staged`):
+        from trial `index`, the newest `IN_FORCE_KEPT` kept. Nothing for a change sent with none."""
+        if cid is None:
+            return
+        self._in_force_cids.pop(cid, None)
+        self._in_force_cids[cid] = index
+        while len(self._in_force_cids) > IN_FORCE_KEPT:
+            del self._in_force_cids[next(iter(self._in_force_cids))]
+
+    def _apply_many(self, command, index: int) -> None:
+        """**Several changes applied together** (`link.ApplyMany`; the console interface design's goal
+        2, the PI, 2026-11-19, "Apply per box, plus Apply all"): a group box's Apply or an Apply all,
+        one act, **judged together, staged together, refused whole**, as `_revert` judges its
+        changes, and applied at the next boundary in one pass, each change a row of its own act as
+        today (`_apply_staged`; XC-529's ask: Apply all adds no shape). `index`, the trial about to
+        run, is every branch's.
+
+        In this order, each refusal refusing the whole:
+        - **each change on its own**, in the order sent: a setting sent twice; **a reward size**, a
+          welfare ceiling's name, never applied with others (`REWARD_SENT_ALONE`; XC-527), its
+          refusal written to the session record too, as a ceiling's always is (`_ceiling_refused`);
+          then what each refuses alone -- a value's (`_value_faults`: a whole setting's fraction
+          among them), a color's pick (`_color_choice`), a range's (`_range_new`) and a draw's
+          (`_form_new`), a whole setting's fractional end among them;
+        - **each value through `set`, unchanged**, in the order sent, so each is judged by `set`'s
+          own rules over what is offered ahead of it, a value past a declared bound refused
+          (`past-limit`); then each range's and draw's ends past a bound (`_beyond_range`);
+        - **then the run with all of it at once** (`_possible`, over every value it staged and every
+          range and draw it offers, so a change that only works with another goes with it), and the
+          layout it leaves, judged whole (`_laid_out`), its new warnings accepted by who sent it.
+
+        **Refused, with a sentence for each change and nothing staged** (`_refuse_together`): the
+        change that refused it with its own reason, as its box alone would hear it, the others
+        "refused with" it; or, where the whole is refused, each with the reason. What it staged is
+        cut back to what was there before it. A warning a change accepted ahead of the refusal stays
+        accepted, as a revert's does. What it accepts carries its page's command id and the warnings
+        that name its setting (`_answered`, `_split`), and a `Withdraw` naming that id takes all of
+        it back while it waits.
+
+        **It never raises**: it runs beside the pause, outside `_command`'s listed `try`, so a check
+        that raises refuses the whole, saying it could not be checked, and the session runs on.
+        **It passes no reward size anywhere**, refusing one first, and each value goes through `set`
+        unchanged. Between trials, never in a frame. Not welfare-critical: the branch handing to it
+        is `_command`'s."""
+        changes, by = tuple(command.changes), command.by
+        names = [change.name for change in changes]
+        staged, pending = len(self._staged), len(self._pending)
+        culprit = None
+        try:
+            values, ranges, forms, offers = {}, {}, {}, []
+            for place, change in enumerate(changes):
+                culprit, name = place, change.name
+                if not isinstance(change, (_link.SetParameter, _link.SetRange, _link.SetForm,
+                                           _link.SetColor)):
+                    raise Exceeded(f"a {change.KIND!r} is sent on its own, never in an apply of "
+                                   f"several")
+                if name in names[:place]:
+                    raise Exceeded(f"{name!r} is sent twice in one apply, so which of the two "
+                                   f"stands cannot be said")
+                if name in self.spec.bounds.ceilings:
+                    raise Exceeded(f"{name!r} {REWARD_SENT_ALONE}")
+                if isinstance(change, _link.SetParameter):
+                    self._value_faults(name, change.value)
+                    values[name] = change.value
+                elif isinstance(change, _link.SetColor):
+                    values[name] = self._color_choice(change)
+                    self._value_faults(name, values[name])
+                elif isinstance(change, _link.SetRange):
+                    try:
+                        declared, key, drawn, new = self._range_new(change)
+                    except Exceeded as refused:
+                        raise Exceeded(f"the range of {name!r} is not changed: {refused}") from refused
+                    ranges[key] = new
+                    offers.append((place, "range", name, declared, key, drawn, new))
+                else:
+                    how = "scaled" if change.shape == "scaled" else "drawn"
+                    try:
+                        declared, form = self._form_new(change)
+                    except Exceeded as refused:
+                        raise Exceeded(f"{name!r} is not {how} as asked: {refused}") from refused
+                    forms[name] = form
+                    offers.append((place, "form", name, declared, None, None, form))
+            for place, change in enumerate(changes):
+                if change.name in values:
+                    culprit = place
+                    self.set(change.name, values[change.name], by=by)
+            for place, kind, name, declared, _, _, new in offers:
+                culprit = place
+                if kind == "form" and isinstance(new, Scaled):
+                    continue
+                for end in variation.extremes(new, declared):
+                    if _outside(declared, end):
+                        try:
+                            self._beyond_range(name, end, by)
+                        except Exceeded as refused:
+                            said = (f"the range of {name!r} is not changed" if kind == "range"
+                                    else f"{name!r} is not drawn as asked")
+                            raise Exceeded(f"{said}: {refused}") from refused
+            culprit = None
+            why = self._possible(ranges=ranges, forms=forms)
+            if why is not None:
+                raise Exceeded(why)
+            self._laid_out(ranges=ranges, forms=forms, by=by)
+            for _, kind, name, declared, key, drawn, new in offers:
+                if kind == "range":
+                    self._pending.append(Pending(
+                        "range", name, was=variation.recorded(drawn, declared),
+                        now=variation.recorded(new, declared), by=by, after=len(self._staged),
+                        key=key, draw=new))
+                else:
+                    self._pending.append(self._form_offered(name, declared, new, by))
+        except Exceeded as refused:
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse_together(changes, culprit, str(refused), by, index)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            del self._staged[staged:]
+            del self._pending[pending:]
+            self._refuse_together(changes, None, (
+                f"it could not be checked ({type(broken).__name__}: {broken}), so it is refused "
+                f"and the session runs on"), by, index)
+
+    def _refuse_together(self, changes: tuple, culprit: int | None, why: str, by: Actor,
+                         index: int) -> None:
+        """**An apply of several, refused whole** (`_apply_many`; the console interface plan's Review
+        Focus 2: "every box in it says refused with its own reason or 'refused with <name>'"): one
+        refusal for each change, in the order sent, each naming the apply's command id and a value
+        its value: the change at `culprit` with `why`, its own reason, the others "refused with" it;
+        with no culprit, each with `why`, the reason the whole is refused. A reward size's refusal
+        goes into the session record too (`_ceiling_refused`). Never raises."""
+        held = self._answering
+        cid = None if held is None else held[0]
+        count = len(changes)
+        together = f"the {count} applied together" if count > 1 else "the apply"
+        for place, change in enumerate(changes):
+            name = change.name
+            if culprit is None:
+                said = f"{name!r} is refused with {together}, and none of them is staged: {why}"
+            elif place == culprit:
+                said = why if count == 1 else f"{why}; so none of {together} is staged"
+            else:
+                said = (f"{name!r} is refused with {changes[culprit].name!r}, applied together with "
+                        f"it, and none of them is staged")
+            value = (_link._scalar(change.value) if isinstance(change, _link.SetParameter)
+                     else None)
+            self._answering = (cid, _link.cut(value, _link.TEXT_LIMIT)
+                               if isinstance(value, str) else value)
+            if place == culprit and name in self.spec.bounds.ceilings:
+                # As asked, as `_command`'s setting path, `_range` and `_form` write it.
+                asked = (change.value if isinstance(change, _link.SetParameter) else
+                         dict(change.numbers) if isinstance(change, (_link.SetRange, _link.SetForm))
+                         else None)
+                self._ceiling_refused(
+                    name, asked if isinstance(asked, (int, float, str, dict)) else repr(asked),
+                    by, said, index)
+            self._refuse(name, by, said)
+        self._answering = held
+
+    def _withdraw(self, command, index: int) -> None:
+        """**A waiting act taken back** (`link.Withdraw`; the console interface design's goal 3; the
+        PI, 2026-11-19, "Yes, a withdraw button"): every change the act of command id
+        `command.cid` staged and that waits for the next boundary -- a box's Apply, a group box's or
+        an Apply all, one act -- is removed before it applies, and written to the change log as one
+        `withdrawn` row for each setting it covered (`_withdrawn`; XC-529), all of one fresh change
+        id, taken now. `index`, the trial about to run.
+
+        **Refused, with the sentence, writing no row and taking nothing back**: an act that has
+        applied, "already in force from trial N" (`_in_force_cids`; the plan's Review Focus 3); an
+        id nothing waiting carries; **a reward size among it**, never withdrawn (XC-527); and where
+        other changes still wait, one that leaves what remains holding trials no animal can get
+        right (`_possible`), since what was offered after it was judged with it. **It never
+        raises**: it runs beside the pause, outside `_command`'s listed `try`. **It passes nothing
+        through `set` and moves no reward size**: it only takes back what waits. A warning a change
+        withdrawn had accepted stays accepted (`warnings.jsonl`), as it was when it was accepted.
+        Between trials, never in a frame. Not welfare-critical: the branch handing to it is
+        `_command`'s."""
+        cid, by = command.cid, command.by
+        if not _link._is_cid(cid):
+            # The wire requires one (`link._named_cid`); one made in this process may not have it.
+            self._refuse(command.KIND, by, f"a withdrawal names the act it takes back by its cid, "
+                                           f"and {cid!r} is not one, so it is refused")
+            return
+        saved = (list(self._staged), list(self._pending), dict(self._acts), dict(self._answers))
+        try:
+            taken, places, pendings, place = [], set(), [], 0
+            for offer, _ in self._offered_acts():
+                if isinstance(offer, Pending):
+                    if offer.cid is not None and offer.cid == cid:
+                        taken.append(offer)
+                        pendings.append(offer)
+                    continue
+                if self._answers.get(place, (None, ()))[0] == cid:
+                    taken.append(offer)
+                    places.add(place)
+                place += 1
+            if not taken:
+                trial = self._in_force_cids.get(cid)
+                if trial is not None:
+                    raise Exceeded(f"it is already in force from trial {trial}, so nothing of it "
+                                   f"waits to be taken back; change the setting again to move it")
+                raise Exceeded("nothing sent with it waits for the next trial, so there is "
+                               "nothing to take back")
+            bounded = [offer[0] for offer in taken if not isinstance(offer, Pending) and offer[4]]
+            if bounded:
+                raise Exceeded(f"{bounded[0]!r} is a reward size, a welfare ceiling, which is never "
+                               f"withdrawn (XC-527): it applies at the next trial, and a value sent "
+                               f"after it takes its place")
+            self._take_back(places, pendings)
+            if self._staged or self._pending:
+                why = self._possible()
+                if why is not None:
+                    raise Exceeded(f"what still waits was judged with it, and without it {why}")
+        except Exceeded as refused:
+            self._staged[:], self._pending[:] = saved[0], saved[1]
+            self._acts, self._answers = saved[2], saved[3]
+            self._refuse(command.KIND, by, f"the change sent as {cid!r} is not withdrawn: {refused}")
+            return
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._staged[:], self._pending[:] = saved[0], saved[1]
+            self._acts, self._answers = saved[2], saved[3]
+            self._refuse(command.KIND, by, (
+                f"the withdrawal of {cid!r} could not be checked ({type(broken).__name__}: "
+                f"{broken}), so it is refused, nothing is taken back, and the session runs on"))
+            return
+        self._withdrawn(taken, cid, by, index)
+
+    def _take_back(self, places: set, pendings: list) -> None:
+        """**The changes a withdrawal takes back, removed from what waits** (`_withdraw`): the values
+        at `places` in `_staged` and the offers `pendings` (by identity) in `_pending`, every place
+        after them renumbered -- each revert's (`_acts`), each answer (`_answers`), each offer's
+        `Pending.after` -- so what remains applies as it was offered."""
+        moved = {}
+        kept = 0
+        for place in range(len(self._staged)):
+            if place not in places:
+                moved[place] = kept
+                kept += 1
+        self._staged[:] = [row for place, row in enumerate(self._staged) if place not in places]
+        self._acts = {moved[place]: act for place, act in self._acts.items() if place in moved}
+        self._answers = {moved[place]: said for place, said in self._answers.items()
+                         if place in moved}
+        self._pending[:] = [
+            dataclasses.replace(offer, after=offer.after - sum(1 for p in places if p < offer.after))
+            for offer in self._pending if not any(offer is taken for taken in pendings)]
+
+    def _withdrawn(self, taken: list, cid: str, by: Actor, index: int) -> None:
+        """**A withdrawal's rows, and its lines on the changes feed** (`_withdraw`; XC-529, the shape
+        sent to wl-preproc on 2026-11-19 and built to as drafted until it answers): one fresh change
+        id for the withdrawal, then for each change taken back, in the order offered, a `withdrawn`
+        row -- `was` and `now` what the setting holds, null where no single value is held
+        (`_given_by`, as every row's `was` is written), `meaning` null, `event_code` null and no
+        `sequence`, since it strobes nothing; its `cid`; `withdrawn`, the row it would have been,
+        `{"kind", "now"}` (a value's, a range's and a draw's `now`; a hand-back's null, read only as
+        it applies); and `staged_by`, who sent it -- `trial_number` the next trial to start, the one
+        it would have applied to. Each said on the feed, kind `withdrawn`."""
+        self._change += 1
+        at = self.wall_now()
+        playing = self._playing()
+        trial_number = self._levels.trials + 1
+        for offer in taken:
+            if isinstance(offer, Pending):
+                name, kind, sent_by = offer.name, offer.kind, offer.by
+                would = None if kind == "hand_back" else offer.now
+                said = self._pending_said(offer)
+            else:
+                name, was, would, sent_by, _ = offer
+                kind = "set"
+                choices = self._declared[name].choices if name in self._declared else ()
+                said = f"{name} {_shown(was, choices)} → {_shown(would, choices)}"
+            held = None if self._given_by(name, playing) else self.spec.values.get(name)
+            if self._record is not None:
+                self._record.change(
+                    change=self._change, kind="withdrawn", name=name, was=held, now=held, by=by,
+                    at=at, trial_number=trial_number, run=self.run_index, meaning=None,
+                    event_code=None, cid=cid, withdrawn={"kind": kind, "now": would},
+                    staged_by=to_map_or_none(sent_by))
+            self._feed("withdrawn", by, at,
+                       f"{said} withdrawn before trial {index}: it never applied")
+
     def _ceiling_refused(self, name: str, asked, by: Actor | None, why: str, index: int) -> None:
         """**A hand-back or a range that named a ceiling, refused, into the session record too**
         (the PI, 2026-09-19, `record.SessionRecord.refusal`: telemetry is lossy, and an attempt on
@@ -5454,6 +5832,20 @@ class Session:
         if isinstance(command, _link.SetColor):
             boxed = self._answering_for(command)
             self._color(command, index)
+            self._answered(boxed)
+            return
+        # **Several changes applied together, and a waiting act withdrawn** (the console interface
+        # plan's Task 4), beside `SetRange`'s as `Revert`'s is, off the welfare list: neither passes a
+        # reward size (`_apply_many`, `_withdraw`), and each value goes through `set`, unchanged.
+        if isinstance(command, _link.ApplyMany):
+            boxed = self._answering_for(command)
+            self._apply_many(command, index)
+            self._answered(boxed)
+            self._split(boxed, [change.name for change in command.changes])
+            return
+        if isinstance(command, _link.Withdraw):
+            boxed = self._answering_for(command)
+            self._withdraw(command, index)
             self._answered(boxed)
             return
         if isinstance(command, _link.Revert):
@@ -5658,13 +6050,16 @@ class Session:
                                               repools=place == repooling)
                 # In force from this trial, by whom, with the warnings it carried (schema 23).
                 self._applied[offer.name] = (index, offer.by, offer.warnings)
+                self._took_effect(offer.cid, index)
                 if closes:
                     self._keep_moment(self._pending_said(applied) if moment is None
                                       else f"reverted to {_back_to(moment)}")
                 continue
             name, was, now, by, bounded = offer
             # In force from this trial, by whom, with the warnings it carried (schema 23).
-            self._applied[name] = (index, by, self._answers.get(staged_at, (None, ()))[1])
+            answered = self._answers.get(staged_at, (None, ()))
+            self._applied[name] = (index, by, answered[1])
+            self._took_effect(answered[0], index)
             staged_at += 1
             kind = "set" if moment is None else "revert"
             if moment is not None:
@@ -7128,7 +7523,7 @@ class Session:
         self._ranges = {}
         # No person's draw (the console settings build), and no change in force (schema 23).
         self._forms, self._form_ids = {}, {}
-        self._applied = {}
+        self._applied, self._in_force_cids = {}, {}
         # No trial's draws kept for a repeat, and every prepared list at its first place (engine
         # build C3).
         self._kept = {}
