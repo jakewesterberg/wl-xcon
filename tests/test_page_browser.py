@@ -100,14 +100,16 @@ class _Dispatch:
 #: summary and editor design of 2026-11-19): the setting's summary line clicked, as a person does,
 #: by the line's own `click()`, so no pointer press holds a frame the test is timing. The box the
 #: selector's first match stands in; nothing where it is open already, stands in none, or is not
-#: there yet (an action waits for it, as Playwright's would, up to `WAIT_S`).
+#: there yet (an action waits for it, as Playwright's would, up to `WAIT_S`). A pinned copy in
+#: Runtime's editor is opened by its pinned line, as a person opens it (the build's Task 3).
 _OPEN_ITS_BOX = """(selector) => {
   let node = null;
   try { node = document.querySelector(selector); } catch (e) { return "not css"; }
   if (!node) { return "none"; }
-  const box = node.closest("#params > .editing > .box, #training-params > .editing > .box");
+  const box = node.closest("#params > .editing > .box, #training-params > .editing > .box, " +
+    "#pinned-editing > .box[data-pin]");
   if (!box || !box.hidden) { return "shown"; }
-  const name = box.getAttribute("data-card");
+  const name = box.getAttribute("data-card") || box.getAttribute("data-pin");
   const line = Array.from(box.parentNode.parentNode.querySelectorAll(
     ":scope > .summary .line[data-open]")).find((one) => one.getAttribute("data-open") === name);
   if (!line) { return "no line"; }
@@ -133,6 +135,25 @@ class _Opening:
     def __init__(self, page) -> None:
         object.__setattr__(self, "_page", page)
 
+    #: What a document going away under `_OPEN_ITS_BOX` says (WebKit's and Chromium's words): a
+    #: page navigating -- a reload the test waits through, as XC-227's does -- has no box to open
+    #: yet, so it is "none", and the wait goes on in the next document.
+    _GONE = ("Execution context was destroyed", "Cannot find context with specified id",
+             "Frame was detached", "Target closed")
+
+    def _opening(self, selector: str) -> str:
+        """`_OPEN_ITS_BOX` on `selector`, a navigation under it read as nothing there yet (the
+        summary and editor build's Task 3: the WebKit sign-in reload flake's first cause, this
+        poll's `evaluate` landing in a document the reload was tearing down)."""
+        from playwright.sync_api import Error
+
+        try:
+            return self._page.evaluate(_OPEN_ITS_BOX, selector)
+        except Error as error:
+            if any(said in str(error) for said in self._GONE):
+                return "none"
+            raise
+
     def __setattr__(self, name, value) -> None:
         setattr(self._page, name, value)
 
@@ -145,7 +166,7 @@ class _Opening:
             if isinstance(selector, str) and kwargs.get("state", "visible") == "visible":
                 waits = kwargs.get("timeout", WAIT_S * 1000) / 1000 if name in self._WAITS else 0
                 end = time.monotonic() + waits
-                while self._page.evaluate(_OPEN_ITS_BOX, selector) == "none" and time.monotonic() < end:
+                while self._opening(selector) == "none" and time.monotonic() < end:
                     self._page.wait_for_timeout(50)
             return attr(selector, *args, **kwargs)
 
@@ -1035,7 +1056,13 @@ def test_a_page_made_before_the_rig_had_keys_reloads_into_the_sign_in_once_it_ha
     assert len(loads) == 0  # asking again is not reloading
     rig.checker.load()  # what the keys thread does once wl.works answers
     page.wait_for_selector("#signin")
-    assert len(loads) == 1
+    # The sign-in is in the new document before its `load` (it waits on the fonts): Playwright
+    # delivers the event only while it is called, so it is waited for, with a deadline (the
+    # summary and editor build's Task 3: the flake's second cause, `readyState` "interactive").
+    end = time.monotonic() + WAIT_S
+    while not loads and time.monotonic() < end:
+        page.wait_for_timeout(50)
+    assert len(loads) == 1, f"the page reloaded {len(loads)} times into the sign-in, not once"
     _sign_in(page)
     page.click(PAUSE)
     rig.wait_for(lambda: _pauses(rig))
@@ -3691,19 +3718,11 @@ _LONG_WHY = ("'fix_hold' at 30 is refused, and the previous value stands: the tr
              "and the time to acquire the point both fit inside it, then apply again (XC-343)")
 
 
-def _popout_frame(tmp_path, **over):
-    """**The pop-out search's own settings as its session makes their rows** (`Session.parameters`,
-    schema 23; the PI's try-out task), with the states a box must hold without overrunning: a plain
-    name of the longest a task may declare (`task.LABEL_LIMIT`), `fix_hold` drawn by a person with
-    its profile, a size scaled, a value over a draw with its live numbers, a change staged, the
-    long refusal (`_LONG_WHY`), and a change in force with a warning; the color boxes as the rig
-    makes them."""
-    from wl_xcon.actor import Box
+def _popout_session(tmp_path):
+    """**The pop-out search's session** as `_popout_frame` and `_popout_own` read it: its rows
+    (`Session.parameters`) and its groups (`Session.groups`), schema 23."""
     from wl_xcon.dio import Simulated as Card
-    from wl_xcon.link import Applied, ParamRow, Refused, Staged
-    from wl_xcon.task import LABEL_LIMIT, NonAging
     from wl_xcon.taskd import Session, SessionSpec
-    from wl_xcon.variation import profile
     from wl_xcon.welfare import Deployment, Simulated as Pump
 
     import _sessions
@@ -3715,7 +3734,45 @@ def _popout_frame(tmp_path, **over):
         values={"pairings": 66}, bounds=_sessions.bounds(), already_delivered_today=0.0,
         deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
         calibration=SRGB, plan="training")
-    rows = {row[0]: ParamRow.of(*row) for row in Session(spec, card=Card(), pump=Pump()).parameters}
+    return Session(spec, card=Card(), pump=Pump())
+
+
+def _popout_own(tmp_path, **over):
+    """**The pop-out search's own rows and groups, as its session makes them** (the ledger's ruling
+    for the summary and editor build's Task 3: "a new test on the wl-xtasks pop-out's own rows"):
+    nothing changed in them -- no long plain name, no staged change -- but a setting that holds no
+    value yet shown at its task's start (`Param.start`), as a run shows it."""
+    import importlib.util
+
+    from wl_xcon.link import GroupRow, ParamRow
+    from _demo import POPOUT, xtasks_or_skip
+
+    session = _popout_session(tmp_path)
+    spec = importlib.util.spec_from_file_location("popout_own", xtasks_or_skip() / POPOUT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    starts = {param.name: param.start for param in module.TASK.params}
+    rows = tuple(ParamRow.of(*row) for row in session.parameters)
+    rows = tuple(dataclasses.replace(row, value=starts[row.name])
+                 if row.value is None and isinstance(starts.get(row.name), (int, float)) else row
+                 for row in rows)
+    return frame(params=rows, groups=tuple(GroupRow(*group) for group in session.groups),
+                 task="tasks/popout_search.py", **over)
+
+
+def _popout_frame(tmp_path, **over):
+    """**The pop-out search's own settings as its session makes their rows** (`Session.parameters`,
+    schema 23; the PI's try-out task), with the states a box must hold without overrunning: a plain
+    name of the longest a task may declare (`task.LABEL_LIMIT`), `fix_hold` drawn by a person with
+    its profile, a size scaled, a value over a draw with its live numbers, a change staged, the
+    long refusal (`_LONG_WHY`), and a change in force with a warning; the color boxes as the rig
+    makes them."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, ParamRow, Refused, Staged
+    from wl_xcon.task import LABEL_LIMIT, NonAging
+    from wl_xcon.variation import profile
+
+    rows = {row[0]: ParamRow.of(*row) for row in _popout_session(tmp_path).parameters}
     shape = {"shape": "non_aging", "numbers": {"shortest": 0.5, "longest": 1.25},
              "values": [], "weights": [], "by": "person"}
     drawn = profile(NonAging(minimum=0.5, mean=0.25, maximum=1.25)).as_dict()
@@ -4836,15 +4893,21 @@ _PRESSED = {
     "hand back": (_b("gap") + ' [data-cmd="hand_back"]', "gap", "0.65 s"),
     # A summary line (the summary and editor build's Task 2: the plan's Review Focus 1).
     "line": ('#params > .summary .line[data-open="set_size"]', "set_size", "6 objects"),
+    # Runtime's pinned line and its box's + there (the summary and editor build's Task 3).
+    "pinned line": ('#pinned > .line[data-open="set_size"]', "set_size", "6 objects"),
+    "pinned stepper": ('#pinned-editing > .box[data-pin="set_size"] [data-dir="1"]', "set_size",
+                       "6 objects"),
 }
 
 
 @pytest.mark.parametrize("control", [
-    "field", "stepper", "segment", "tick", "swatch", "apply", "withdraw", "hand back", "line"])
+    "field", "stepper", "segment", "tick", "swatch", "apply", "withdraw", "hand back", "line",
+    "pinned line", "pinned stepper"])
 def test_a_press_during_frames_acts_once(rig, control):
     """The plan's Review Focus 1: a frame lands while a trainer presses a box's control -- a field,
     −/+, a segment of the switch, a tick, a swatch, Apply, *withdraw*, *hand back*, a summary line
-    (the summary and editor build's Task 2, which opens its setting) -- a frame that
+    (the summary and editor build's Task 2, which opens its setting), Runtime's pinned line and
+    its box's + there (the build's Task 3) -- a frame that
     changes that box's head and every neighbor's: the press acts once, and the box shows the
     frame's news after. The mouse goes down, the frame of trial 41 arrives, the mouse comes up.
     Run in WebKit too, where earlier fix rounds found a frame replacing the button under a press."""
@@ -4855,6 +4918,11 @@ def test_a_press_during_frames_acts_once(rig, control):
     page = _task6_page(rig, params=_matrix_rows(40))
     if control == "hand back":
         _more(page)
+    if control.startswith("pinned"):
+        _pin(page, "set_size")
+        page.click('label[for="t-runtime"]')
+        if control == "pinned stepper":
+            page._page.click('#pinned > .line[data-open="set_size"]')
     staged = ()
     if control == "apply":
         page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
@@ -4922,6 +4990,15 @@ def test_a_press_during_frames_acts_once(rig, control):
     elif control == "line":
         assert sent == [] and _opened(page) == ["set_size"]
         assert page.text_content(target + " > .lv") == "6"
+    elif control == "pinned line":
+        assert sent == [] and page._page.is_visible(_pinned("set_size"))
+        assert page.get_attribute(target, "aria-pressed") == "true"
+        assert page.text_content(target + " > .lv") == "6"
+    elif control == "pinned stepper":
+        assert sent == []
+        assert page.input_value(f'{_pinned("set_size")} input[data-param="set_size"]') == "5"
+        assert page.input_value(f'{_b("set_size")} input[data-param="set_size"]') == "5"
+        assert _say(page, "set_size") == "not sent"
     else:
         assert [(type(s), s.name) for s in sent] == [(HandBack, "gap")]
     for neighbor, shown in (("response_deadline", "0.60 s"), ("set_size", "6 objects"),
@@ -5565,24 +5642,47 @@ _NO_LOCAL_STORE = ("Object.defineProperty(window, 'localStorage', { configurable
 
 
 def _pinned(name: str) -> str:
-    return f'#pinned > .box[data-pin="{name}"]'
+    """A pinned setting's box in Runtime's editor (the summary and editor build's Task 3)."""
+    return f'#pinned-editing > .box[data-pin="{name}"]'
 
 
-def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
+def test_nothing_is_pinned_at_first(rig):
     """The design's goal 9 (the PI, 2026-11-19: "Yes, you choose only"): nothing is pinned until a
-    person pins it; a box's *pin to Runtime*, in its *more*, puts a copy of it in Runtime's Pinned
-    strip that works as the box does -- typing, −/+, Esc, Apply, *withdraw* -- and shares the
-    box's one draft (the ledger's pin ruling: "one draft per setting, never two diverging
-    copies"), a setting keeping one box by its name; the pin is kept per task across a reload, and
-    *unpin* takes it away."""
+    person pins it -- Runtime's Pinned strip hidden, holding no line and its editor no box, every
+    box's *more* offering *pin to Runtime*, and nothing kept in the store. In a real browser: run
+    with `WLX_BROWSER=webkit` too, for Safari."""
+    page = _task6_page(rig)
+    page.click('label[for="t-runtime"]')
+    assert not page.is_visible("#pinned-pane")
+    assert page.locator("#pinned .line").count() == 0
+    assert page.locator("#pinned-editing .box").count() == 0
+    toggles = page.eval_on_selector_all("#params [data-pin-toggle]", "(all) => all.map((b) => [b.textContent, b.getAttribute('aria-pressed')])")
+    assert len(toggles) == 4 and set(map(tuple, toggles)) == {("pin to Runtime", "false")}, toggles
+    assert page.evaluate("window.localStorage.getItem('wlx.pins.tasks/fixation_detection.py')") is None
+
+
+def _pin_line(name: str) -> str:
+    """A pinned setting's summary line on Runtime (the summary and editor build's Task 3)."""
+    return f'#pinned > .line[data-open="{name}"]'
+
+
+def test_a_pinned_line_opens_the_editor_on_runtime_and_survives_a_reload(rig):
+    """The summary and editor design's goal 9: "Runtime's Pinned strip is a short summary of the
+    pinned settings, and a click opens the same editor on Runtime (one editor per tab, the
+    setting's one draft shared)". A box's *pin to Runtime*, in its *more*, puts the setting's line
+    in the strip (`#pinned` holds lines, not boxes), shown whatever its tab's find box dims; a
+    click on it opens the setting's box in Runtime's own editor, as a mirror of the setting's one
+    box (the ledger's pin ruling: "one draft per setting, never two diverging copies"). A draft
+    made on Runtime shows ● on its Task parameters line too, and back; Esc, Esc returns to the
+    pinned line; −/+, Apply from Runtime sends once, *withdraw*; the pin and the setting opened on
+    Runtime are kept per task across a reload, and *unpin* takes both away. Rewrites
+    `test_a_pinned_box_works_on_runtime_and_survives_a_reload`, whose copy stood in the strip.
+    In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.actor import Box
     from wl_xcon.link import SetParameter, Staged, Withdraw
 
     jake = Box("Jake Westerberg")
     page = _task6_page(rig)
-    page.click('label[for="t-runtime"]')
-    assert not page.is_visible("#pinned-pane") and page.locator("#pinned .box").count() == 0
-    page.click('label[for="t-task"]')
     assert page.text_content(f'{_b("fix_hold")} [data-pin-toggle]') == "pin to Runtime"
     page.click(f'{_b("fix_hold")} > details.more > summary')
     page.click(f'{_b("fix_hold")} [data-pin-toggle]')
@@ -5591,29 +5691,51 @@ def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
 
     page.fill("#pfind", "set_size")
     page.click('label[for="t-runtime"]')
+    line = _pin_line("fix_hold")
     copy = _pinned("fix_hold")
     field = f'{copy} input[data-param="fix_hold"]'
-    assert page.is_visible(copy) and page.locator("#pinned .box").count() == 1, (
-        "a copy is shown whatever its tab's find box hides")
+    assert page.locator("#pinned > *").count() == 1 and page.is_visible(line)
+    assert "nofind" not in page.get_attribute(line, "class").split(), (
+        "a pinned line is shown whatever its tab's find box dims")
+    assert page.text_content(f"{line} > .ln") == "fix_hold"
+    assert page.text_content(f"{line} > .lv") == "0.30 s"
+    assert page.locator("#pinned-editing > .box").count() == 1, "the strip holds lines, the editor one box"
+    assert page._page.is_hidden(copy), "closed until its line is clicked"
+    assert page.inner_text("#pinned-editing > .placeholder") == web.PINNED_EMPTY
+    widths = page.evaluate("""() => [getComputedStyle(document.getElementById('pinned')).columnWidth,
+        getComputedStyle(document.querySelector('#params > .summary')).columnWidth]""")
+    assert widths[0] == widths[1] and widths[0].endswith("px"), (widths, "its tab's columns")
+    page._page.click(line)
+    assert page._page.is_visible(copy) and page.is_hidden("#pinned-editing > .placeholder")
+    assert page.get_attribute(line, "aria-pressed") == "true"
     assert page.locator('[data-card="fix_hold"]').count() == 1, "one box by the setting's name"
-    page.fill(field, "0.5")
+
+    page.fill(field, "0.50")
     assert page.text_content(f"{copy} > .status > .say").strip() == "not sent"
     assert _bar(page) == "1 edit not sent: fix_hold"
+    assert _marked(page, "fix_hold", "#pinned")[:2] == ("●", "0.30 → 0.50 s"), "Runtime's line"
     page.click('label[for="t-task"]')
+    assert _marked(page, "fix_hold")[:2] == ("●", "0.30 → 0.50 s"), "the Task parameters line too"
     page.fill("#pfind", "")
     original = f'{_b("fix_hold")} input[data-param="fix_hold"]'
-    assert page.input_value(original) == "0.5" and _say(page, "fix_hold") == "not sent"
+    assert page.input_value(original) == "0.50" and _say(page, "fix_hold") == "not sent"
     page.fill(original, "0.55")
     page.click('label[for="t-runtime"]')
     assert page.input_value(field) == "0.55", "the copy follows its box's draft"
+    assert _marked(page, "fix_hold", "#pinned")[:2] == ("●", "0.30 → 0.55 s"), "and its line"
     page.press(field, "Escape")
     assert page.input_value(field) == "0.30"
     assert page.text_content(f"{copy} > .status > .say").strip() == "0.10 to 1.00"
-    assert _bar(page) is None
+    assert _bar(page) is None and _marked(page, "fix_hold", "#pinned")[:2] == ("", "0.30 s")
+    page.press(field, "Escape")
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.matches('#pinned > .line[data-open=\"fix_hold\"]')"), (
+        "a second Esc returns to the pinned line")
     page.click(f'{copy} [data-dir="1"]')
     assert page.input_value(field) == "0.35"
     page.click(f"{copy} [data-apply]")
     rig.wait_for(lambda: rig.dispatch.seen)
+    page.wait_for_timeout(300)  # housekeeping: room for a second send, were there one
     (sent,) = rig.dispatch.seen
     assert (type(sent), sent.name, sent.value) == (SetParameter, "fix_hold", 0.35)
     _offer(rig, 41, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.35, jake, False,
@@ -5621,26 +5743,67 @@ def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
     _arrived(page, 41)
     rig.wait_for(lambda: page.text_content(f"{copy} > .status > .say").strip() ==
                  "waiting · you")
+    assert _marked(page, "fix_hold", "#pinned")[:2] == ("◷", "0.30 → 0.35 s")
     page.click(f'{copy} [data-withdraw="{sent.cid}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
 
     _offer(rig, 42, params=_task6_rows(), withdrawals=(sent.cid,))
-    # Another setting opened in the editor, so the pinned box is hidden there as the page loads:
-    # its copy is shown on Runtime all the same (the summary and editor design of 2026-11-19).
+    # Another setting opened on the Task parameters tab: Runtime's editor keeps its own.
     page.click('label[for="t-task"]')
     _open(page, "set_size")
     page.click('label[for="t-runtime"]')
     page.reload()
     page.wait_for_selector(SIGNED_IN, timeout=WAIT_S * 1000)
-    page.wait_for_selector(copy, state="visible")
+    page._page.wait_for_selector(copy, state="visible")
+    assert page.get_attribute(line, "aria-pressed") == "true"
+    assert page.evaluate("window.localStorage.getItem('wlx.pinned-opened.tasks/"
+                         "fixation_detection.py')") == "fix_hold"
+    assert _opened(page) == ["set_size"], "the Task parameters tab's own"
     assert page.input_value(field) == "0.30"
     page.click(f"{copy} > details.more > summary")
     page.click(f"{copy} [data-pin-toggle]")
-    assert not page.is_visible("#pinned-pane") and page.locator("#pinned .box").count() == 0
+    assert not page.is_visible("#pinned-pane")
+    assert page.locator("#pinned > *").count() == 0 and page.locator("#pinned-editing .box").count() == 0
     page.reload()
     page.wait_for_selector("#params .box", state="attached")
-    assert page.locator("#pinned .box").count() == 0
+    assert page.locator("#pinned > *").count() == 0 and page.locator("#pinned-editing .box").count() == 0
+
+
+def test_a_pinned_line_says_a_refusal_and_its_editor_opens_one_at_a_time(rig):
+    """The summary and editor design's goal 9 with two pins: Runtime's editor shows one pinned
+    setting at a time, the line clicked; a draft left in one survives opening the other, its line
+    keeping ●; a refusal the rig says is on the pinned line as on its tab's (`!`); and a pin of a
+    setting no longer among the task's drops its line, its box and what Runtime had open.
+    In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Refused
+
+    page = _task6_page(rig)
+    _pin(page, "fix_hold")
+    _pin(page, "set_size")
+    page.click('label[for="t-runtime"]')
+    assert page.eval_on_selector_all("#pinned > .line", "(all) => all.map((l) => l.getAttribute('data-open'))") == [
+        "fix_hold", "set_size"], "in the order pinned"
+    page._page.click(_pin_line("fix_hold"))
+    page.fill(f'{_pinned("fix_hold")} input[data-param="fix_hold"]', "0.40")
+    page._page.click(_pin_line("set_size"))
+    assert page._page.is_visible(_pinned("set_size")) and page._page.is_hidden(_pinned("fix_hold"))
+    assert page.get_attribute(_pin_line("fix_hold"), "aria-pressed") == "false"
+    assert _marked(page, "fix_hold", "#pinned")[:2] == ("●", "0.30 → 0.40 s")
+    page.click("#drafts-discard")
+    _offer(rig, 41, params=_task6_rows(), refusals=(
+        Refused("set_size", Box("Jake Westerberg"), "'set_size' at 40 is above its 36", value=40.0),))
+    _arrived(page, 41)
+    rig.wait_for(lambda: _marked(page, "set_size", "#pinned")[0] == "!")
+    assert _marked(page, "set_size", "#pinned") == _marked(page, "set_size"), "as its tab's line"
+    _offer(rig, 42, params=tuple(row for row in _task6_rows() if row.name != "set_size"))
+    _arrived(page, 42)
+    rig.wait_for(lambda: page.locator("#pinned > .line").count() == 1)
+    assert page.locator("#pinned-editing > .box").count() == 1
+    assert page.is_visible("#pinned-editing > .placeholder"), "what Runtime had open is gone"
+    assert page.evaluate("window.localStorage.getItem('wlx.pinned-opened.tasks/"
+                         "fixation_detection.py')") is None, "and is no longer kept"
 
 
 def _pin(page, name: str) -> None:
@@ -5724,7 +5887,7 @@ def test_a_pin_with_its_store_blocked_lasts_the_page_and_nothing_breaks(rig):
     page.click("#drafts-discard")
     page.reload()
     page.wait_for_selector("#params .box", state="attached")
-    assert page.locator("#pinned .box").count() == 0 and not page.is_visible("#pinned-pane")
+    assert page.locator("#pinned-editing .box").count() == 0 and not page.is_visible("#pinned-pane")
     assert errors == [], errors
 
 
@@ -5770,6 +5933,10 @@ def test_the_demo_keys_fold_after_the_first_visit(rig):
 
 
 def _line(name: str, root: str = "#params") -> str:
+    """A setting's summary line on a settings tab, or (`root` "#pinned") its pinned line on
+    Runtime, which stands in a summary of its own (the build's Task 3)."""
+    if root == "#pinned":
+        return _pin_line(name)
     return f'{root} > .summary .line[data-open="{name}"]'
 
 
@@ -6058,10 +6225,166 @@ def test_find_with_no_match_opens_nothing(rig):
         assert page.is_visible("#pfind-none")
         assert page.text_content("#pfind-none") == "no setting matches"
         page.press("#pfind", "Enter")
-        assert _opened(page) == (["click a setting above to change it"] if opened is None else [opened])
+        # The opened setting stays opened, the editor saying find hides it (the ledger's ruling
+        # for the build's Task 3: `test_the_editor_says_when_find_hides_the_opened_setting`).
+        assert _opened(page) == (["click a setting above to change it"] if opened is None
+                                 else [web.FIND_HIDES_OPENED, opened])
     page.fill("#pfind", "")
     assert not page.is_visible("#pfind-none")
     assert rig.dispatch.seen == []
+
+
+def test_the_editor_says_when_find_hides_the_opened_setting(rig):
+    """The ledger's ruling for the summary and editor build's Task 3: where the find box hides the
+    setting opened in the editor, the editor says "the opened setting is hidden by find · clear
+    find to see it" in place of going blank (Task 2's concern 3) -- across a frame, and on the
+    Training tab as on Task parameters; a find that finds it, or none, takes the words away and
+    shows its box again, still opened. In a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
+    rows = _task6_rows() + _training_rows(2.0)
+    page = _task6_page(rig, params=rows)
+    note = "#params > .editing > .findhid"
+    assert page.is_hidden(note), "no find, no words"
+    _open(page, "fix_hold")
+    page.fill("#pfind", "set_size")
+    assert page.is_visible(note) and page.text_content(note) == web.FIND_HIDES_OPENED
+    assert page._page.is_hidden(_b("fix_hold")) and page.is_hidden("#params > .editing > .placeholder")
+    assert _opened(page) == [web.FIND_HIDES_OPENED, "fix_hold"]
+    _offer(rig, 41, params=rows)
+    _arrived(page, 41)
+    assert page.is_visible(note), "a frame keeps the words"
+    page.fill("#pfind", "fix")
+    assert page.is_hidden(note) and page._page.is_visible(_b("fix_hold"))
+    page.fill("#pfind", "set_size")
+    page.fill("#pfind", "")
+    assert page.is_hidden(note) and _opened(page) == ["fix_hold"]
+
+    page.click('label[for="t-training"]')
+    _open(page, "fade_in_step", "#training-params")
+    page.fill("#tfind", "gain")
+    assert page.is_visible("#training-params > .editing > .findhid")
+    assert page.is_hidden(note), "each tab's own find"
+
+
+def test_the_training_tab_is_a_summary_below_the_switch_and_ladder(rig, tmp_path):
+    """The summary and editor design's call on the Training tab: "the training switch and the stage
+    ladder stay where they are; the summary and the editor replace the boxes in its settings
+    panel, below them". On the pop-out's own Training settings (`_popout_own`): the switch and the
+    trainer's panel stand above the summary; each of the three rules is one line (the group's
+    title, its settings' values), none of their settings a line of its own, and each opens as its
+    sentence with its fields in place; its find works as Task parameters' does; its columns are as
+    wide as its own longest line (the ledger's ruling for the build's Task 3), no name cut. Through
+    the wire, in a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_own(tmp_path, **_TRAINING, shaping="on", full_task=True))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-training"]')
+    page.wait_for_selector("#training-params > .summary .line", state="visible")
+    top = page.evaluate("document.querySelector('#training-params > .summary').getBoundingClientRect().top")
+    for above in ("#shaping", "#rt-train"):
+        assert page.is_visible(above), above
+        bottom = page.evaluate(f"document.querySelector('{above}').getBoundingClientRect().bottom")
+        assert bottom <= top, (above, bottom, top)
+    assert page.locator("#shaping [data-cmd=shaping]").count() == 3, "the switch"
+
+    lines = dict(page.eval_on_selector_all("#training-params > .summary .line[data-open]", """all =>
+        all.map((line) => [line.getAttribute('data-open'), [line.querySelector('.ln').textContent,
+        line.querySelector('.lv').textContent, line.getBoundingClientRect().height]])"""))
+    sentences = {"Move up": "Move up when at least ", "Move back": "Move back when fewer than ",
+                 "Staircase": "One level harder after "}
+    for rule, starts in sentences.items():
+        label, value, height = lines[rule]
+        assert label == rule and 18 <= height <= 22, (rule, lines[rule])
+        assert " · " in value, (rule, value, "its settings' values")
+        page._page.click(_line(rule, "#training-params"))
+        assert _opened(page, "#training-params") == [rule]
+        said = page.text_content(f'{_b(rule, "#training-params")} .editor .sentence > .gs')
+        assert said == starts, (rule, said)
+    members = {"move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
+               "staircase_down", "staircase_up"}
+    assert not members & set(lines), "a rule's settings are its one line"
+
+    page.fill("#tfind", "staircase")
+    assert "Staircase" in _found(page, "#training-params")
+    page.fill("#tfind", "")
+    width = page.get_attribute("#training-params > .summary", "style")
+    assert width is not None and re.fullmatch(r"column-width: [0-9.]+ch", width), width
+    assert page.get_attribute("#params > .summary", "style") != width, "each tab its own"
+    cut = page.eval_on_selector_all("#training-params > .summary .line > .ln, "
+                                    "#training-params > .summary .line > .lv", """parts =>
+        parts.filter((part) => part.scrollWidth > part.clientWidth + 0.5).map((part) =>
+        part.textContent)""")
+    assert cut == [], cut
+
+
+def test_the_real_popout_summary_has_three_columns_or_more_at_1280(rig, tmp_path):
+    """The ledger's ruling for the summary and editor build's Task 3: "size the summary's columns
+    from the tab's own longest line ... so the real pop-out gets 3-4 columns at 1280 while a
+    40-character label still fits uncut" (`test_no_popout_name_is_cut_at_1280`, beside it). On the
+    wl-xtasks pop-out's own rows at their start values, at 1280 × 800 with the demo screen's
+    column shown: three columns or more on Task parameters and on Training, no name and no value
+    cut, every Task parameters line above the fold; and at 1024 and 1440 nothing cut. Through the
+    wire, in a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_own(tmp_path, demo=True))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params > .summary .line", state="visible")
+    assert page.is_visible("#demo-pane"), "the demo screen's column is shown"
+    columns = """(root) => new Set(Array.from(document.querySelectorAll(root + ' > .summary .line'))
+        .filter((line) => line.getClientRects().length).map((line) =>
+        Math.round(line.getBoundingClientRect().left))).size"""
+    cuts = """(root) => Array.from(document.querySelectorAll(root + ' > .summary .line > .ln, ' + root +
+        ' > .summary .line > .lv')).filter((part) => part.getClientRects().length &&
+        part.scrollWidth > part.clientWidth + 0.5).map((part) => part.textContent)"""
+    assert page.evaluate(columns, "#params") >= 3
+    below = page.eval_on_selector_all("#params > .summary .line", """lines => lines.filter(
+        (line) => line.getBoundingClientRect().bottom + window.scrollY > 800).map(
+        (line) => line.getAttribute('data-open'))""")
+    assert below == [], below
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        assert page.evaluate(cuts, "#params") == [], width
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-training"]')
+    page.wait_for_selector("#training-params > .summary .line", state="visible")
+    # Its eight lines are fewer than three columns' worth, so the engine balances them into what
+    # it needs (WebKit two): its columns' width leaves room for three.
+    room = page.evaluate("""() => { const summary = document.querySelector('#training-params > .summary');
+        const style = getComputedStyle(summary);
+        return [parseFloat(style.columnWidth), parseFloat(style.columnGap), summary.clientWidth]; }""")
+    assert 3 * room[0] + 2 * room[1] <= room[2], room
+    assert page.evaluate(columns, "#training-params") >= 2, "its one section breaks between its subsections"
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        assert page.evaluate(cuts, "#training-params") == [], width
+
+
+def test_a_frame_that_lengthens_a_name_widens_its_columns_in_place(rig):
+    """The ledger's ruling for the summary and editor build's Task 3, across frames: a frame whose
+    longest line is longer -- a plain name the rig now gives -- widens the summary's columns, the
+    summary and its lines patched in place (the nodes kept, a focused line keeping its focus), and
+    one that shortens it again narrows them. In a real browser: run with `WLX_BROWSER=webkit` too,
+    for Safari."""
+    page = _task6_page(rig)
+    narrow = page.get_attribute("#params > .summary", "style")
+    page.evaluate("document.querySelector('#params > .summary').wlxKept = 1")
+    page._page.focus(_line("set_size"))
+    long = _task6_rows(fix_hold={"label": "Fixation hold, before the array is shown"})
+    _offer(rig, 41, params=long)
+    _arrived(page, 41)
+    _until(page, "document.querySelector('#params > .summary').getAttribute('style') !== " + json.dumps(narrow))
+    wide = page.get_attribute("#params > .summary", "style")
+    assert float(wide.split()[-1][:-2]) > float(narrow.split()[-1][:-2]), (narrow, wide)
+    assert page.evaluate("document.querySelector('#params > .summary').wlxKept === 1"), "patched in place"
+    assert page.evaluate(f"document.activeElement === document.querySelector('{_line('set_size')}')")
+    _offer(rig, 42, params=_task6_rows())
+    _arrived(page, 42)
+    _until(page, "document.querySelector('#params > .summary').getAttribute('style') === " + json.dumps(narrow))
 
 
 def test_the_summary_steps_with_the_arrow_keys(rig):

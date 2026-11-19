@@ -300,7 +300,14 @@ FIND_SAID = "find a setting or section"
 #: "Find with no match / Enter on no match dims everything and opens nothing, saying 'no setting
 #: matches'").
 NO_MATCH = "no setting matches"
-PINNED_SAID = "boxes you pinned from the settings tabs; each works as there, one draft between them"
+PINNED_SAID = ("settings you pinned from the settings tabs; click one to change it here, one draft "
+               "between here and its tab")
+#: **What Runtime's editor says with no pinned setting opened** (the summary and editor build's
+#: Task 3: the design's goal 9, "a click opens the same editor on Runtime").
+PINNED_EMPTY = "click a pinned setting above to change it"
+#: **What the editor says where the find box hides the setting opened in it** (the ledger's
+#: ruling for the summary and editor build's Task 3), in place of a blank editor.
+FIND_HIDES_OPENED = "the opened setting is hidden by find · clear find to see it"
 DEMO_FOLD_SAID = "keys and demo limits"
 #: The trials the plain run is offered with: `wlx run --trials`'s default (`cli`), the flat run
 #: of N trials, one block (the b3a-2 plan, decision 6). A run of one of its task's plans has its
@@ -2956,6 +2963,7 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     return (_summary(frame, view, training)
             + f'<div class="legend">{_e(SUMMARY_LEGEND)}</div>'
             + f'<div class="editing"><div class="placeholder">{_e(EDITOR_EMPTY)}</div>'
+            + f'<div class="findhid" hidden>{_e(FIND_HIDES_OPENED)}</div>'
             + "".join(shown) + "</div>"
             + f'<div class="wdrs" hidden>{declined}</div>')
 
@@ -3209,6 +3217,7 @@ def _summary(frame, view: View, training: bool) -> str:
     peers = _percents(frame)
     entries = [entry for entry in _entries(frame) if _training(entry[0]) == training]
     lines = []
+    widths = [_line_width(NEW_COLOR_LINE, "")]
     for section, row, group, members in entries:
         if group is None:
             change = staged.get(row.name)
@@ -3218,8 +3227,10 @@ def _summary(frame, view: View, training: bool) -> str:
             words = _plain(_PER_TRIAL[row.source][0]) if drawn else ""
             number = (row.members is None and row.color is None and row.position is None
                       and not isinstance(row.value, str))
+            shown = _waits(row, change, now)
+            widths.append(_line_width(row.label or row.name, now))
             lines.append((section, 1 if row.changed else 0, _line(
-                row.name, row.label or row.name, row.name, now, _waits(row, change, now),
+                row.name, row.label or row.name, row.name, now, shown,
                 state, said, drawn, row.changed, row.bounded, words,
                 _line_unit(row) if number else None), 1))
             continue
@@ -3232,6 +3243,7 @@ def _summary(frame, view: View, training: bool) -> str:
         words = "; ".join(f"{member.label or member.name} {_plain(_PER_TRIAL[member.source][0])}"
                           for member in drawn)
         changed = sum(1 for member in members if member.changed)
+        widths.append(_line_width(group.name, now))
         lines.append((section, changed, _line(
             group.name, group.name, ", ".join(member.name for member in members), now, shown,
             state, said, bool(drawn), bool(changed), False, words), len(members)))
@@ -3243,7 +3255,39 @@ def _summary(frame, view: View, training: bool) -> str:
                        f'</span><span class="ln">{_e(NEW_COLOR_LINE)}</span><span class="lv">'
                        f"</span></button>" for section in colored}
     run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
-    return _sections(frame.task, lines, run, panels)
+    return _sections(frame.task, lines, run, panels, max(widths))
+
+
+#: **How wide a summary line's characters are, in the summary's `ch`** (the ledger's ruling for the
+#: summary and editor build's Task 3: "size the summary's columns from the tab's own longest
+#: line"), measured in WebKit and Chromium on 2026-11-19 (layout, not timing; the build's
+#: `task-3-report.md`): the summary's `ch` is 8.4 px (IBM Plex Sans at 14 px); a plain name is
+#: IBM Plex Sans at 12.5 px, its characters 0.24 to 0.93 em wide, taken here by the widest of four
+#: kinds -- narrow (0.38 em: "i", "l", "t", "f", "r", a space, most punctuation), wide (0.93 em:
+#: "m", "w", "M", "W", "%", "@", "→", "…"), any other capital (0.72 em), anything else (0.6 em) --
+#: so an estimate is never short (over the pop-out's own names it is 13 to 20 % long); a value is
+#: IBM Plex Mono at 12 px, 7.2 px a character, taken as 0.9 ch; and a line's padding, its marks'
+#: 2 em and its gaps take 40 px, taken as 5.5 ch with 6 px to spare.
+_NARROW = frozenset(" 'ijlftr/,.!:;|[](){}·²\\")
+_WIDE = frozenset("mwMW%@→…")
+_NAME_CH = 12.5 / 8.4
+_VALUE_CH = 0.9
+_LINE_CH = 5.5
+#: **The narrowest a summary's columns are** (an engineering default: four columns of a 1280 wide
+#: window beside the demo screen, the summary and editor design's goal 1), in `ch`.
+SUMMARY_FLOOR_CH = 24.0
+
+
+def _line_width(label: str, shown: str) -> float:
+    """**How wide a summary line must be for its plain name and its value to show whole**, in the
+    summary's `ch` (`_NAME_CH`, `_VALUE_CH`, `_LINE_CH`), as the summary's columns take it from
+    its longest line (`_summary`, `_sections`): the value in force, never what waits after an
+    arrow or a draft, so a change waiting or typed never moves the columns and the editor under
+    the pointer (the design's anti-goal); either may cut with an ellipsis, its whole in the
+    line's title."""
+    name = sum(0.38 if char in _NARROW else 0.93 if char in _WIDE else 0.72 if char.isupper()
+               else 0.6 for char in label)
+    return name * _NAME_CH + len(shown) * _VALUE_CH + _LINE_CH
 
 
 def _group_state(members: list, frame, staged: dict) -> tuple[str, str]:
@@ -3576,7 +3620,8 @@ def _count(settings: int, changed: int) -> str:
     return f"{settings} setting{'' if settings == 1 else 's'} · {changed} changed"
 
 
-def _sections(task: str, cards: list, run: str = "", panels: dict | None = None) -> str:
+def _sections(task: str, cards: list, run: str = "", panels: dict | None = None,
+              width: float | None = None) -> str:
     """**The summary's lines in their sections** (the console settings design's §7; the PI,
     2026-11-16: "The task file names it"; the summary and editor design's goal 1): each `(section,
     changed, html, settings)` under the section its row names (`ParamRow.section`; a row naming
@@ -3590,7 +3635,9 @@ def _sections(task: str, cards: list, run: str = "", panels: dict | None = None)
     not made. `panels` gives a section's *New color…* line, after its lines. `task` names the task
     (`data-task`: what the page keeps the opened setting and the pins under), and `run` the run in
     progress (`data-run`; "" between runs): the script drops every draft when it changes (the
-    console interface design's call: "drafts ... dropped at the run's end")."""
+    console interface design's call: "drafts ... dropped at the run's end"). `width`, in `ch`, is
+    its columns' (`_line_width` of its longest line, never under `SUMMARY_FLOOR_CH`; the ledger's
+    ruling for the build's Task 3), so a task of short names gets more columns than one of long."""
     panels = panels or {}
 
     def block(name: str, own: list, counted: list, inside: str = "") -> str:
@@ -3607,7 +3654,9 @@ def _sections(task: str, cards: list, run: str = "", panels: dict | None = None)
         subs = "".join(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
         every = node["own"] + [one for found in node["subs"].values() for one in found]
         parts.append(block(top, node["own"], every, subs))
-    return (f'<div class="summary" data-task="{_e(task)}" data-run="{_e(run)}">'
+    wide = "" if width is None else (
+        f' style="column-width: {math.ceil(max(width, SUMMARY_FLOOR_CH) * 10) / 10:g}ch"')
+    return (f'<div class="summary" data-task="{_e(task)}" data-run="{_e(run)}"{wide}>'
             f'{"".join(parts)}</div>')
 
 
@@ -4303,12 +4352,18 @@ body.session-shut .session { display: none !important; }
 .kv.wrap > .btn { flex-shrink: 1; max-width: 100%; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; }
-/* Columns as wide as a line of the longest plain name a task may declare (`task.LABEL_LIMIT`, 40
-   characters) with its marks and a value beside it, so no name is cut (the ledger's ruling for
-   the summary and editor build's Task 2): two at 1280 beside the demo screen, three at 1440. */
+/* Columns as wide as the tab's own longest line, its plain name and its value whole (`_line_width`;
+   the ledger's ruling for the summary and editor build's Task 3), set on the summary by Python;
+   330 px, a line of the longest plain name a task may declare (`task.LABEL_LIMIT`), where none is
+   (Task 2's ruling). Runtime's Pinned lines take their tabs' widest. */
 .summary { columns: auto 330px; column-gap: 20px; min-width: 0; }
 .ssec { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; margin: 0 0 6px; min-width: 0; }
 .ssec .ssec { margin: 3px 0 0; }
+/* A section holding subsections breaks between them across columns, so the Training tab, one
+   section of several, has columns too (the summary and editor build's Task 3); its header never
+   stands alone at a column's foot. */
+.ssec:has(> .ssec) { break-inside: auto; -webkit-column-break-inside: auto; page-break-inside: auto; }
+.ssec > h4 { break-after: avoid; -webkit-column-break-after: avoid; page-break-after: avoid; }
 .ssec > h4 { margin: 0 0 1px; height: 17px; line-height: 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ssec .ssec > h4 { text-transform: none; letter-spacing: 0; font-weight: 500; border-bottom: 0; }
 .ssec > h4 .ns, .tab .tns { color: var(--accent); font-weight: 600; }
@@ -4332,7 +4387,7 @@ body.session-shut .session { display: none !important; }
 .top > .nomatch { font-size: 12.5px; font-weight: 600; color: var(--crit); }
 .params > .legend { font-size: 11px; color: var(--muted); }
 .params > .editing { border-top: 2px solid var(--ink); padding-top: 8px; min-width: 0; }
-.params > .editing > .placeholder { color: var(--muted); font-size: 13px; padding: 4px 0; }
+.params > .editing > .placeholder, .params > .editing > .findhid { color: var(--muted); font-size: 13px; padding: 4px 0; }
 .cards { display: grid; gap: 5px; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); align-items: start; }
 .nofind { display: none !important; }
 .panel .top.tools { justify-content: flex-start; }
@@ -5327,6 +5382,7 @@ _SCRIPT = """
       name = null;
       shown = null;
     }
+    // The words find's hiding says are said after, by `sayFindHides`.
     Array.prototype.forEach.call(editor.children, function (child) {
       var hide = child.classList.contains("placeholder") ? shown !== null : child !== shown;
       if (child.hidden !== hide) { child.hidden = hide; }
@@ -5335,6 +5391,20 @@ _SCRIPT = """
       var on = one.getAttribute("data-open") === name ? "true" : "false";
       if (one.getAttribute("aria-pressed") !== on) { one.setAttribute("aria-pressed", on); }
     });
+    sayFindHides(root);
+  }
+  // **Where the find box hides the setting opened** (the ledger's ruling for the summary and
+  // editor build's Task 3), the editor says so -- "the opened setting is hidden by find · clear
+  // find to see it" -- in place of going blank; the box stays hidden, as find leaves it.
+  function sayFindHides(root) {
+    var editor = root.querySelector(":scope > .editing");
+    var note = editor ? editor.querySelector(":scope > .findhid") : null;
+    if (!note) { return; }
+    var shown = Array.prototype.filter.call(editor.children, function (child) {
+      return !child.hidden && child !== note && !child.classList.contains("placeholder");
+    })[0];
+    var hide = !(shown && shown.classList.contains("nofind"));
+    if (note.hidden !== hide) { note.hidden = hide; }
   }
   function openSetting(name) {
     var root = null;
@@ -5393,6 +5463,7 @@ _SCRIPT = """
     // Nothing found says so (the plan's Review Focus 4: "no setting matches").
     var none = el(root.id === "training-params" ? "tfind-none" : "pfind-none");
     if (none) { none.hidden = find === "" || found > 0; }
+    sayFindHides(root);
     return find;
   }
   function applyFind() {
@@ -6034,6 +6105,7 @@ _SCRIPT = """
       line.classList.toggle("unconfirmed", has("?"));
       line.classList.toggle("warned", has("⚠"));
     });
+    mirrorLine(name);
   }
   // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
   // in it (the controls review's §3, rule 2); a button focused is not one, Chromium focusing
@@ -6261,6 +6333,11 @@ _SCRIPT = """
       ["data-task", "data-run"].forEach(function (attr) {
         live.setAttribute(attr, secs.getAttribute(attr) || "");
       });
+      // Its columns' width, from its longest line (`web._line_width`).
+      if ((live.getAttribute("style") || "") !== (secs.getAttribute("style") || "")) {
+        if (secs.hasAttribute("style")) { live.setAttribute("style", secs.getAttribute("style")); }
+        else { live.removeAttribute("style"); }
+      }
       Array.prototype.forEach.call(live.querySelectorAll(".ssec"), function (section) {
         var other = secs.querySelector('.ssec[data-section="' + CSS.escape(section.getAttribute("data-section")) + '"]');
         var header = section.querySelector(":scope > h4");
@@ -6723,18 +6800,23 @@ _SCRIPT = """
     });
   }
   // **Pins** (the console interface design's goal 9; the PI, 2026-11-19: "Yes, you choose only"): a
-  // box's *pin to Runtime*, in its *more*, puts a working copy of it in Runtime's Pinned strip,
-  // kept per task in this browser's storage under `wlx.pins.<task>` -- the names pinned, in the
-  // order pinned -- every access inside `try`, so a store that throws keeps them for this page
-  // alone; nothing is pinned until a person pins it. **A copy is its original's mirror, never a
-  // second box** (the ledger's pin ruling: "one draft per setting, never two diverging copies"):
-  // it carries `data-pin` where its original carries `data-card`, outside the roots every box
-  // lookup reads (`CARDS`, `cardOf`), so a setting keeps one box, one draft and one act. What a
-  // person does in a copy -- typing, a tick, a segment, a swatch, −/+, Apply, Discard, Esc, Enter,
-  // *withdraw*, *hand back* -- is done to its original (`pinOf`, `twinOf`), and the copy is
-  // brought up to it node by node (`morph`), its own *more* left open or closed, so a press in it
-  // lands on a node no frame replaced.
+  // box's *pin to Runtime*, in its *more*, puts its setting's summary line in Runtime's Pinned
+  // strip (`#pinned`), kept per task in this browser's storage under `wlx.pins.<task>` -- the
+  // names pinned, in the order pinned -- every access inside `try`, so a store that throws keeps
+  // them for this page alone; nothing is pinned until a person pins it. **A click on a pinned line
+  // opens it in Runtime's own editor below** (`#pinned-editing`; the summary and editor design's
+  // goal 9: "a click opens the same editor on Runtime (one editor per tab, the setting's one draft
+  // shared)"), kept as a tab's is, under `wlx.pinned-opened.<task>`. A pinned line is its tab's
+  // line's mirror (`mirrorLine`: what the rig said and what the page adds, `markLine`), and the
+  // editor's box **its original's mirror, never a second box** (the ledger's pin ruling: "one
+  // draft per setting, never two diverging copies"): it carries `data-pin` where its original
+  // carries `data-card`, outside the roots every box lookup reads (`CARDS`, `cardOf`), so a
+  // setting keeps one box, one draft and one act. What a person does in a copy -- typing, a tick,
+  // a segment, a swatch, −/+, Apply, Discard, Esc, Enter, *withdraw*, *hand back* -- is done to its
+  // original (`pinOf`, `twinOf`), and the copy is brought up to it node by node (`morph`), its own
+  // *more* left open or closed, so a press in it lands on a node no frame replaced.
   var PINS_KEY = "wlx.pins.";
+  var PINNED_OPENED_KEY = "wlx.pinned-opened.";
   var pinsHeld = {};
   var TWINS = "input, select, textarea, button";
   function pinTask() {
@@ -6768,7 +6850,67 @@ _SCRIPT = """
     mirrorPins(true);
   }
   function pinOf(node) {
-    return node && node.closest ? node.closest("#pinned > .box[data-pin]") : null;
+    return node && node.closest ? node.closest("#pinned-editing > .box[data-pin]") : null;
+  }
+  function pinnedLine(name) {
+    var strip = el("pinned");
+    return strip ? strip.querySelector(':scope > .line[data-open="' + CSS.escape(name) + '"]') : null;
+  }
+  function pinnedCopy(name) {
+    var holder = el("pinned-editing");
+    return holder ? holder.querySelector(':scope > .box[data-pin="' + CSS.escape(name) + '"]') : null;
+  }
+  // **A pinned line brought up to its tab's line** in place, its node kept (`patchLine`'s rule):
+  // every attribute but whether it is opened, which is Runtime's (`applyPinnedOpened`), and its
+  // tab's find marks, which are its tab's; and each part's text.
+  function mirrorLine(name) {
+    var line = pinnedLine(name);
+    var from = line ? linesOf(name)[0] : null;
+    if (!from) { return; }
+    var own = function (attr) { return attr === "aria-pressed"; };
+    Array.prototype.slice.call(line.attributes).forEach(function (attr) {
+      if (!own(attr.name) && !from.hasAttribute(attr.name)) { line.removeAttribute(attr.name); }
+    });
+    Array.prototype.forEach.call(from.attributes, function (attr) {
+      if (own(attr.name)) { return; }
+      var value = attr.name !== "class" ? attr.value : attr.value.split(" ").filter(function (word) {
+        return word !== "nofind" && word !== "found";
+      }).join(" ");
+      if (line.getAttribute(attr.name) !== value) { line.setAttribute(attr.name, value); }
+    });
+    Array.prototype.forEach.call(from.children, function (part, at) {
+      var have = line.children[at];
+      if (!have) { line.appendChild(part.cloneNode(true)); return; }
+      if (have.textContent !== part.textContent) { have.textContent = part.textContent; }
+    });
+  }
+  // **The pinned setting opened in Runtime's editor** (`#pinned-editing`), as a tab's is
+  // (`applyOpened`): its copy shown, every other hidden, the placeholder said while none is; one
+  // no longer pinned dropped.
+  function applyPinnedOpened() {
+    var holder = el("pinned-editing");
+    if (!holder) { return; }
+    var key = PINNED_OPENED_KEY + pinTask();
+    var name = readOpened(key);
+    var shown = name === null ? null : pinnedCopy(name);
+    if (name !== null && (!shown || !pinnedLine(name))) {
+      writeOpened(key, null);
+      name = null;
+      shown = null;
+    }
+    Array.prototype.forEach.call(holder.children, function (child) {
+      var hide = child.classList.contains("placeholder") ? shown !== null : child !== shown;
+      if (child.hidden !== hide) { child.hidden = hide; }
+    });
+    Array.prototype.forEach.call(el("pinned").children, function (one) {
+      var on = one.getAttribute("data-open") === name ? "true" : "false";
+      if (one.getAttribute("aria-pressed") !== on) { one.setAttribute("aria-pressed", on); }
+    });
+  }
+  function openPinned(name) {
+    if (!pinnedCopy(name)) { return; }
+    writeOpened(PINNED_OPENED_KEY + pinTask(), name);
+    applyPinnedOpened();
   }
   // A copy's control's twin in its original: the same place among the box's controls, which the
   // copy shares with it node for node (`morph`).
@@ -6837,17 +6979,19 @@ _SCRIPT = """
   // `now`: the copy's own press has been done to its original, so its copy is brought up at once,
   // not at the press's end (it is the node pressed that the hold keeps; `morph` keeps it).
   function mirrorOne(name, now) {
-    var holder = el("pinned");
-    if (!holder || (pressing() && !now)) { return; }
-    var copy = holder.querySelector(':scope > .box[data-pin="' + CSS.escape(name) + '"]');
+    if (pressing() && !now) { return; }
+    var copy = pinnedCopy(name);
     var original = copy ? cardOf(name) : null;
     if (copy && original) { morph(original, copy, true); }
   }
   // `now`: a pin or an unpin, a deliberate press, shown at once.
   function mirrorPins(now) {
-    var holder = el("pinned");
-    if (!holder) { return; }
-    var names = readPins(pinTask()).filter(function (name) { return cardOf(name) !== null; });
+    var holder = el("pinned-editing");
+    var strip = el("pinned");
+    if (!holder || !strip) { return; }
+    var names = readPins(pinTask()).filter(function (name) {
+      return cardOf(name) !== null && linesOf(name).length > 0;
+    });
     Array.prototype.forEach.call(document.querySelectorAll(inCards("[data-pin-toggle]")), function (button) {
       var on = names.indexOf(button.getAttribute("data-pin-toggle")) !== -1;
       var said = on ? "unpin from Runtime" : "pin to Runtime";
@@ -6855,28 +6999,54 @@ _SCRIPT = """
       button.setAttribute("aria-pressed", on ? "true" : "false");
     });
     if (pressing() && !now) { return; }
-    Array.prototype.slice.call(holder.children).forEach(function (copy) {
+    Array.prototype.slice.call(holder.querySelectorAll(":scope > .box[data-pin]")).forEach(function (copy) {
       if (names.indexOf(copy.getAttribute("data-pin")) === -1) { copy.remove(); }
     });
+    Array.prototype.slice.call(strip.children).forEach(function (line) {
+      if (names.indexOf(line.getAttribute("data-open")) === -1) { line.remove(); }
+    });
+    var widest = 0;
     names.forEach(function (name, at) {
       var original = cardOf(name);
-      var copy = holder.querySelector(':scope > .box[data-pin="' + CSS.escape(name) + '"]');
+      var from = linesOf(name)[0];
+      var line = pinnedLine(name);
+      if (!line) {
+        line = from.cloneNode(true);
+        line.removeAttribute("aria-pressed");
+        line.classList.remove("nofind", "found");
+      }
+      mirrorLine(name);
+      if (strip.children[at] !== line) { strip.insertBefore(line, strip.children[at] || null); }
+      // As wide as the widest of the summaries its lines are from (`web._line_width`).
+      var width = parseFloat(from.closest(".summary").style.columnWidth) || 0;
+      if (width > widest) { widest = width; }
+      var copy = pinnedCopy(name);
       if (!copy) {
         copy = copyOf(original);
         copy.removeAttribute("data-card");
-        // Shown on Runtime whether or not its original is the one opened in the editor.
-        copy.removeAttribute("hidden");
+        // Shown only while opened on Runtime, whether or not its original is opened on its tab
+        // (`applyPinnedOpened`, below).
         copy.setAttribute("data-pin", name);
         copy.classList.remove("nofind");
         var more = copy.querySelector(":scope > details.more");
         if (more) { more.open = false; }
       } else { morph(original, copy, true); }
-      if (holder.children[at] !== copy) { holder.insertBefore(copy, holder.children[at] || null); }
+      // After the placeholder, in the order pinned.
+      if (holder.children[at + 1] !== copy) { holder.insertBefore(copy, holder.children[at + 1] || null); }
     });
+    var said = widest ? widest + "ch" : "";
+    if (strip.style.columnWidth !== said) { strip.style.columnWidth = said; }
+    applyPinnedOpened();
     el("pinned-pane").hidden = names.length === 0;
   }
   if (el("pinned")) {
     el("pinned").addEventListener("click", function (e) {
+      var line = e.target.closest("#pinned > .line[data-open]");
+      if (line) { openPinned(line.getAttribute("data-open")); }
+    });
+  }
+  if (el("pinned-editing")) {
+    el("pinned-editing").addEventListener("click", function (e) {
       var copy = pinOf(e.target);
       if (!copy) { return; }
       e.stopPropagation();
@@ -6896,7 +7066,7 @@ _SCRIPT = """
       mirrorPins();
     }, true);
     ["input", "change"].forEach(function (type) {
-      el("pinned").addEventListener(type, function (e) {
+      el("pinned-editing").addEventListener(type, function (e) {
         var copy = pinOf(e.target);
         if (!copy) { return; }
         e.stopPropagation();
@@ -6909,7 +7079,7 @@ _SCRIPT = """
         mirrorPins();
       }, true);
     });
-    el("pinned").addEventListener("keydown", function (e) {
+    el("pinned-editing").addEventListener("keydown", function (e) {
       var copy = pinOf(e.target);
       if (!copy || !e.target.matches("input")) { return; }
       var twin = twinOf(copy, e.target);
@@ -8069,7 +8239,7 @@ _SCRIPT = """
   // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).
   document.addEventListener("pointerdown", function (e) {
     if (e.button === 0 && e.target && e.target.closest &&
-        e.target.closest("#params, #training-params, #moments, #pinned")) {
+        e.target.closest("#params, #training-params, #moments, #pinned-params")) {
       pressedAt = performance.now();
       setTimeout(release, PRESS_MS + 50);
     }
@@ -8132,8 +8302,8 @@ _SCRIPT = """
       if (drafts[name] || waited) { discard(name, typed === field ? field : null); }
       else {
         typed.blur();
-        // A second Esc returns to the setting's summary line (a pinned copy's is on its tab).
-        leftFrom = typed === field ? name : null;
+        // A second Esc returns to the setting's summary line, a pinned copy's to its pinned line.
+        leftFrom = name;
       }
     }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
@@ -8182,7 +8352,8 @@ _SCRIPT = """
   }
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) { return; }
-    var line = e.target && e.target.closest ? e.target.closest(inCards(".summary .line[data-open]")) : null;
+    var line = e.target && e.target.closest ?
+      e.target.closest(inCards(".summary .line[data-open]") + ", #pinned > .line[data-open]") : null;
     if (line && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       var summary = line.closest(".summary");
@@ -8196,8 +8367,9 @@ _SCRIPT = """
     if (line && e.key === "Enter") {
       e.preventDefault();
       var name = line.getAttribute("data-open");
-      openSetting(name);
-      var into = firstField(line.closest(CARDS.join(", ")));
+      var pinned = line.parentNode === el("pinned");
+      if (pinned) { openPinned(name); } else { openSetting(name); }
+      var into = firstField(pinned ? el("pinned-params") : line.closest(CARDS.join(", ")));
       if (into) { into.focus(); }
       return;
     }
@@ -8205,7 +8377,9 @@ _SCRIPT = """
     // just left it (`fieldKeys`) and comes here too.
     if (e.key === "Escape" && leftFrom !== null &&
         (e.target === document.body || e.target === document.documentElement)) {
-      var back = linesOf(leftFrom)[0];
+      // Its line on the tab shown: Runtime's pinned line, or its own tab's.
+      var back = [pinnedLine(leftFrom)].concat(Array.prototype.slice.call(linesOf(leftFrom))).filter(
+        function (one) { return one && one.getClientRects().length; })[0];
       leftFrom = null;
       if (back && back.getClientRects().length) { e.preventDefault(); back.focus(); }
     }
@@ -8500,7 +8674,7 @@ def page(
       </div>
       <div class="panels">
         <div class="tabpanel" id="tp-runtime">
-          <section class="panel glass pins" id="pinned-pane" aria-label="pinned settings" hidden><div class="top"><h2>Pinned</h2><span class="sub">{_e(PINNED_SAID)}</span></div><div class="cards" id="pinned"></div></section>
+          <section class="panel glass pins" id="pinned-pane" aria-label="pinned settings" hidden><div class="top"><h2>Pinned</h2><span class="sub">{_e(PINNED_SAID)}</span></div><div class="params" id="pinned-params"><div class="summary" id="pinned"></div><div class="editing" id="pinned-editing"><div class="placeholder">{_e(PINNED_EMPTY)}</div></div></div></section>
           <section class="panel glass"><div class="top"><h2>Trials</h2></div><div id="rt-trials">{p['rt-trials']}</div></section>
           <section class="panel glass"><div class="top"><h2>This run</h2></div><div id="rt-work">{p['rt-work']}</div></section>
           <div class="panel glass" id="rt-shaping">{p['rt-shaping']}</div>

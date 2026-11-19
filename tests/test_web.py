@@ -5564,3 +5564,64 @@ def test_a_line_says_short_units_and_carries_what_the_page_reads():
         r'class="line[^"]*" data-open="([^"]*)" data-said="([^"]*)"', params)}
     assert told == {"fix_window": "waiting for the next trial · jake (box, unverified)",
                     "fix_luminance": "in force from trial 12"}, told
+
+
+def test_a_summary_is_as_wide_as_its_own_longest_line():
+    """The ledger's ruling for the summary and editor build's Task 3: "size the summary's columns
+    from the tab's own longest line (Python sets a width in `ch` from the longest label and value
+    it renders, with a floor)". A tab of short names takes the floor (`SUMMARY_FLOOR_CH`); a long
+    plain name widens its own tab's columns, not the other tab's; the longest plain name a task may
+    declare, with its draw, is given at least the 332 px (39.5 ch of 8.4 px) Task 2 measured it
+    needs (layout, not timing); a capital or a wide letter is taken as wider than a narrow one; and
+    a change waiting, which the line says after an arrow, moves no column (the design's anti-goal:
+    "the page jumping under the pointer")."""
+    from wl_xcon.task import LABEL_LIMIT
+
+    import math
+
+    def width(html_text: str) -> float:
+        found = re.search(r'<div class="summary" [^>]*style="column-width: ([0-9.]+)ch"', html_text)
+        assert found, html_text[:200]
+        return float(found.group(1))
+
+    short = (ParamRow.of("hold", "s", 0.0, 2.0, 0.3, False, source="task", section="Timing"),
+             ParamRow.of("step", "", 0.0, 1.0, 0.1, False, source="task", section="Training"))
+    parts = fragments(frame(params=short), view())
+    assert width(parts["params"]) == web.SUMMARY_FLOOR_CH
+    assert width(parts["training-params"]) == web.SUMMARY_FLOOR_CH
+    long_name = "Fixation hold, before the array is shown"[:LABEL_LIMIT]
+    long = (replace(short[0], label=long_name),) + short[1:]
+    parts = fragments(frame(params=long), view())
+    assert width(parts["params"]) == math.ceil(web._line_width(long_name, "0.30 s") * 10) / 10
+    assert width(parts["training-params"]) == web.SUMMARY_FLOOR_CH, "each tab its own"
+    assert web._line_width(long_name, "0.5–1.25 s") >= 332 / 8.4
+    assert (web._line_width("mmmm", "") > web._line_width("AAAA", "") > web._line_width("aaaa", "")
+            > web._line_width("iiii", "")), "wide, a capital, any other, narrow"
+    waiting = fragments(frame(params=long, staged=(
+        Staged("hold", 0.3, 0.45, Box("jake"), False, cid="w-1"),)), view())["params"]
+    assert "0.30 → 0.45 s" in waiting
+    assert width(waiting) == width(parts["params"]), "a change waiting moves no column"
+
+
+def test_the_editor_has_words_for_a_setting_find_hides_and_runtime_has_its_own_editor():
+    """The ledger's rulings for the summary and editor build's Task 3: each settings tab's editor
+    holds, hidden, the words it says where the find box hides the setting opened
+    (`FIND_HIDES_OPENED`), after its placeholder; and Runtime's Pinned strip is a summary of lines
+    (`#pinned`, empty until a person pins one; the page's script fills it) above an editor of its
+    own (`#pinned-editing`), which says `PINNED_EMPTY` while no pinned setting is opened (the
+    design's goal 9)."""
+    parts = fragments(frame(), view())
+    for key in ("params", "training-params"):
+        if 'class="editing"' not in parts[key]:
+            continue
+        editor = parts[key].partition('<div class="editing">')[2]
+        assert editor.startswith(f'<div class="placeholder">{web.EDITOR_EMPTY}</div>'
+                                 f'<div class="findhid" hidden>{html.escape(web.FIND_HIDES_OPENED)}</div>'), key
+    assert web.FIND_HIDES_OPENED == "the opened setting is hidden by find · clear find to see it"
+    document = page(parts, stale_after_s=30.0, nonce="n0nce", can_write=True)
+    pane = document[document.index('<section class="panel glass pins" id="pinned-pane"'):]
+    pane = pane[:pane.index("</section>")]
+    assert ('<div class="params" id="pinned-params"><div class="summary" id="pinned"></div>'
+            f'<div class="editing" id="pinned-editing"><div class="placeholder">{web.PINNED_EMPTY}'
+            '</div></div></div>') in pane
+    assert '<div class="cards" id="pinned">' not in document, "the strip holds lines, not boxes"
