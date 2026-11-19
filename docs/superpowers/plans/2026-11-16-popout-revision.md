@@ -73,6 +73,49 @@
 - **Added to them here, as the console plan's Task 6 adds `scaled-small`:** `check.LAYOUT` gains `"specials-over-100"`, a sum and no layout, since it is the set judged at the values (Task 4); `check.impossible` gains `specials=` beside the console plan's `forms=` (Task 4).
 - **Not planned here, said in this plan's report:** the console plan's desaturation check reads a set at each luminance a light names, not at the light's saturation, so a fixation point at saturation 0 (the set's gray) at 40 cd/m² would be warned `color-set-desaturated`. Task 7's load test expects no new warning, and so needs that check to read each light at its own saturation, in the console plan's Task 7.
 
+## Amendments, 2026-11-19: built on `console-build-2026-11-17`, before it merges
+
+The PI, 2026-11-19, after choosing the settings tabs' summary-and-editor layout: "also build out the rest of the task
+parameters before you ask me for more input". So this plan is built on branch `console-build-2026-11-17` after the
+console interface rework (`docs/superpowers/plans/2026-11-19-console-interface.md`) and the summary-and-editor
+layout (`docs/superpowers/plans/2026-11-19-params-summary-editor.md`), before the branch merges; the PI is asked
+nothing until it is built and reviewed (a question goes to `.superpowers/questions-for-pi.md`; a welfare-listed
+change still stops for him). Where this plan and the code have moved apart, these amendments rule:
+
+1. **Base and branches.** wl-xcon: this branch at the layout build's head. wl-xtasks: `popout-revision-2026-11-16`
+   from `console-settings-2026-11-16` at `c30ca28` (the PI's label review built in), committed only there.
+2. **Telemetry is at schema 23** (the rework), not 22. This plan adds no telemetry field; a task that finds it needs
+   one stops and reports it.
+3. **The backlog's numbers**: take "Next free" from `docs/backlog.md` as it stands (XC-543 at this writing), not 516.
+   XC-514 is this plan's existing line if present; otherwise Task 1 files the ask's line from Next free. Task 1 first
+   checks codes 4139-4145 are still unallocated in `tasks/allocation.py` and in wl-preproc's frozen layer; if any is
+   taken, it takes the next free run and says so in the ask.
+4. **Special trials are one group** (the console interface design's goal 8; the PI, 2026-11-19, "One box after
+   Timing"; closes XC-534): Task 7 declares `task.Group("Special trials", (the four shares, catch_hold), sentence)`,
+   its section `Special trials` placed right after Timing in the declared order, each share `whole=True` (unit
+   `"percent"`, 0 to 100, starts 0). Its sentence reads, with the fields in place: "Of every 100 trials:
+   {target_absent_percent} target absent, {odd_place_empty_percent} odd place empty, {distractor_alone_percent} a
+   distractor alone, {odd_one_alone_percent} the odd one alone; a catch is held {catch_hold}". **The remainder** is
+   said after the sentence as "N normal search" (the design's goal 8): rendered in Python from the values in force
+   (100 minus the shares' sum, "none" at or past 100 with the `specials-over-100` warning's words), and updated by
+   the page from the group's own fields while a draft is open (a small change in `web._group_box` and the script,
+   Task 7's wl-xcon side, with its test `test_the_special_trials_line_says_the_rest_are_normal_search`).
+5. **Every new setting has a plain name (at most 40 characters) and a one-sentence help (at most 120)**, in the voice
+   the PI approved for the pop-out's first 30 (`.superpowers/sdd/2026-11-19-console-interface/task-9-report.md`'s
+   table); counts and shares `whole=True`; the fixation point's luminances and the graces in their own units.
+   Task 7's report tables them for the PI's review of the wl-xtasks branch.
+6. **The summary must still fit**: the layout build's `test_every_popout_line_is_above_the_fold_at_1280x800` keeps
+   passing with the revision's settings (about 45 lines). If it cannot, Task 7 stops and reports the count and the
+   space; the controller rules (fold the fixation point's two looks into one group line each, or move the bounds
+   into a subsection shown as one line).
+7. **The seam note is done**: the desaturation check reads each light at its own saturation since the console
+   settings build's fix wave (`f8a4071`, Task 7's seam defect 1); saturation is CAM16-UCS chroma (the PI,
+   2026-11-18, COL-39), and saturation 0 is still the set's apex at that lightness, so
+   `test_the_fixation_point_at_saturation_0_is_todays_gray` stands. Each fixation point entry carries `light_xy`
+   (XC-513, accepted).
+8. **The PI's review of the wl-xtasks branch** (labels, sentences, the meanings) is asked with the rest, after the
+   whole-build review, not before.
+
 ---
 
 ### Task 1: Tell wl-preproc the new record shapes and allocate the codes, before any is written (§7)
