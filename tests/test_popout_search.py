@@ -1952,7 +1952,8 @@ def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
     """The design's goal 8 (the PI, 2026-11-19, "One box after Timing"): **the bars and the
     staircases read as three rules, each one box with one Apply** -- *Move up*, *Move back* and
     *Staircase* (`GROUPS`), their settings sharing a section, none a reward size (the load's
-    `bad-group`); **the two bars are percents**, and no other setting is; at the starts the rules
+    `bad-group`); **the two bars are percents**, with the distractors' brightness and Fade-in's
+    step and floor (the PI, 2026-11-19), and no other setting is; at the starts the rules
     read "Move up when at least 80% of the last 50 answers at the hardest step are right". **The
     path to the page**: a session on the task sends each group and each setting's plain name, help,
     wholeness and percent, and the Training tab draws each rule as one box whose sentence holds its
@@ -1964,8 +1965,10 @@ def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
     from wl_xcon.link import GroupRow, ParamRow
 
     assert [(group.name, group.settings, group.sentence) for group in task.groups] == list(GROUPS)
-    assert {param.name for param in task.params if param.percent} == {"move_up_bar",
-                                                                      "move_back_bar"}
+    # The PI, 2026-11-19 (asked in the UI): the distractors' brightness and Fade-in's step and
+    # floor, fractions of full, read as percents too.
+    assert {param.name for param in task.params if param.percent} == {
+        "move_up_bar", "move_back_bar", "distractor_fraction", "fade_in_step", "fade_in_floor"}
     assert "bad-group" not in {f.code for f in check_task(
         task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=measured(),
         deployment=Deployment.RIG_FIXED, source=TASK_FILE)}
