@@ -247,8 +247,8 @@ def test_the_trial_line_marks_the_setting_drawn_by_the_staircase(tmp_path):
     running = [frame for frame in session.link.published if frame.phase == "running"]
     assert running and all(row.source == "staircase" for frame in running
                            for row in frame.params if row.name == "set_size")
-    card = fragments(running[-1], view())["params"].split('<div class="param')
-    (size,) = [part for part in card if "<span>set_size</span>" in part]
+    card = fragments(running[-1], view())["params"].split('<div class="box')
+    (size,) = [part for part in card if 'data-card="set_size"' in part]
     assert '<span class="pv">set each trial by its staircase</span>' in size
     assert 'placeholder="a value over its staircase"' in size
 

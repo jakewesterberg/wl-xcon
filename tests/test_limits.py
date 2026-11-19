@@ -572,9 +572,10 @@ def test_the_card_says_each_limits_reason(tmp_path):
         "1.00 to 12.00 objects · fewer than 1 cannot be: one is needed; a stand-in for the "
         "array&#x27;s places, which a set size must declare")
     assert _range(rows["fix_hold"]) == "0.00 to open s · below 0 cannot be"
+    # At its step's decimals (`ParamRow.step`: cd/m2 steps by 1, `task.UNIT_STEPS`; the console
+    # interface rework's Task 5), a step of 0.01 two.
     assert _range(rows["fix_luminance"]) == (
-        "0.00 to 80.00 cd/m2 · white on the default calibration, the sRGB standard&#x27;s "
-        "(COL-29)")
+        "0 to 80 cd/m2 · white on the default calibration, the sRGB standard&#x27;s (COL-29)")
     assert rows["target_appearance"].why is None
     assert _range(ParamRow("free", "deg", None, None, 1.0, False)) == "no limit"
     assert _range(ParamRow("capped", "deg", 0.0, 10.0, 1.0, False,

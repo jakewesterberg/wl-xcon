@@ -61,14 +61,20 @@ def _row(name, section, changed=False, unit="s"):
     return ParamRow.of(name, unit, 0.0, 10.0, 1.0, False, section=section, changed=changed)
 
 
+def _sections_only(html: str) -> str:
+    """The pane with each box's own `<details>` -- its *more*, a color's New color -- taken out,
+    so only the sections' are left (the console interface rework's Task 5)."""
+    return re.sub(r'<details class="(?:more|newc)".*?</details>', "", html, flags=re.S)
+
+
 def _groups(html: str) -> list[tuple[str, list]]:
-    """Each `<details>` header and the names of the cards directly under it, in page order: the
-    text from its summary to the next `<details>` or `</details>`."""
+    """Each section's `<details>` header and the names of the boxes directly under it, in page
+    order: the text from its summary to the next `<details>` or `</details>`."""
     found = []
-    for piece in re.split(r"(?=<details)", html)[1:]:
+    for piece in re.split(r"(?=<details)", _sections_only(html))[1:]:
         summary = re.search(r"<summary>(.*?)</summary>", piece).group(1)
         body = re.split(r"<details|</details>", piece.split("</summary>", 1)[1])[0]
-        found.append((summary, re.findall(r'<div class="pn"><span>(.*?)</span>', body)))
+        found.append((summary, re.findall(r'<div class="box[^"]*" data-card="(.*?)"', body)))
     return found
 
 
@@ -102,7 +108,8 @@ def test_cards_are_grouped_in_declared_order_each_header_counting():
     assert stimuli.index('data-sec="Stimuli/fixation point"') < stimuli.index(
         'data-sec="Stimuli/array"')
     assert f'data-task="{frame().task}"' in html
-    assert html.count("<details") == html.count("</details>") == 6
+    sections = _sections_only(html)
+    assert sections.count("<details") == sections.count("</details>") == 6
 
 
 def test_a_changed_setting_counts_in_its_sections_header():

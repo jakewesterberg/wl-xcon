@@ -44,8 +44,10 @@ from __future__ import annotations
 import html
 import dataclasses
 import math
+import re
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from importlib import resources
 from pathlib import PurePath
 
@@ -1334,7 +1336,7 @@ def _plan_row(frame: Telemetry, view: View) -> str:
     nothing = ("" if frame.next_block is not None
                else ' disabled title="this block is the last its plan gives"')
     return (
-        f'<div class="kv"><span class="nm">{_e(" · ".join(said))}</span>'
+        f'<div class="kv wrap"><span class="nm">{_e(" · ".join(said))}</span>'
         f'<button type="button" class="btn" data-cmd="next_block"{_gate(view, nothing)}>'
         f"next block</button>"
         f'<button type="button" class="btn" data-cmd="back_block"{_gate(view)}>back one</button>'
@@ -1425,7 +1427,10 @@ def _need(frame: Telemetry | None, view: View) -> str:
             for scope, label in DRUM_SWITCHES
             if scope != (frame.drumming or "off")
         )
-        rows.append(f'<div class="kv"><span class="nm">{now}</span>{switches}</div>')
+        # A row of a sentence and its buttons wraps, the buttons going under the sentence where
+        # both do not fit (`.kv.wrap`; the workflow review's F12: a button that would not shrink
+        # squeezed "this block has no percentage rule..." to one letter a line).
+        rows.append(f'<div class="kv wrap"><span class="nm">{now}</span>{switches}</div>')
         if frame.clearing:
             # The controller's ruling M4: on where nothing in the run can be cleared, it says so.
             said = ("clear is on" if frame.clearable
@@ -1449,7 +1454,7 @@ def _need(frame: Telemetry | None, view: View) -> str:
                       *judged[1:])
         for setting, (said, on, label) in (("clear", clear), ("first_answers", judged)):
             rows.append(
-                f'<div class="kv"><span class="nm">{said}</span><button type="button" class="btn" '
+                f'<div class="kv wrap"><span class="nm">{said}</span><button type="button" class="btn" '
                 f'data-cmd="training" data-setting="{setting}" data-on="{on}"{_gate(view)}>'
                 f"{label}</button></div>"
             )
@@ -1754,7 +1759,7 @@ _STAGED_KINDS = {"hand_back": "hand back", "range": "range", "revert": "revert",
                  "form": "drawn"}
 
 
-def _becomes(change) -> str:
+def _becomes(change, row=None) -> str:
     """**What a staged change leaves its setting with**, in words (the C3 plan's calls 23 and 30;
     its review, M-15). A hand-back's is where the rig says it goes (`Staged.to`, as it is offered,
     read from the open block as the hand-back is): its conditions, its draw, or the run -- the
@@ -1762,15 +1767,17 @@ def _becomes(change) -> str:
     line says -- never "unset", which it is not. A revert's change that hands a setting back
     (`Staged.hands_back`, whatever its `now`) says so the same way, "handed back to ...". Any other
     change's is its new value, a range's its new draw in the rig's words, as `_num` shows a
-    value. Escaped (`_e`), ready for the page."""
+    value. Escaped (`_e`), ready for the page. Given its setting's `row`, a number is shown as its
+    box shows it (`_figure`: a whole setting's with no decimals); the feed's, without, as `_num`."""
+    shown = _num if row is None else (lambda value: _figure(row, value))
     if change.hands_back:
         back = ("its draw" if change.to == "draw"
-                else "the run's " + _e(_num(change.now)) if change.to == "run" and
+                else "the run's " + _e(shown(change.now)) if change.to == "run" and
                 change.now is not None
                 else "the run, which gives it no value" if change.to == "run"
                 else "its conditions")
         return back if change.kind == "hand_back" else "handed back to " + back
-    return _e(_num(change.now))
+    return _e(shown(change.now))
 
 
 def _will_override(named: tuple) -> str:
@@ -1876,11 +1883,15 @@ def _significant(value: float) -> str:
 
 
 def _range(row) -> str:
+    """**A box's limits and why each stands, whole** (`ParamRow.why`), as its *more* says them:
+    each end at the box's own decimals (`_figure`), a whole setting's with none (the design's goal
+    6: "1 to 36 objects")."""
     if row.bounded:
         return f"welfare ceiling {_e(_significant(row.high))} {_e(row.unit)}"
     if row.low is None and row.high is None:
         return "no limit"
-    said = f"{_e(_edge(row.low))} to {_e(_edge(row.high))} {_e(row.unit)}"
+    ends = ("open" if end is None else _figure(row, end) for end in (row.low, row.high))
+    said = f"{_e(next(ends))} to {_e(next(ends))} {_e(row.unit)}"
     # **Why each limit stands, in one line** (`ParamRow.why`; the console settings design's §4:
     # "each card says why for any limit that stays"). The standard "below 0 cannot be" is left
     # unsaid beside another reason, which it goes without saying beside (the builder's call): a
@@ -1893,45 +1904,79 @@ def _range(row) -> str:
     return f"{said} · {_e('; '.join(reasons))}" if reasons else said
 
 
-#: The arrows' step by unit: the mockup's `stepOf` (`docs/superpowers/mockups/
-#: 2026-09-26-console-mockup-v12.html`), in this repository's unit names -- the tasks
-#: say `deg` where the mockup said `°`. A display choice, not a rule about values:
-#: `Session.set` checks the range whatever step reached it.
-_STEPS = {"mL": 0.01, "s": 0.05, "deg": 0.1}
-
-
 def _step(row) -> float:
-    return _STEPS.get(row.unit, 0.01)
+    """**How far one press of a box's − or + moves it** (`ParamRow.step`, the rig's `task.step_of`:
+    a declared step, else 1 for a whole setting, else its unit's, else 0.01; the console interface
+    design's call on steps): 1 for a whole setting whatever a hand-made row says. A display
+    choice, not a rule about values: `Session.set` and `_impossible` judge whatever reached them."""
+    return 1.0 if row.whole else row.step
+
+
+def _places(step: float) -> int:
+    """The decimals a step shows: 0.05 two, 0.1 one, 1 and 10 none."""
+    exponent = Decimal(repr(float(step))).normalize().as_tuple().exponent
+    return max(0, -exponent) if isinstance(exponent, int) else 0
+
+
+#: The most decimals a box shows of a value's own (`_figure`): a value's digits past its step's are
+#: shown, never rounded away, up to these.
+_OWN_PLACES = 6
+
+
+def _figure(row, value: object) -> str:
+    """**A number as its box shows it** (the console interface design's goal 6, the PI: "for
+    necessary whole numbers (set size), there should not be a decimal option"): a whole setting's
+    with no decimals, `4`, never `4.00` (its step is 1, `_step`); any other's at its step's
+    decimals (`_places`), or more where the value holds more -- 0.35 on a 0.1 step reads 0.35,
+    never 0.3 -- up to `_OWN_PLACES`, so a box never shows a value it does not hold. `unset` for `None`; a word as
+    written. Formatting, not derivation."""
+    if value is None:
+        return "unset"
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return str(value)
+    number = float(value)
+    if not math.isfinite(number):
+        return str(value)
+    own = f"{number:.{_OWN_PLACES}f}".rstrip("0").partition(".")[2]
+    return f"{number:.{max(_places(_step(row)), len(own))}f}"
+
+
+def _unit(said: str) -> str:
+    """A field's unit beside it (the design's call: "the unit beside every field, the drawn side's
+    fields included"); nothing where there is none."""
+    return f'<span class="unit">{_e(said)}</span>' if said else ""
 
 
 def _field(row, view: View) -> str:
-    """A card's input and arrows (spec §5.2). A number is shown at its step's
-    decimals and carries the step and the declared range for the script's arrows,
-    which clamp to it; a categorical value is a word, with no arrows. Greyed away
-    from the box."""
+    """**A box's field** (the console interface design's goal 1): − , the value, +, and its unit
+    beside it. A number is shown as `_figure` shows it and carries the step and the declared range
+    for the script's − and +, which clamp to it; a whole setting's field steps by 1 and asks for
+    the numeric keyboard (goal 6). A categorical value is a word, with neither. Greyed away from
+    the box."""
     off = _gate(view)
     name = _e(row.name)
     if isinstance(row.value, str):
         return (
-            f'<span class="spin"><input class="field mono" data-param="{name}" '
-            f'data-kind="word" value="{_e(row.value)}" aria-label="{name}"{off}></span>'
+            f'<span class="fu"><span class="spin"><input class="field mono" data-param="{name}" '
+            f'data-kind="word" value="{_e(row.value)}" aria-label="{name}"{off}></span></span>'
         )
     step = _step(row)
-    places = len(f"{step:g}".partition(".")[2])
-    value = "" if row.value is None else f"{row.value:.{places}f}"
+    value = "" if row.value is None else _figure(row, row.value)
     edges = "".join(
         f' data-{end}="{_e(edge)}"'
         for end, edge in (("min", row.low), ("max", row.high))
         if edge is not None
     )
+    keys = "numeric" if row.whole else "decimal"
     return (
-        f'<span class="spin"><input class="field mono" data-param="{name}" '
-        f'data-step="{step:g}"{edges} inputmode="decimal" value="{value}" '
+        f'<span class="fu"><span class="spin">'
+        f'<button type="button" class="stp" data-dir="-1" tabindex="-1" '
+        f'aria-label="decrease {name}"{off}>−</button>'
+        f'<input class="field mono" data-param="{name}" '
+        f'data-step="{step:g}"{edges} inputmode="{keys}" value="{_e(value)}" '
         f'aria-label="{name}"{off}>'
-        f'<span class="arrows"><button type="button" data-dir="1" tabindex="-1" '
-        f'aria-label="increase {name}"{off}>▲</button>'
-        f'<button type="button" data-dir="-1" tabindex="-1" '
-        f'aria-label="decrease {name}"{off}>▼</button></span></span>'
+        f'<button type="button" class="stp" data-dir="1" tabindex="-1" '
+        f'aria-label="increase {name}"{off}>+</button></span>{_unit(row.unit)}</span>'
     )
 
 
@@ -2022,6 +2067,15 @@ def _switch(row, view: View, drawn: bool, other: str = "drawn") -> str:
             f'{side("fixed", not drawn)}{side(other, drawn)}</div>')
 
 
+#: **What a size's factor multiplies**, beside its field as its unit (the design's call: "the unit
+#: beside every field").
+SCALED_UNIT = "× each object's eccentricity"
+
+#: **What a weighted list's weights are counted in**, beside their field: each weight against the
+#: others, not in the setting's unit (`variation`'s weighted list).
+WEIGHTS_UNIT = "relative"
+
+
 def _scaled_side(row, view: View) -> str:
     """**A size card's scaled side** (the console settings design's §5; the PI, 2026-11-16, "Size =
     factor x eccentricity"): its factor, filled from the scaling in force (`ParamRow.shape`), and
@@ -2033,8 +2087,8 @@ def _scaled_side(row, view: View) -> str:
     factor = (shape.get("numbers") or {}).get("factor") if shape.get("shape") == "scaled" else None
     return (f'<div class="shp rng" data-fields="scaled"><label class="rn">factor'
             f'<input class="field mono" data-form="factor" inputmode="decimal" '
-            f'value="{_e(_typed(factor))}" aria-label="{name}: factor"{off}></label>'
-            f'<span class="rn">× each object&#x27;s eccentricity</span></div>'
+            f'value="{_e(_typed(factor))}" aria-label="{name}: factor"{off}>'
+            f"{_unit(SCALED_UNIT)}</label></div>"
             f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
             f"apply</button>")
 
@@ -2045,8 +2099,9 @@ def _drawn_side(row, view: View) -> str:
     max; a list of values: shuffled passes, or a weight each"): the shape select, the shape in
     force selected (`ParamRow.shape`, a person's or the block's) or non-aging, and each shape's
     fields, only the selected shape's shown, each filled from the shape in force where it is that
-    shape; then *apply*, which sends `form` (`link.SetForm`), staged until the next trial.
-    Greyed away from the box."""
+    shape, each with its unit beside it (a weighted list's weights `WEIGHTS_UNIT`); then *apply*,
+    which sends `form` (`link.SetForm`), staged until the next trial. Its profile is in the box's
+    *more* (`_profile`). Greyed away from the box."""
     off, name = _gate(view), _e(row.name)
     shape = row.shape or {}
     chosen = shape.get("shape", "non_aging")
@@ -2062,14 +2117,15 @@ def _drawn_side(row, view: View) -> str:
         cells = "".join(
             f'<label class="rn">{field}<input class="field mono" data-form="{field}" '
             f'inputmode="decimal" value="{_e(typed[field])}" '
-            f'aria-label="{name}: {field}"{off}></label>'
+            f'aria-label="{name}: {field}"{off}>'
+            f'{_unit(WEIGHTS_UNIT if field == "weights" else row.unit)}</label>'
             for field in fields)
         groups.append(f'<div class="shp rng" data-fields="{key}"'
                       f'{"" if key == chosen else " hidden"}>{cells}</div>')
     return (f'<select class="field" data-shape="{name}" aria-label="{name}: shape"{off}>'
             f"{options}</select>{''.join(groups)}"
             f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
-            f"apply</button>{_profile(row)}")
+            f"apply</button>")
 
 
 #: **The profile's drawing, in the SVG's own units** (`_profile`): its width, each panel's left,
@@ -2236,8 +2292,9 @@ def _color_card(row, frame, view: View) -> str:
     offers, the run's value's pressed; pressing one sends `color`, `link.SetColor`, staged until
     the next trial), and **two levels** (`_color_level`): its saturation, gray to full, its luminance
     held, and its luminance, its saturation held -- the latter the light's fraction setting, or its
-    set's luminance setting, which moves every light of the set that reads it. Then the caption:
-    `COLOR_APPROXIMATE`. Each swatch's color is the rig's (`photometry.srgb_hex`), written only
+    set's luminance setting, which moves every light of the set that reads it. The caption,
+    `COLOR_APPROXIMATE`, is in its box's *more*, its status line saying "approximate on this
+    screen" at rest (`_box`). Each swatch's color is the rig's (`photometry.srgb_hex`), written only
     where it is a `#rrggbb`. Greyed away from the box. `""` where the rig sent none."""
     color = row.color
     if not isinstance(color, dict) or not isinstance(color.get("sets"), dict) or not color["sets"]:
@@ -2275,7 +2332,6 @@ def _color_card(row, frame, view: View) -> str:
             f'{"".join(groups)}'
             f'<div class="lvls">{_color_level("saturation", color.get("saturation"), frame, view)}'
             f'{_color_level("luminance", luminance, frame, view, every)}</div>'
-            f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span>'
             f'{_new_color(row, sets, chosen, view)}</div>')
 
 
@@ -2301,10 +2357,13 @@ def _over(row, place: str, view: View) -> str:
     replaces a draw"): empty, since no one number is in force for it to show, and **never a
     spinner** (XC-418), no arrows stepping from a number no trial takes. A word where the run's
     value is one, else a number, as `_field` reads it; greyed away from the box."""
-    word = ' data-kind="word"' if isinstance(row.value, str) else ' inputmode="decimal"'
+    word = isinstance(row.value, str)
+    keys = ' data-kind="word"' if word else (
+        ' inputmode="numeric"' if row.whole else ' inputmode="decimal"')
     name = _e(row.name)
-    return (f'<input class="field mono over" data-param="{name}"{word} value="" '
-            f'placeholder="{place}" aria-label="{name}: {place}"{_gate(view)}>')
+    return (f'<span class="fu"><input class="field mono over" data-param="{name}"{keys} value="" '
+            f'placeholder="{place}" aria-label="{name}: {place}"{_gate(view)}>'
+            f'{"" if word else _unit(row.unit)}</span>')
 
 
 def _range_editor(row, view: View) -> str:
@@ -2320,7 +2379,7 @@ def _range_editor(row, view: View) -> str:
     fields = "".join(
         f'<label class="rn">{_e(number)}<input class="field mono" data-number="{_e(number)}" '
         f'inputmode="decimal" value="{_e(value)}" aria-label="{name}: {_e(number)}"{off}>'
-        f"</label>"
+        f"{_unit(row.unit)}</label>"
         for number, value in row.numbers.items()
     )
     return (f'<div class="rng">{fields}<button type="button" class="btn small" data-cmd="range" '
@@ -2372,12 +2431,143 @@ def _whence(row, view: View, over: str = "") -> str:
     return "".join(parts)
 
 
+def _plain(markup: str) -> str:
+    """Markup this module made, as the words it shows, for a `title` that holds a cut text whole."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", "", markup)).split())
+
+
+#: **How much of a refusal its box's status line says** (`_gist`), in characters: its reason, cut
+#: at a word; the whole sentence is in the box's *more* (the layout review's finding 2: "a refusal
+#: of 14 lines that never leaves").
+GIST_LIMIT = 80
+
+
+def _gist(why: str) -> str:
+    """**A refusal's reason in short**, for its box's one status line: the part after the rig's
+    "...is refused, and the previous value stands:" where it says one, else the sentence, cut at a
+    word to `GIST_LIMIT` characters with "…"."""
+    said = " ".join((why.partition(": ")[2] or why).split())
+    if len(said) <= GIST_LIMIT:
+        return said
+    return (said[:GIST_LIMIT].rpartition(" ")[0] or said[:GIST_LIMIT]).rstrip(",;:") + "…"
+
+
+def _limits(row) -> str:
+    """**A box's limits in short**, for its status line at rest (the layout review's finding 2:
+    "`0 or more` for `0.00 to open s · below 0 cannot be`"): its ends as `_figure` shows them, a
+    whole setting's said whole; the sentence with each limit's reason is in its *more*
+    (`_range`). Plain words, escaped where used."""
+    if row.bounded:
+        return f"welfare ceiling {_significant(row.high)} {row.unit}"
+    low, high = (None if end is None else _figure(row, end) for end in (row.low, row.high))
+    said = ("" if low is None and high is None else f"{low} or more" if high is None
+            else f"up to {high}" if low is None else f"{low} to {high}")
+    if row.whole:
+        return f"{said} · whole number" if said else "whole number"
+    return said
+
+
+def _status(row, change, refusal) -> tuple[str, str]:
+    """**A box's one status line** (the console interface design's goal 4) as the rig's frame
+    says it, and the state it marks the box with: a change waiting for the next trial and who
+    sent it (`staged`); else the last refusal of it, the value refused and its gist (`refused`);
+    else, while a run plays, the change in force and the trial it took effect at (`Applied`), with
+    a warning where the rig judged one (`warned`, else `applied`); else, at rest, its limits in
+    short (`_limits`) -- a color's that its swatches are approximate. The page's own states (*not
+    sent*, *sending…*, *cannot send*) are its script's (the plan's Task 6)."""
+    if change is not None:
+        return "staged", f"waiting for the next trial · {_who(change.by)}"
+    if refusal is not None:
+        value = "" if refusal.value is None else f" {_e(_figure(row, refusal.value))}"
+        return "refused", f"refused{value} · {_e(_gist(refusal.why))}"
+    if row.applied is not None:
+        if row.warned:
+            return "warned", f"in force, with a warning · from trial {_e(row.applied.trial)}"
+        return "applied", f"in force from trial {_e(row.applied.trial)}"
+    return "", _e("approximate on this screen" if row.color is not None else _limits(row))
+
+
+def _box(row, frame, view: View, value: str, editor: str, change, refusal) -> str:
+    """**One setting's box** (the console interface design's goal 1; the PI, 2026-11-19, "Small
+    boxes"; the controls review's §2, "three zones, fixed places"), the markup the page's script
+    works on:
+
+        <div class="box[ state][ ceiling][ wide]" data-card="NAME">
+          <div class="head">   the plain name (`ParamRow.label`) with the code name small, or the
+                               code name alone; the ceiling's mark; the value in force, and what
+                               waits for the next trial after an arrow
+          <div class="editor"> the field with − and + and its unit, or the fixed/drawn switch and
+                               its sides, or a color's set and swatches
+          <div class="status"> one line (`_status`) and, at its right, Discard and Apply, hidden
+                               by `visibility` until the script marks the box `draft`, so its
+                               height never jumps
+          <details class="more"> opened in place: what it is (`ParamRow.help`), its limits and
+                               why (`_range`), where its value comes from and *hand back*
+                               (`_whence`), what it gives, the staged change, the warnings and the
+                               last refusal whole, and a draw's profile
+
+    Every text a narrow box may cut short carries its whole in its `title`."""
+    name, off = _e(row.name), _gate(view)
+    if row.label:
+        names = (f'<span class="names"><span class="lbl" title="{_e(row.label)}">{_e(row.label)}'
+                 f'</span><span class="code" title="{name}">{name}</span></span>')
+    else:
+        names = f'<span class="names"><span class="code only" title="{name}">{name}</span></span>'
+    flag = '<span class="ceil">ceiling</span>' if row.bounded else ""
+    lead = None if change is None else _STAGED_KINDS.get(change.kind)
+    if change is not None and change.kind == "form" and row.switch == "scaled":
+        lead = "scaled"
+    waits = ("" if change is None else
+             f' <span class="to">→ {"" if lead is None else _e(lead) + " "}'
+             f"{_becomes(change, row)}</span>")
+    now = f"{value}{waits}"
+    state, said = _status(row, change, refusal)
+    mark = (
+        ""
+        if change is None
+        else f'<span class="stg">staged{"" if lead is None else " " + lead} → '
+        f"{_becomes(change, row)} by {_who(change.by)}</span>"
+    )
+    more = []
+    if row.help:
+        more.append(f'<span class="what">{_e(row.help)}</span>')
+    more.append(f'<span class="range">{_range(row)}</span>')
+    more.append(_whence(row, view, _beneath(row, frame)))
+    if row.gives is not None:
+        # What it gives each object, in degrees, made by the rig (`ParamRow.gives`; the
+        # console settings design's §5).
+        more.append(f'<span class="src gives">gives {_e(row.gives)}</span>')
+    more.append(mark)
+    more.extend(f'<span class="wrn">warning: {_e(warned)}</span>' for warned in row.warned)
+    if refusal is not None:
+        more.append(f'<span class="rfs">last refused: {_e(refusal.why)}</span>')
+    if row.switch == "drawn":
+        more.append(_profile(row))
+    if isinstance(row.color, dict) and row.color.get("sets"):
+        more.append(f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span>')
+    classes = " ".join(word for word in ("box", state, "ceiling" if row.bounded else "",
+                                         "wide" if row.color is not None else "") if word)
+    return (
+        f'<div class="{classes}" data-card="{name}">'
+        f'<div class="head">{names}{flag}<span class="now" title="{_e(_plain(now))}">{now}</span>'
+        f"</div>"
+        f'<div class="editor">{editor}</div>'
+        f'<div class="status"><span class="say" title="{_e(_plain(said))}">{said}</span>'
+        f'<span class="acts"><button type="button" class="btn small" data-discard="{name}"{off}>'
+        f'Discard</button><button type="button" class="btn small primary" '
+        f'data-apply="{name}"{off}>Apply</button></span></div>'
+        f'<details class="more"><summary>more</summary><div class="detail">{"".join(more)}</div>'
+        f"</details></div>"
+    )
+
+
 def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
-    """One card per `ParamRow`: value, unit, range, the ceiling flag, a staged
-    marker, and -- P4d-2b b2a -- the input and arrows that set it and the last
-    refusal of it with its sentence (spec §5.2: "A refusal shows on the card and in
-    the feed"). *Last* is the word because a refusal carries no time: it stays on
-    the card beside whatever the value has since become, and says it is the last.
+    """One box per `ParamRow` (`_box`, the console interface rework's Task 5: head, editor, one
+    status line and a *more* opened in place): value, unit, range, the ceiling flag, a staged
+    marker, and -- P4d-2b b2a -- the input and its − and + that set it and the last refusal of it
+    with its sentence (spec §5.2: "A refusal shows on the card and in the feed"), its gist on the
+    status line and the whole in *more*. *Last* is the word because a refusal carries no time: it
+    stays on the box beside whatever the value has since become, and says it is the last.
 
     **A setting holding a whole position** shows the rig's words for it, eccentricity and
     direction first with its (x, y) beside them, its unit in them (`ParamRow.position`; the PI,
@@ -2409,23 +2599,7 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     cards = []
     for row in frame.params:
         change = staged.get(row.name)
-        flag = '<span class="ceil">ceiling</span>' if row.bounded else ""
-        lead = None if change is None else _STAGED_KINDS.get(change.kind)
-        if change is not None and change.kind == "form" and row.switch == "scaled":
-            lead = "scaled"
-        mark = (
-            ""
-            if change is None
-            else f'<span class="stg">staged{"" if lead is None else " " + lead} → '
-            f"{_becomes(change)} by {_who(change.by)}</span>"
-        )
         refusal = refused.get(row.name)
-        said = (
-            ""
-            if refusal is None
-            else f'<span class="rfs">last refused: {_e(refusal.why)}</span>'
-        )
-        cls = "param staged" if change is not None else "param"
         settable = row.value is None or isinstance(row.value, str) or (
             isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
         per_trial = _PER_TRIAL.get(row.source)
@@ -2435,7 +2609,7 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
             per_trial = _SCALED
         held_by = _HELD_BY.get(row.source)
         if held_by is not None:
-            label = (f'<span class="pv">{held_by[0]} {_e(_num(row.value))} '
+            label = (f'<span class="pv">{held_by[0]} {_e(_figure(row, row.value))} '
                      f'<span class="unit">{_e(row.unit)}</span></span>')
             entry = _over(row, held_by[1], view) if settable and row.position is None else ""
         elif per_trial is not None:
@@ -2448,37 +2622,29 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
             # a color setting's is picked on its color card, below.
             label, entry = f'<span class="pv">{_e(row.words)}</span>', ""
         else:
-            label = (f'<span class="pv">{_e(_num(row.value))} '
+            label = (f'<span class="pv">{_e(_figure(row, row.value))} '
                      f'<span class="unit">{_e(row.unit)}</span></span>')
             entry = _field(row, view) if settable else ""
         if row.switch == "drawn":
             drawn = row.shape is not None
-            shown = (label + _switch(row, view, drawn)
-                     + f'<div class="side fixed" data-side="fixed"{" hidden" if drawn else ""}>'
-                     f"{entry}</div>"
-                     + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
-                     f"{_drawn_side(row, view)}</div>")
+            editor = (_switch(row, view, drawn)
+                      + f'<div class="side fixed" data-side="fixed"{" hidden" if drawn else ""}>'
+                      f"{entry}</div>"
+                      + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
+                      f"{_drawn_side(row, view)}</div>")
         elif row.switch == "scaled":
-            shown = (label + _switch(row, view, scaled, "scaled")
-                     + f'<div class="side fixed" data-side="fixed"{" hidden" if scaled else ""}>'
-                     f"{entry}</div>"
-                     + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
-                     f"{_scaled_side(row, view)}</div>")
+            editor = (_switch(row, view, scaled, "scaled")
+                      + f'<div class="side fixed" data-side="fixed"{" hidden" if scaled else ""}>'
+                      f"{entry}</div>"
+                      + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
+                      f"{_scaled_side(row, view)}</div>")
         elif row.color is not None:
             # A color setting: its set, its hues as swatches, its two levels (the design's §6).
-            shown = label + _color_card(row, frame, view)
+            editor = _color_card(row, frame, view)
         else:
-            shown = label + entry
-        if row.gives is not None:
-            # What it gives each object, in degrees, made by the rig (`ParamRow.gives`; the
-            # console settings design's §5).
-            shown += f'<span class="src gives">gives {_e(row.gives)}</span>'
-        cards.append((row.section or OTHER, row.changed, (
-            f'<div class="{cls}"><div class="pn"><span>{_e(row.name)}</span>{flag}</div>'
-            f"{shown}"
-            f'<span class="range">{_range(row)}</span>'
-            f"{_whence(row, view, _beneath(row, frame))}{mark}{said}</div>"
-        )))
+            editor = entry
+        cards.append((row.section or OTHER, row.changed,
+                      _box(row, frame, view, label, editor, change, refusal)))
     return _sections(frame.task, [card for card in cards if _training(card[0]) == training])
 
 
@@ -3259,6 +3425,9 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .kv > span { min-width: 0; overflow-wrap: anywhere; }
 .kv > .keep { overflow-wrap: normal; white-space: nowrap; flex-shrink: 0; }
 .kv > .btn { flex-shrink: 0; }
+.kv.wrap { flex-wrap: wrap; align-items: baseline; row-gap: 4px; }
+.kv.wrap > span { flex: 1 1 12em; }
+.kv.wrap > .btn { flex-shrink: 1; max-width: 100%; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; }
 .secs { display: grid; gap: 8px; }
@@ -3266,16 +3435,41 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .sec .sec { margin-top: 8px; }
 .sec > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; }
 .sec[open] > summary { margin-bottom: 6px; }
-.cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.cards { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); align-items: start; }
 .nofind { display: none !important; }
 #pfind { max-width: 220px; }
-.param { border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; display: grid; gap: 2px; background: var(--surface-2); }
-.param .pn { font-family: var(--mono); font-size: 12.5px; font-weight: 500; display: flex; justify-content: space-between; gap: 6px; overflow-wrap: anywhere; }
-.param .ceil { font-family: var(--cond); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--warn); font-weight: 700; }
-.param .pv { font-family: var(--mono); font-size: 13px; }
-.param .range, .param .stg { font-size: 11.5px; color: var(--muted); }
-.param.staged { border-color: var(--accent); }
-.param.staged .stg { color: var(--accent); }
+.box { border: 1px solid var(--rule); border-radius: 5px; padding: 5px 7px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-content: start; background: var(--surface-2); min-width: 0; }
+.box.wide { grid-column: span 2; }
+@media (max-width: 520px) { .box.wide { grid-column: auto; } }
+.box:has(> details.more[open]) { grid-column: 1 / -1; background: var(--surface); }
+.box > .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 8px; padding: 0; min-width: 0; }
+.box .names { display: grid; flex: 1 1 7em; min-width: 0; }
+.box .lbl { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .code.only { font-size: 12.5px; color: var(--ink); font-weight: 500; }
+.box .ceil { font-family: var(--cond); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--warn); font-weight: 700; }
+.box .now { max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .pv { font-family: var(--mono); font-size: 13px; }
+.box .now .to { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.box > .editor { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+.box > .editor > * { min-width: 0; max-width: 100%; }
+.box > .status { position: relative; display: flex; align-items: center; min-height: 24px; min-width: 0; font-size: 12px; color: var(--muted); }
+.box .status .say { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .status .acts { position: absolute; right: 0; top: 0; bottom: 0; display: flex; gap: 4px; align-items: center; padding-left: 6px; background: inherit; visibility: hidden; }
+.box.draft .status .acts { position: static; flex: none; visibility: visible; }
+.box.staged { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.box.staged .status .say { color: var(--accent); }
+.box.refused { border-color: var(--crit); box-shadow: inset 3px 0 0 var(--crit); }
+.box.refused .status .say { color: var(--crit); }
+.box.warned .status .say { color: var(--warn); }
+.box.ceiling:not(.staged):not(.refused) { box-shadow: inset 3px 0 0 var(--warn); }
+.box > .more > summary { cursor: pointer; font-size: 12px; color: var(--muted); width: max-content; }
+.box .detail { display: grid; gap: 3px; margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--rule); font-size: 12.5px; min-width: 0; }
+.box .detail > * { min-width: 0; overflow-wrap: anywhere; }
+.box .detail .what { color: var(--ink); }
+.box .range, .box .stg { font-size: 12px; color: var(--muted); }
+.box .stg { color: var(--accent); }
+.box .wrn { font-size: 12px; color: var(--warn); }
 .feed { display: grid; align-content: start; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .ev { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 6px; padding: 4px 0; border-top: 1px solid var(--rule); font-size: 12.5px; }
 .ev:first-child { border-top: 0; }
@@ -3309,7 +3503,7 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .controlbar .spacer { flex: 1; }
 .btn.small { padding: 2px 8px; font-size: 12.5px; }
 .btn.danger { border-color: var(--crit); color: var(--crit); }
-.btn:disabled, .field:disabled, .arrows button:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled, .field:disabled, .stp:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
 .who { font-size: 12.5px; color: var(--muted); }
 .who b { color: var(--ink); font-weight: 600; }
 body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{display:none}
@@ -3320,52 +3514,56 @@ body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{di
 .inline input, .inline select { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; padding: 1px 4px; }
 #mark-note { width: min(34em, 60vw); }
 #sched-value { width: 7em; }
+.fu { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; max-width: 100%; }
+.fu .unit, .box .rn .unit { margin-left: 0; font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
 .spin { display: inline-flex; align-items: stretch; }
-.field { width: 6em; border: 1px solid var(--rule); border-radius: 3px 0 0 3px; padding: 1px 4px; background: var(--surface); color: inherit; font-size: 12.5px; }
-.field[data-kind="word"] { border-radius: 3px; }
+.field { width: 6em; border: 1px solid var(--rule); border-radius: 3px; padding: 1px 4px; background: var(--surface); color: inherit; font-size: 12.5px; }
 .field.pending { border-color: var(--accent); }
-.arrows { display: flex; flex-direction: column; border: 1px solid var(--rule); border-left: 0; border-radius: 0 3px 3px 0; overflow: hidden; }
-.arrows button { flex: 1; width: 18px; border: 0; padding: 0; background: var(--surface-2); color: var(--muted); cursor: pointer; font-size: 8px; line-height: 1; }
-.arrows button + button { border-top: 1px solid var(--rule); }
-.param .rfs { font-size: 11.5px; color: var(--crit); }
-.param { align-content: start; }
-.param .src, .param .rn { font-size: 11.5px; color: var(--muted); }
-.param .src { overflow-wrap: anywhere; }
-.param .rng { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.param .rn { display: inline-flex; gap: 3px; align-items: center; }
-.param .rn .field { width: 4.5em; border-radius: 3px; }
-.param .sw { display: inline-flex; gap: 0; }
-.param .sw .seg { border-radius: 0; }
-.param .sw .seg:first-child { border-radius: 4px 0 0 4px; }
-.param .sw .seg:last-child { border-radius: 0 4px 4px 0; }
-.param .sw .seg.on { background: var(--ink); color: var(--bg); }
-.param .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.param .side[hidden], .param .shp[hidden] { display: none; }
-.param .prof { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; }
-.param .prof .bar { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 0.6; }
-.param .prof .base { stroke: var(--rule); stroke-width: 1; }
-.param .prof .haz { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
-.param .prof .flat { stroke: var(--muted); stroke-width: 1; }
-.param .prof .ax { fill: var(--muted); font: 8px sans-serif; }
-.param .shp .rn .field[data-form="values"], .param .shp .rn .field[data-form="weights"] { width: 9em; }
-.param > .btn { justify-self: start; }
-.param .clr { display: grid; gap: 4px; }
-.param .clr .hues { display: flex; flex-wrap: wrap; gap: 4px; }
-.param .clr .hues[hidden] { display: none; }
-.param .clr .hue { display: inline-flex; gap: 4px; align-items: center; }
-.param .clr .hue.on { background: var(--ink); color: var(--bg); }
-.param .clr .chip { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); }
-.param .clr .chip.none { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--rule) 3px, var(--rule) 4px); }
-.param .clr .lvls { display: grid; gap: 4px; }
-.param .clr .lvl .field { width: 4.5em; border-radius: 3px; }
-.param .clr .newc { display: grid; gap: 4px; }
-.param .clr .newc > summary { cursor: pointer; }
-.param .clr .newc .nf { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.param .clr .newc .nf[hidden], .param .clr .newc [data-newset-only][hidden] { display: none; }
-.param .clr .newc .nf .field { width: 4.5em; border-radius: 3px; }
-.param .clr .newc .newc-do { display: flex; gap: 6px; }
-.param .clr .newc .newc-out { overflow-wrap: anywhere; }
-.field.over { width: 100%; border-radius: 3px; }
+.spin .stp { width: 22px; min-height: 24px; border: 1px solid var(--rule); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; font-family: var(--sans); font-size: 14px; line-height: 1; }
+.spin .stp:first-child { border-radius: 3px 0 0 3px; border-right: 0; }
+.spin .stp:last-child { border-radius: 0 3px 3px 0; border-left: 0; }
+.spin .stp + .field { border-radius: 0; width: 5em; text-align: right; font-size: 14px; font-weight: 600; }
+.box .rfs { font-size: 12px; color: var(--crit); }
+.box .src, .box .rn { font-size: 12px; color: var(--muted); }
+.box .src { overflow-wrap: anywhere; }
+.box .rng { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.box .rn { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; min-width: 0; max-width: 100%; }
+.box .rn .field { width: 4.5em; }
+.box .sw { display: inline-flex; gap: 0; }
+.box .sw .seg { border-radius: 0; }
+.box .sw .seg:first-child { border-radius: 4px 0 0 4px; }
+.box .sw .seg:last-child { border-radius: 0 4px 4px 0; }
+.box .sw .seg.on { background: var(--ink); color: var(--bg); }
+.box .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1 1 100%; min-width: 0; }
+.box .side[hidden], .box .shp[hidden] { display: none; }
+.box .prof { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; }
+.box .prof .bar { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 0.6; }
+.box .prof .base { stroke: var(--rule); stroke-width: 1; }
+.box .prof .haz { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; }
+.box .prof .flat { stroke: var(--muted); stroke-width: 1; }
+.box .prof .ax { fill: var(--muted); font: 8px sans-serif; }
+.box .shp .rn .field[data-form="values"], .box .shp .rn .field[data-form="weights"] { width: 9em; }
+.box .detail .btn { justify-self: start; }
+.box .clr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; flex: 1 1 100%; }
+.box .clr .hues { display: flex; flex-wrap: wrap; gap: 4px; }
+.box .clr .hues[hidden] { display: none; }
+.box .clr .hue { display: inline-flex; gap: 4px; align-items: center; }
+.box .clr .hue.on { background: var(--ink); color: var(--bg); }
+.box .clr .chip { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); }
+.box .clr .chip.none { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--rule) 3px, var(--rule) 4px); }
+.box .clr .lvls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.box .clr .lvl .field { width: 4.5em; }
+.box .clr .src { overflow-wrap: anywhere; }
+.box .clr .newc { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.box .clr .newc > summary { cursor: pointer; }
+.box .clr .newc .nf { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.box .clr .newc .nf[hidden], .box .clr .newc [data-newset-only][hidden] { display: none; }
+.box .clr .newc .nf .field { width: 4.5em; }
+.box .clr .newc .newc-do { display: flex; flex-wrap: wrap; gap: 6px; }
+.box .clr .newc .newc-out { overflow-wrap: anywhere; }
+.fu:has(> .over) { display: flex; flex-wrap: nowrap; width: 100%; }
+.field.over { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; }
+.box select.field, .box .rn select.field { width: auto; max-width: 100%; }
 #moments .rv { font-size: 11.5px; color: var(--muted); margin: -2px 0 6px; overflow-wrap: anywhere; }
 .ev.ctl .kind { color: var(--accent); }
 .controlbar .sep { width: 1px; align-self: stretch; background: var(--rule); margin: 0 4px; }
@@ -4069,8 +4267,7 @@ _SCRIPT = """
     });
   }
   function cardOf(name) {
-    var button = document.querySelector(inCards('[data-switch][data-name="' + CSS.escape(name) + '"]'));
-    return button ? button.closest(".param") : null;
+    return document.querySelector(inCards('.box[data-card="' + CSS.escape(name) + '"]'));
   }
   function showSide(card, which) {
     Array.prototype.forEach.call(card.querySelectorAll("[data-side]"), function (side) {
@@ -4117,13 +4314,16 @@ _SCRIPT = """
     Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
       var kept = readSections(sectionsKey(root));
       var find = root.closest("#params") && el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
-      Array.prototype.forEach.call(root.querySelectorAll(".param"), function (card) {
-        var name = card.querySelector(".pn span");
-        var found = find === "" || (name !== null && name.textContent.toLowerCase().indexOf(find) !== -1);
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
+        // A box is found by its code name or its plain name (the console interface design's
+        // goal 5).
+        var label = card.querySelector(".head .lbl");
+        var name = (card.getAttribute("data-card") + " " + (label ? label.textContent : "")).toLowerCase();
+        var found = find === "" || name.indexOf(find) !== -1;
         card.classList.toggle("nofind", !found);
       });
       Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-        var matches = section.querySelector(".param:not(.nofind)") !== null;
+        var matches = section.querySelector(".box:not(.nofind)") !== null;
         section.classList.toggle("nofind", find !== "" && !matches);
         section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
       });
@@ -4142,9 +4342,24 @@ _SCRIPT = """
   }
   if (el("pfind")) { el("pfind").addEventListener("input", applySections); }
   applySections();
+  // **A box's *more* a person opened** (the console interface design's goal 1: "everything else
+  // opens inside the box on a click"), by setting, kept open across the frames that replace the
+  // boxes until it is closed. The click is on its summary, before it toggles.
+  var mores = {};
+  function keepMore(e) {
+    var summary = e.target.closest(inCards(".box > details.more > summary"));
+    if (!summary) { return; }
+    var name = summary.closest(".box").getAttribute("data-card");
+    if (summary.parentNode.open) { delete mores[name]; } else { mores[name] = true; }
+  }
   // After the cards are replaced: each timing card on the side and shape a person chose.
   function restoreSides() {
     applySections();
+    Object.keys(mores).forEach(function (name) {
+      var card = cardOf(name);
+      var more = card ? card.querySelector(":scope > details.more") : null;
+      if (more) { more.open = true; }
+    });
     Object.keys(sides).forEach(function (name) {
       var card = cardOf(name);
       if (card) { showSide(card, sides[name]); }
@@ -4274,7 +4489,7 @@ _SCRIPT = """
   // A number typed and not sent is marked pending, and, while a frame is held because of it,
   // its card says so under the editor: never a silent freeze of the cards (fix round 2).
   function markRanges() {
-    Array.prototype.forEach.call(document.querySelectorAll(inCards(".param")), function (card) {
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".box")), function (card) {
       var fields = card.querySelectorAll("input[data-number]");
       var edited = false;
       Array.prototype.forEach.call(fields, function (input) {
@@ -4943,7 +5158,7 @@ _SCRIPT = """
     var key = button.getAttribute("data-name");
     var numbers = {};
     var bad = null;
-    var fields = button.closest(".param").querySelectorAll("input[data-number]");
+    var fields = button.closest(".box").querySelectorAll("input[data-number]");
     Array.prototype.forEach.call(fields, function (input) {
       var raw = input.value.trim();
       var value = Number(raw);
@@ -4990,7 +5205,7 @@ _SCRIPT = """
   // is not sent, said as a range's is; once sent, a second press is held as a range's is.
   function sendForm(button, detail) {
     var key = button.getAttribute("data-name");
-    var card = button.closest(".param");
+    var card = button.closest(".box");
     // A size's scaled side has no shape to choose: it is a scaling (the design's §5).
     var select = card.querySelector("select[data-shape]");
     var shape = select ? select.value : "scaled";
@@ -5294,6 +5509,7 @@ _SCRIPT = """
   document.addEventListener("click", function (e) {
     if (!e.target.closest) { return; }
     keepSection(e);
+    keepMore(e);
     var answering = e.target.closest("[data-answer]");
     if (answering && !answering.disabled) { answerWarning(answering); return; }
     var resuming = e.target.closest("[data-resume]");
@@ -5305,7 +5521,7 @@ _SCRIPT = """
       // A timing card's side, on this page alone: nothing is sent until its value or *apply*.
       var side = switched.getAttribute("data-switch");
       sides[switched.getAttribute("data-name")] = side;
-      showSide(switched.closest(".param"), side);
+      showSide(switched.closest(".box"), side);
       return;
     }
     var button = e.target.closest("[data-cmd]");
@@ -5424,7 +5640,7 @@ _SCRIPT = """
     if (e.target.matches("input[data-param]")) { schedule(e.target); }
     else if (e.target.matches("select[data-shape]")) {
       shapes[e.target.getAttribute("data-shape")] = e.target.value;
-      showShape(e.target.closest(".param"), e.target.value);
+      showShape(e.target.closest(".box"), e.target.value);
     }
     else if (e.target.matches("select[data-colorset]")) {
       colorSets[e.target.getAttribute("data-colorset")] = e.target.value;

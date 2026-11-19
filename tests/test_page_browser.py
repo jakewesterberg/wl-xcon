@@ -246,6 +246,18 @@ def _until(page, expression: str, seconds: float = WAIT_S) -> None:
     pytest.fail(f"timed out after {seconds:g} s waiting for {expression}")
 
 
+def _more(page, root: str = "#params") -> None:
+    """**Open every box's *more* in `root`** as a person does, by its summary (the console
+    interface rework's Task 5: *hand back*, a draw's live numbers and *change the range* sit in a
+    box's *more*); the page keeps each open across the frames that replace the boxes."""
+    names = page.eval_on_selector_all(
+        f"{root} .box", "boxes => boxes.map((box) => box.getAttribute('data-card'))")
+    for name in names:
+        page.click(f'{root} .box[data-card="{name}"] > details.more > summary')
+        page.wait_for_selector(f'{root} .box[data-card="{name}"] > details.more[open]',
+                               state="attached")
+
+
 def _pauses(rig) -> list:
     return [seen for seen in rig.dispatch.seen if isinstance(seen, Pause)]
 
@@ -1366,7 +1378,7 @@ def test_the_page_shows_a_settings_position_eccentricity_and_direction_first(rig
     page = rig.browser_page()
 
     page.locator("#params", has_text="27.236° at 45°").wait_for(state="attached")
-    card = page.locator("#params .param").first
+    card = page.locator("#params .box").first
     text = card.text_content()
 
     assert "target_pos" in text and "27.236° at 45° · (x, y) (20, 20)" in text
@@ -1389,7 +1401,8 @@ def test_the_page_keeps_its_controls_while_a_setting_holds_no_number_or_word(rig
 
     page.locator("#params", has_text="[0.3, 0.6]").wait_for(state="attached")
 
-    assert page.locator("#params .param").first.locator("input").count() == 0
+    assert page.locator("#params .box").count() == 1
+    assert page.locator("#params .box").first.locator("input").count() == 0
     for command in ("pause", "mark", "reward", "stop"):
         assert page.locator(f'#controls [data-cmd="{command}"]').count() == 1, command
 
@@ -2074,6 +2087,7 @@ def test_hand_back_a_range_and_revert_send_their_bodies(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: rig.dispatch.seen)
@@ -2103,6 +2117,7 @@ def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.fill('#params input[data-number="low"]', "0.750")
     page.click('[data-cmd="range"][data-name="wait"]')
@@ -2130,6 +2145,7 @@ def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.dblclick('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: rig.dispatch.seen)
@@ -2163,6 +2179,7 @@ def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_le
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.fill('#params input[data-number="high"]', "1.5")
     _offer(rig, 41, params=rows(0.4))
@@ -2194,6 +2211,7 @@ def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
@@ -2248,6 +2266,7 @@ def test_a_range_typed_and_left_unsent_says_the_cards_wait_for_it(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     page.fill('#params input[data-number="high"]', "1.5")
     page.mouse.click(2, 2)  # a neutral spot: the field loses focus
     rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
@@ -2273,6 +2292,7 @@ def test_a_range_typed_as_the_same_number_does_not_hold_the_cards(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     page.fill('#params input[data-number="high"]', "1.250")
     page.mouse.click(2, 2)
     rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
@@ -2292,6 +2312,7 @@ def test_a_range_press_the_rig_did_not_take_can_be_sent_again(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     rig.dispatch.answers = serve.not_delivered("the rig is not connected")
     page.fill('#params input[data-number="high"]', "1.5")
     page.click('[data-cmd="range"][data-name="wait"]')
@@ -2322,6 +2343,7 @@ def test_a_press_is_not_lost_when_a_frame_lands_between_the_mouse_down_and_up(ri
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
     page.mouse.down()
@@ -2369,6 +2391,7 @@ def test_an_older_held_frame_never_replaces_a_newer_one_after_a_press_expires(ri
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     page.evaluate("window.__t = performance.now(); performance.now = function () { return window.__t; };")
 
     page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
@@ -2397,6 +2420,7 @@ def test_a_press_the_page_never_sees_end_shows_the_held_frame(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
 
     page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
     page.mouse.down()
@@ -2425,6 +2449,7 @@ def test_a_correction_typed_while_a_range_press_is_out_stays_to_be_sent(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     rig.dispatch.delay = 3.0
     page.fill('#params input[data-number="high"]', "1.5")
     page.click('[data-cmd="range"][data-name="wait"]')
@@ -2450,6 +2475,7 @@ def test_a_second_range_press_while_the_first_is_out_is_refused_and_said(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     rig.dispatch.delay = 3.0
     page.fill('#params input[data-number="high"]', "1.5")
     page.click('[data-cmd="range"][data-name="wait"]')
@@ -2476,6 +2502,7 @@ def test_a_press_a_menu_or_a_drag_takes_over_or_no_primary_press_leaves_the_card
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     button = '[data-cmd="hand_back"][data-name="fix_hold"]'
 
     page.hover(button)
@@ -2508,6 +2535,7 @@ def test_a_double_click_on_change_the_range_never_says_not_sent_while_the_rig_an
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
+    _more(page)
     page.evaluate("""() => {
       window.__said = [];
       new MutationObserver(function () {
@@ -3438,7 +3466,7 @@ def _open_of(page, name: str) -> bool:
 
 
 def _shown(page, name: str) -> bool:
-    return page.is_visible(f'#params .param:has(.pn span:text-is("{name}"))')
+    return page.is_visible(f'#params .box[data-card="{name}"]')
 
 
 def test_the_find_box_finds_a_setting_in_a_collapsed_section_and_opens_it(rig):
@@ -3564,6 +3592,7 @@ def test_a_press_on_a_training_card_is_not_lost_when_a_frame_lands_under_it(rig)
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-training"]')
+    _more(page, "#training-params")
 
     page.hover('#training-params [data-cmd="hand_back"][data-name="move_up_bar"]')
     page.mouse.down()
@@ -3604,3 +3633,209 @@ def test_a_collapsed_training_section_stays_collapsed_across_a_frame(rig):
     page.reload()
     page.click('label[for="t-training"]')
     assert not _training_open(page, "Training/Fade-in") and _training_open(page, "Training")
+
+
+# --- the console interface rework's Task 5: the box, drawn (the design of 2026-11-19) ----------
+
+#: The widths a trainer's laptop gives the page (the design's "How it is judged done": "no text
+#: past a box at 1024, 1280 and 1440 wide"), each at a laptop's height.
+WIDTHS = (1024, 1280, 1440)
+LAPTOP_H = 800
+
+#: A refusal as long as the one the layout review found on `fix_hold` (about 100 words), so a box
+#: holding one is measured.
+_LONG_WHY = ("'fix_hold' at 30 is refused, and the previous value stands: the trial ends "
+             "NO_FIXATION after 10 s, while the hold can take up to 30 s, so some trials could "
+             "never be answered, and an animal held that long learns nothing from the trial it "
+             "cannot finish; shorten the hold, or lengthen the timeout so that the longest hold "
+             "and the time to acquire the point both fit inside it, then apply again (XC-343)")
+
+
+def _popout_frame(tmp_path, **over):
+    """**The pop-out search's own settings as its session makes their rows** (`Session.parameters`,
+    schema 23; the PI's try-out task), with the states a box must hold without overrunning: a plain
+    name of the longest a task may declare (`task.LABEL_LIMIT`), `fix_hold` drawn by a person with
+    its profile, a size scaled, a value over a draw with its live numbers, a change staged, the
+    long refusal (`_LONG_WHY`), and a change in force with a warning; the color boxes as the rig
+    makes them."""
+    from wl_xcon.actor import Box
+    from wl_xcon.dio import Simulated as Card
+    from wl_xcon.link import Applied, ParamRow, Refused, Staged
+    from wl_xcon.task import LABEL_LIMIT, NonAging
+    from wl_xcon.taskd import Session, SessionSpec
+    from wl_xcon.variation import profile
+    from wl_xcon.welfare import Deployment, Simulated as Pump
+
+    import _sessions
+    from _demo import ALLOCATION, POPOUT, xtasks_or_skip
+
+    spec = SessionSpec(
+        task=str(xtasks_or_skip() / POPOUT), allocation=ALLOCATION, root=tmp_path,
+        session_id="2027-01-14_01", subject="A", trials=1, frame_period=1 / 240, seed=1,
+        values={"pairings": 66}, bounds=_sessions.bounds(), already_delivered_today=0.0,
+        deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
+        calibration=SRGB, plan="training")
+    rows = {row[0]: ParamRow.of(*row) for row in Session(spec, card=Card(), pump=Pump()).parameters}
+    shape = {"shape": "non_aging", "numbers": {"shortest": 0.5, "longest": 1.25},
+             "values": [], "weights": [], "by": "person"}
+    drawn = profile(NonAging(minimum=0.5, mean=0.25, maximum=1.25)).as_dict()
+    rows["fix_hold"] = dataclasses.replace(
+        rows["fix_hold"], label="Fixation hold, before the array is shown"[:LABEL_LIMIT],
+        source="form", switch="drawn", shape=shape, profile=drawn,
+        help="How long gaze must stay on the fixation point before the array appears.")
+    rows["fix_acquisition"] = dataclasses.replace(
+        rows["fix_acquisition"], source="range", draw="uniform from 1 to 3.5 s, changed live",
+        numbers={"low": 1.0, "high": 3.5}, conditions=("near", "far", "middle"), more=4)
+    rows["disc_size"] = dataclasses.replace(rows["disc_size"], source="task", switch="scaled")
+    rows["set_size"] = dataclasses.replace(
+        rows["set_size"], applied=Applied(39, "jake (box, unverified)"),
+        warned=("crowded-array: 12 objects on a 6° ring leave 1.1° between windows of 1.6°",))
+    by = Box("Jake Westerberg")
+    return frame(params=tuple(rows.values()), task="tasks/popout_search.py",
+                 staged=(Staged("fix_window", 2.0, 1.5, by, False, cid="box-2"),),
+                 refusals=(Refused("fix_hold", by, _LONG_WHY, cid="box-1", value=30.0),),
+                 **over)
+
+
+#: **What passes a box's edge, measured** (the layout review's finding 1: "this bug is invisible
+#: to a test that reads the HTML"): for every box on the shown tab, each descendant whose right
+#: edge passes the box's, and each whose own content is wider than it is. A text cut short on
+#: purpose -- `text-overflow: ellipsis` over `overflow: hidden` -- is excepted only where its
+#: `title` holds it whole, and so is what it holds, which it clips; a field, whose text scrolls
+#: inside it, is excepted from the second; and what a closed `<details>` holds, which is not shown
+#: (both engines still lay it out). Each found as `name: tag.class (why)`.
+_OVERRUNS = """(root) => {
+  const found = [];
+  const cut = (node) => {
+    const style = getComputedStyle(node);
+    return style.textOverflow === 'ellipsis' && style.overflowX === 'hidden' &&
+      Boolean(node.getAttribute('title'));
+  };
+  const clipped = (node, box) => {
+    for (let at = node.parentElement; at && at !== box; at = at.parentElement) {
+      if (cut(at)) { return true; }
+      if (at.tagName === 'DETAILS' && !at.open && node.closest('summary') === null) { return true; }
+    }
+    return false;
+  };
+  for (const box of document.querySelectorAll(root + ' .box')) {
+    const edge = box.getBoundingClientRect().right;
+    for (const node of box.querySelectorAll('*')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) { continue; }
+      if (clipped(node, box)) { continue; }
+      const said = box.getAttribute('data-card') + ': ' + node.tagName.toLowerCase() + '.' +
+        (node.getAttribute('class') || '').split(' ').join('.');
+      if (rect.right > edge + 0.5) { found.push(said + ' (right edge ' + Math.round(rect.right - edge) + ' px past)'); }
+      if (node instanceof SVGElement || ['INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName)) { continue; }
+      if (node.scrollWidth > node.clientWidth + 1 && node.clientWidth > 0 && !cut(node)) {
+        found.push(said + ' (' + node.scrollWidth + ' px of content in ' + node.clientWidth + ')');
+      }
+    }
+  }
+  return found;
+}"""
+
+
+def test_no_text_passes_its_box_at_three_widths(rig, tmp_path):
+    """The PI, trying the console in Safari (2026-11-19): "text overruns the boxes, eg, color
+    section". At 1024, 1280 and 1440 wide, on the Task parameters and the Training tabs, no box's
+    text passes its edge (`_OVERRUNS`): not the color boxes, not the longest plain name, not the
+    long refusal, not a drawn box's shapes; and again with every box's *more* and every color's
+    New color open, a box with its *more* open taking its row. Through the wire, in a real
+    browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
+    page = rig.browser_page()
+    for tab, root in (("t-task", "#params"), ("t-training", "#training-params")):
+        page.click(f'label[for="{tab}"]')
+        page.wait_for_selector(f"{root} .box", state="visible")
+        if root == "#params":
+            assert page.locator("#params .box .clr").count() >= 2, "the color boxes are measured"
+        for width in WIDTHS:
+            page.set_viewport_size({"width": width, "height": LAPTOP_H})
+            page.evaluate(f"document.querySelectorAll('{root} .box details')"
+                          ".forEach((d) => {{ d.open = false; }})")
+            assert page.evaluate(_OVERRUNS, root) == [], (tab, width, "closed")
+            page.evaluate(f"document.querySelectorAll('{root} .box details')"
+                          ".forEach((d) => {{ d.open = true; }})")
+            assert page.evaluate(_OVERRUNS, root) == [], (tab, width, "open")
+            # An open box takes its row, so its reasons read across it (the layout review's
+            # finding 2: a refusal read in about four lines instead of about fifteen).
+            assert page.evaluate(
+                f"(() => {{ const box = document.querySelector('{root} .box');"
+                f" const row = box.parentNode.getBoundingClientRect();"
+                f" return box.getBoundingClientRect().width > row.width - 2; }})()")
+
+
+def test_an_open_more_stays_open_across_a_frame(rig):
+    """The console interface rework's Task 5: a box's *more* a person opened stays open when a
+    frame replaces the boxes (as a section does, `applySections`), and one they closed again stays
+    closed; the frame's news shows in it. In a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
+    from wl_xcon.link import ParamRow
+
+    def rows(why):
+        return (ParamRow.of("fix_hold", "s", 0.0, None, 0.5, False, why={"low": why}),
+                ParamRow.of("timeout", "s", 0.0, None, 2.0, False))
+
+    _offer(rig, 40, params=rows("below 0 cannot be"))
+    page = rig.browser_page()
+    page.click('label[for="t-task"]')
+    _more(page)
+    page.click('#params .box[data-card="timeout"] > details.more > summary')
+    _offer(rig, 41, params=rows("a reason of trial 41"))
+    _arrived(page, 41)
+    rig.wait_for(lambda: "a reason of trial 41" in page.inner_text("#params"))
+
+    assert page.evaluate("[document.querySelector('#params .box[data-card=\"fix_hold\"] > "
+                         "details.more').open, document.querySelector('#params "
+                         ".box[data-card=\"timeout\"] > details.more').open]") == [True, False]
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "waits on the console interface plan's Task 8, the one bar that stays in view: the header, "
+    "the animal strip, the control band and the scheduled stop take about 450 px above the tabs "
+    "until it lands; strict, so its landing fails here until this mark is removed"))
+def test_the_first_setting_starts_within_260px_at_1280x800(rig, tmp_path):
+    """The design's "How it is judged done": "the first setting within the first 260 px at 1280 ×
+    800" (the layout review's finding 4: about 500 px went before it). Measured from the top of
+    the page, unscrolled, on the Task parameters tab."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params .box", state="visible")
+
+    top = page.evaluate("document.querySelector('#params .box').getBoundingClientRect().top"
+                        " + window.scrollY")
+    assert top <= 260, top
+
+
+def test_runtime_still_needed_reads_as_words_at_three_widths(rig):
+    """The workflow review's F12: Runtime's "Still needed" drew `this block has no percentage
+    rule, so this changes nothing here` one letter per line down 950 px. At 1024, 1280 and 1440
+    wide, each sentence of the pane's rows is at least eight ems wide and no taller than three of
+    its lines. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame(rule=None, clearing=False, owed={"ecc 10": 18}))))
+    page = rig.browser_page()
+    page.wait_for_selector("#rt-need .kv .nm", state="visible")
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        shapes = page.evaluate("""() => Array.from(document.querySelectorAll('#rt-need .kv > .nm'))
+          .map((span) => {
+            const rect = span.getBoundingClientRect();
+            const line = parseFloat(getComputedStyle(span).lineHeight) ||
+              1.4 * parseFloat(getComputedStyle(span).fontSize);
+            const em = parseFloat(getComputedStyle(span).fontSize);
+            return [span.textContent.slice(0, 40), rect.width / em, rect.height / line];
+          })""")
+        assert any("no percentage rule" in said for said, _, _ in shapes), shapes
+        narrow = [(said, round(wide, 1), round(tall, 1)) for said, wide, tall in shapes
+                  if wide < 8 or tall > 3.2]
+        assert narrow == [], (width, narrow)

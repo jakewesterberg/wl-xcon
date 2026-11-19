@@ -893,9 +893,9 @@ def test_the_cards_say_the_pool_gives_the_two_looks(tmp_path):
     rows = {row.name: row for row in running.params}
     assert (rows["target_appearance"].source, rows["distractor_appearance"].source,
             rows["pairings"].source) == ("pool", "pool", "run")
-    cards = fragments(running, view())["params"].split('<div class="param')
-    looks = [card for card in cards if "<span>target_appearance</span>" in card
-             or "<span>distractor_appearance</span>" in card]
+    cards = fragments(running, view())["params"].split('<div class="box')
+    looks = [card for card in cards if 'data-card="target_appearance"' in card
+             or 'data-card="distractor_appearance"' in card]
     assert len(looks) == 2 and all(
         '<span class="pv">drawn each trial from its pool</span>' in card
         and 'placeholder="a value over its pool"' in card for card in looks)

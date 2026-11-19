@@ -666,8 +666,8 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
         view(),
     )["params"]
 
-    assert params.count('<div class="param') == 5
-    assert '<div class="param staged">' in params
+    assert params.count('<div class="box') == 5
+    assert '<div class="box staged" data-card="fix_hold">' in params
     assert f"staged → 0.40 by {_who(Box('jake'))}" in params
     assert '<span class="ceil">ceiling</span>' in params
     # Review fix round 1: the ceiling keeps its own decimals (`_significant`), unlike
@@ -1260,15 +1260,17 @@ def test_a_console_without_the_mark_endpoint_greys_mark_alone():
 
 
 def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
-    """Spec §5.2: up/down arrows and an input on each card. The step is the mockup's
-    rule by unit (mL 0.01, s 0.05, deg 0.1, else 0.01), and the input shows the value
-    at the step's decimals; a categorical card takes a word and has no arrows."""
+    """Spec §5.2: − and + and an input on each box (the console interface rework's Task 5: two
+    buttons beside the field, where two 8 px arrows were). The step is the rig's
+    (`ParamRow.step`, `task.step_of`: by unit, s 0.05, deg 0.1, mL 0.01, else 0.01), and the
+    input shows the value at the step's decimals, or more where the value holds more; a
+    categorical box takes a word and has neither."""
     params = fragments(
         frame(
             params=(
-                ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
-                ParamRow("reward_correct", "mL", 0.0, 0.4, 0.15, True),
-                ParamRow("fix_window", "deg", None, 5.0, 2.0, False),
+                ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, step=0.05),
+                ParamRow.of("reward_correct", "mL", 0.0, 0.4, 0.15, True, step=0.01),
+                ParamRow.of("fix_window", "deg", None, 5.0, 2.0, False, step=0.1),
                 ParamRow("target_appearance", "", None, None, None, False),
                 ParamRow("shape", "", None, None, "penguin", False),
             )
@@ -1277,9 +1279,13 @@ def test_each_parameter_card_has_arrows_and_an_input_with_its_step_and_range():
     )["params"]
 
     assert (
+        '<button type="button" class="stp" data-dir="-1" tabindex="-1" '
+        'aria-label="decrease fix_hold">−</button>'
         '<input class="field mono" data-param="fix_hold" data-step="0.05" '
         'data-min="0.1" data-max="1.0" inputmode="decimal" value="0.30" '
         'aria-label="fix_hold">'
+        '<button type="button" class="stp" data-dir="1" tabindex="-1" '
+        'aria-label="increase fix_hold">+</button></span><span class="unit">s</span>'
     ) in params
     assert 'data-param="reward_correct" data-step="0.01" data-min="0.0" data-max="0.4"' in params
     assert 'data-param="fix_window" data-step="0.1" data-max="5.0" inputmode="decimal" value="2.0"' in params
@@ -1304,7 +1310,7 @@ def test_a_setting_holding_a_position_shows_it_polar_first_and_offers_no_input()
         )),
         view(),
     )["params"]
-    target = params.partition('<div class="param">')[2].partition('<div class="param">')[0]
+    target = _cards(params)["target_pos"]
 
     assert '<span class="pv">27.236° at 45° · (x, y) (20, 20)</span>' in target
     assert "<input" not in target and 'data-dir="1"' not in target and "unset" not in target
@@ -1323,7 +1329,7 @@ def test_a_value_that_is_no_number_or_word_is_shown_as_written_with_no_input():
         ParamRow("flag", "", None, None, True, False),
         ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False),
     )), view())["params"]
-    span, odd, flag, hold = params.split('<div class="param">')[1:]
+    span, odd, flag, hold = (_cards(params)[name] for name in ("span", "odd", "flag", "fix_hold"))
 
     assert '<span class="pv">[0.3, 0.6] <span class="unit">deg</span></span>' in span
     assert "[&#x27;&lt;b&gt;&#x27;, 1]" in odd and "<b>" not in odd
@@ -3281,10 +3287,11 @@ _SINCE = 1_700_000_000.0
 
 
 def _cards(params: str) -> dict[str, str]:
-    """Each card of the parameters pane, by its setting's name."""
+    """Each box of the parameters pane, by its setting's name (`data-card`; the console interface
+    rework's Task 5)."""
     cards = {}
-    for card in params.split('<div class="param')[1:]:
-        cards[re.search(r'<div class="pn"><span>(.*?)</span>', card).group(1)] = card
+    for card in params.split('<div class="box')[1:]:
+        cards[html.unescape(re.search(r'data-card="(.*?)"', card).group(1))] = card
     return cards
 
 
@@ -3383,7 +3390,8 @@ def test_a_setting_without_live_numbers_shows_no_range_editor():
 
     assert params.count('data-cmd="range"') == 2
     assert ('<div class="rng"><label class="rn">low<input class="field mono" data-number="low" '
-            'inputmode="decimal" value="0.75" aria-label="wait: low"></label>') in cards["wait"]
+            'inputmode="decimal" value="0.75" aria-label="wait: low"><span class="unit">s</span>'
+            '</label>') in cards["wait"]
     assert 'data-number="high" inputmode="decimal" value="1.25"' in cards["wait"]
     assert ('<button type="button" class="btn small" data-cmd="range" data-name="wait">'
             "change the range</button></div>") in cards["wait"]
@@ -3580,9 +3588,11 @@ def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escap
     assert "<script" not in text
     assert EVIL not in text
     # Five on the held card (its condition, its draw, a number's name thrice), the other card's
-    # conditions and its staged hand-back, seven in the feed (a range's block among them), the
-    # moment's words and what a revert to it changes, and the setting the eased line names.
-    assert text.count(html.escape(EVIL, quote=True)) == 16
+    # conditions and its staged hand-back -- in its *more*, and in its head after the arrow and
+    # that head's `title` (the console interface rework's Task 5) -- seven in the feed (a range's
+    # block among them), the moment's words and what a revert to it changes, and the setting the
+    # eased line names.
+    assert text.count(html.escape(EVIL, quote=True)) == 18
 
 
 def test_the_page_says_while_a_persons_change_keeps_trials_out_of_moving_up():
@@ -4475,7 +4485,8 @@ def test_a_size_card_offers_fixed_and_scaled_and_says_what_each_object_gets():
     assert '<div class="side fixed" data-side="fixed">' in fixed
     assert '<div class="side scaled" data-side="scaled" hidden>' in fixed
     assert ('<label class="rn">factor<input class="field mono" data-form="factor" '
-            'inputmode="decimal" value="" aria-label="disc_size: factor"></label>') in fixed
+            'inputmode="decimal" value="" aria-label="disc_size: factor">'
+            '<span class="unit">× each object&#x27;s eccentricity</span></label>') in fixed
     assert ('<button type="button" class="btn small" data-cmd="form" data-name="disc_size">'
             'apply</button>') in fixed
     assert "select" not in fixed.split('data-side="scaled"')[1]
@@ -4646,3 +4657,255 @@ def test_runtime_says_the_switch_in_one_line():
         view())["params"]
     assert "frozen at 6.00 " in cards and "training frozen" in cards
     assert "full task at 40.00 " in cards and "given by the full task" in cards
+
+
+# --- the console interface rework's Task 5: the box, drawn (the design of 2026-11-19) ----------
+#
+# A setting is a small box of three zones -- head, editor, status -- and a *more* that opens in
+# place (the PI, 2026-11-19: "Small boxes"; the controls review's §2). The markup Tasks 6 to 8
+# script against: `<div class="box" data-card="<name>">` holding `.head`, `.editor`, `.status`
+# and `<details class="more">`.
+
+from html.parser import HTMLParser  # noqa: E402
+
+_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+                   "param", "source", "track", "wbr"})
+
+
+class _Node:
+    def __init__(self, tag: str, attrs: dict, parent: "_Node | None") -> None:
+        self.tag, self.attrs, self.parent, self.children = tag, attrs, parent, []
+
+    def classes(self) -> set:
+        return set((self.attrs.get("class") or "").split())
+
+    def text(self) -> str:
+        return "".join(child if isinstance(child, str) else child.text()
+                       for child in self.children)
+
+    def walk(self):
+        for child in self.children:
+            if isinstance(child, _Node):
+                yield child
+                yield from child.walk()
+
+    def find(self, cls: str) -> "list[_Node]":
+        return [node for node in self.walk() if cls in node.classes()]
+
+    def zone(self, cls: str) -> "_Node":
+        (found,) = [child for child in self.children
+                    if isinstance(child, _Node) and cls in child.classes()]
+        return found
+
+
+class _Tree(HTMLParser):
+    """The fragment as a tree of elements: enough to say which zone of a box a text is in."""
+
+    def __init__(self, markup: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = self.at = _Node("root", {}, None)
+        self.feed(markup)
+
+    def handle_starttag(self, tag, attrs):
+        node = _Node(tag, dict(attrs), self.at)
+        self.at.children.append(node)
+        if tag not in _VOID:
+            self.at = node
+
+    def handle_startendtag(self, tag, attrs):
+        self.at.children.append(_Node(tag, dict(attrs), self.at))
+
+    def handle_endtag(self, tag):
+        node = self.at
+        while node is not None and node.tag != tag:
+            node = node.parent
+        if node is not None and node.parent is not None:
+            self.at = node.parent
+
+    def handle_data(self, data):
+        self.at.children.append(data)
+
+
+def _box(params: str, name: str) -> _Node:
+    """The box of the setting `name` in a parameters pane, as a tree."""
+    (box,) = [node for node in _Tree(params).root.walk()
+              if node.attrs.get("data-card") == name]
+    assert "box" in box.classes() and box.tag == "div", box.attrs
+    return box
+
+
+def _said(node: _Node) -> str:
+    return " ".join(node.text().split())
+
+
+def test_a_box_shows_its_plain_name_and_code_name():
+    """The design's goal 5 (the PI, 2026-11-19: "Plain name, code name small"): a box's head leads
+    with the plain name its task declares (`ParamRow.label`) and the code name small beneath it;
+    a setting with no plain name shows its code name alone, as the name. Each is whole in its
+    `title`, so a name cut short at a narrow box is still read; the head ends with the value in
+    force. The box is the markup Tasks 6 to 8 script: `div.box[data-card]` with `.head`,
+    `.editor`, `.status` and `details.more`, in that order."""
+    rows = (ParamRow.of("fix_hold", "s", 0.0, None, 0.5, False, label="Fixation hold",
+                        help="How long gaze must stay on the fixation point."),
+            ParamRow.of("timeout", "s", 0.0, None, 2.0, False))
+    params = fragments(frame(params=rows), view())["params"]
+
+    named = _box(params, "fix_hold")
+    zones = [child for child in named.children if isinstance(child, _Node)]
+    assert [(z.tag, sorted(z.classes())) for z in zones] == [
+        ("div", ["head"]), ("div", ["editor"]), ("div", ["status"]), ("details", ["more"])]
+    head = named.zone("head")
+    (label,) = head.find("lbl")
+    (code,) = head.find("code")
+    assert (_said(label), label.attrs["title"]) == ("Fixation hold", "Fixation hold")
+    assert (_said(code), code.attrs["title"]) == ("fix_hold", "fix_hold")
+    assert "only" not in code.classes()
+    assert _said(head.find("now")[0]) == "0.50 s"
+    assert "How long gaze must stay" in _said(named.zone("more"))
+
+    # At rest the status line says the limits in short (the layout review's finding 2).
+    assert _said(_box(params, "timeout").zone("status").find("say")[0]) == "0.00 or more"
+    bare = _box(params, "timeout").zone("head")
+    assert bare.find("lbl") == []
+    (alone,) = bare.find("code")
+    assert _said(alone) == "timeout" and "only" in alone.classes()
+    # The small code name and the plain name are styled apart.
+    assert ".box .code {" in _CSS and ".box .lbl {" in _CSS and ".box .code.only {" in _CSS
+
+
+def test_a_whole_box_shows_no_decimals_and_steps_by_one():
+    """The design's goal 6 (the PI: "for necessary whole numbers (set size), there should not be a
+    decimal option for entry"): a setting its task declares whole (`ParamRow.whole`) shows `4`,
+    never `4.00` -- in its head, its field, its limits and what is staged for it -- and its field
+    steps by 1 with a numeric keyboard. A setting that is not whole keeps its step's decimals and
+    never loses a digit its value holds."""
+    # Whole whatever step a row says (a hand-made row's 0.01 here): the page steps it by 1.
+    rows = (ParamRow.of("set_size", "objects", 1.0, 36.0, 4.0, False, whole=True),
+            ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.35, False, step=0.1))
+    params = fragments(frame(params=rows, staged=(
+        Staged("set_size", 4.0, 6.0, Box("jake"), False),)), view())["params"]
+
+    box = _box(params, "set_size")
+    whole = _said(box)
+    assert not re.search(r"\d\.\d", whole), whole
+    # The head: the value in force, then what waits for the next trial.
+    assert _said(box.zone("head").find("now")[0]) == "4 objects → 6"
+    assert _said(box.zone("head").find("pv")[0]) == "4 objects"
+    (field,) = [n for n in box.zone("editor").walk() if n.tag == "input"]
+    assert (field.attrs["value"], field.attrs["data-step"], field.attrs["inputmode"]) == (
+        "4", "1", "numeric")
+    assert "1 to 36 objects" in _said(box.zone("more"))
+    assert "staged → 6 by" in _said(box.zone("more"))
+
+    other = _box(params, "fix_window")
+    (field,) = [n for n in other.zone("editor").walk() if n.tag == "input"]
+    assert (field.attrs["value"], field.attrs["data-step"], field.attrs["inputmode"]) == (
+        "2.35", "0.1", "decimal")
+
+
+def test_a_box_keeps_its_reasons_behind_more():
+    """The design's goal 1 and the layout review's finding 2 (the PI: "descriptions are too
+    long"): the limits with their reasons, where the value comes from, the conditions and the
+    draw, *hand back*, the whole of what is staged and the whole refusal sit inside the box's
+    *more*, a `<details>` that opens in place, and nowhere else on the box. The status line is one
+    line: one span, never wrapped (cut short with its whole text in its `title`), the refusal's
+    gist in it, its whole sentence in *more*."""
+    why = ("'fix_hold' at 30 is refused, and the previous value stands: the trial ends "
+           "NO_FIXATION after 10 s, while the hold can take up to 30 s, so some trials could "
+           "never be answered; shorten the hold or lengthen the timeout (XC-343)")
+    row = ParamRow.of("fix_hold", "s", 0.0, None, 0.5, False, source="person",
+                      conditions=("near", "far"), draw="uniform from 0.4 to 0.6 s",
+                      why={"low": "below 0 cannot be"})
+    params = fragments(frame(params=(row,), refusals=(
+        Refused("fix_hold", Box("jake"), why, cid="box-1", value=30.0),)), view())["params"]
+
+    box = _box(params, "fix_hold")
+    more = box.zone("more")
+    assert more.tag == "details" and "open" not in more.attrs
+    assert _said(more.children[0]) == "more" and more.children[0].tag == "summary"
+    inside = _said(more)
+    outside = " ".join(_said(box.zone(z)) for z in ("head", "editor", "status"))
+    for said in (_said(_Tree(web._range(row)).root), "held by a person",
+                 "set or drawn by conditions near, far", "its draw: uniform from 0.4 to 0.6 s",
+                 " ".join(html.unescape(why).split()), "hand back"):
+        assert said in inside, said
+        assert said not in outside, said
+    assert [n for n in more.walk() if n.attrs.get("data-cmd") == "hand_back"]
+
+    status = box.zone("status")
+    (say,) = status.find("say")
+    assert "\n" not in say.text() and not [n for n in say.walk() if n.tag in ("br", "div", "p")]
+    assert _said(say).startswith("refused 30.00 · the trial ends NO_FIXATION")
+    assert len(_said(say)) < len(why) and say.attrs["title"] == _said(say)
+    assert "refused" in box.classes()
+    rule = re.search(r"\.box \.status \.say \{([^}]*)\}", _CSS).group(1)
+    assert "white-space: nowrap" in rule and "text-overflow: ellipsis" in rule
+    # Apply and Discard sit at the status line's right, hidden by `visibility` until a draft, so
+    # the box's height never jumps (the design's anti-goals).
+    acts = status.find("acts")[0]
+    assert [(n.attrs.get("data-discard"), n.attrs.get("data-apply")) for n in acts.walk()
+            if n.tag == "button"] == [("fix_hold", None), (None, "fix_hold")]
+    assert re.search(r"\.box \.status \.acts \{[^}]*visibility: hidden", _CSS)
+    assert re.search(r"\.box\.draft \.status \.acts \{[^}]*visibility: visible", _CSS)
+
+
+def test_every_field_says_its_unit_the_drawn_side_too():
+    """The design's call (the PI's units, "Seconds stay seconds, the unit beside every field, the
+    drawn side's fields included"; the controls review's F9: "no unit on any of them"): every
+    field a box types a number in -- its value, a value over its draw, the drawn side's shapes,
+    a size's factor, its draw's live numbers -- has its unit beside it; a list's weights are
+    relative, and say so."""
+    shape = {"shape": "non_aging", "numbers": {"shortest": 0.5, "longest": 1.25},
+             "values": [], "weights": [], "by": "person"}
+    rows = (
+        ParamRow.of("fix_hold", "s", 0.0, None, 0.5, False, source="form", switch="drawn",
+                    shape=shape),
+        ParamRow.of("fix_acquisition", "s", 0.0, None, 2.0, False, source="draw",
+                    draw="uniform from 1 to 3 s", numbers={"low": 1.0, "high": 3.0}),
+        ParamRow.of("disc_size", "deg", 0.0, None, 1.0, False, source="task", switch="scaled"),
+        ParamRow.of("set_size", "objects", 1.0, 36.0, 4.0, False, whole=True, step=1.0),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+
+    fields = 0
+    for name, unit in (("fix_hold", "s"), ("fix_acquisition", "s"), ("disc_size", "deg"),
+                       ("set_size", "objects")):
+        box = _box(params, name)
+        for node in box.walk():
+            if node.tag != "input" or not ({"data-param", "data-form", "data-number"}
+                                           & set(node.attrs)):
+                continue
+            fields += 1
+            said, at = None, node.parent
+            while said is None and at is not box:
+                units = [c for c in at.children if isinstance(c, _Node)
+                         and "unit" in c.classes() and c.tag == "span"]
+                said = _said(units[0]) if units else None
+                at = at.parent
+            assert said, (name, node.attrs)
+            form = node.attrs.get("data-form")
+            expected = ("relative" if form == "weights" else "× each object's eccentricity"
+                        if form == "factor" else unit)
+            assert said == expected, (name, node.attrs, said)
+    # fix_hold: each shape's fields on its drawn side (11, a list's values and a weighted list's
+    # values and weights among them) and the value over its draw; fix_acquisition: the value over
+    # its draw and its two live numbers; disc_size: its field and its factor; set_size: its field.
+    assert fields == 11 + 1 + 3 + 2 + 1, fields
+
+
+def test_runtime_still_needed_reads_as_words():
+    """The workflow review's F12 (Runtime, "Still needed": `this block has no percentage rule, so
+    this changes nothing here` drawn one letter per line down 950 px): a row of the pane that holds
+    a sentence and a button wraps, the button going under the sentence where both do not fit,
+    never squeezing the sentence to a letter's width (`.kv.wrap`; a browser test measures it)."""
+    need = fragments(frame(rule=None, owed={"ecc 10": 18}), view())["rt-need"]
+    tree = _Tree(need).root
+    rows = [node for node in tree.walk() if "kv" in node.classes()
+            and [c for c in node.children if isinstance(c, _Node) and c.tag == "button"]
+            and [c for c in node.children if isinstance(c, _Node) and "nm" in c.classes()]]
+    assert len(rows) >= 3, need  # drumming, clear, and the percentage's
+    assert all("wrap" in row.classes() for row in rows), [row.attrs for row in rows]
+    assert any("this block has no percentage rule" in _said(row) for row in rows)
+    rule = re.search(r"\.kv\.wrap \{([^}]*)\}", _CSS).group(1)
+    assert "flex-wrap: wrap" in rule
+    assert re.search(r"\.kv\.wrap > span \{[^}]*flex: 1 1 \d+em", _CSS)
