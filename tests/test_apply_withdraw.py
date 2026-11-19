@@ -329,6 +329,10 @@ def test_a_withdraw_pressed_while_its_change_waits_takes_it_back_in_a_running_se
     assert {line["params"]["fix_hold"] for line in _lines(session)} == {0.3}
     assert not session.refusals and not _fed(session, "set")
     assert _frames(link)[-1].withdrawals == ("box-1",)
+    # The re-review's M-c: a `wlx taskd` session back between runs lists none (`Session
+    # .withdrawals`: empty between runs).
+    session._after_service_run()
+    assert session.withdrawals == ()
 
 
 def test_a_change_drained_beside_a_withdraw_still_waits_a_boundary(tmp_path):

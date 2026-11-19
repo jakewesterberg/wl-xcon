@@ -5443,7 +5443,7 @@ _SCRIPT = """
     box.classList.toggle("sending", sending);
     box.classList.toggle("cannot", Boolean(draft && draft.error) && !sending);
     hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
-    hold(box.querySelector("[data-discard]"), sending ? !out[name].answered : !draft);
+    hold(box.querySelector("[data-discard]"), sending ? !answeredLong(out[name]) : !draft);
     mirrorOne(name);
   }
   // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
@@ -5958,12 +5958,18 @@ _SCRIPT = """
   // **Discard** (and Esc): the box back to what it is headed to -- what this page sent and the rig
   // has not yet applied, else the value in force -- the field it was typed in focused again.
   // **An act answered *sent* and not yet answered by a frame** is let go by Discard and Esc too (the
-  // whole-build review's I2: a box always has a way back): the box back to the value in force,
-  // saying the rig has not confirmed it -- a frame that then shows it waiting or in force says so.
+  // whole-build review's I2: a box always has a way back), once a frame has come since without the
+  // rig's word on it (`answeredLong`): the box back to the value in force, saying the rig has not
+  // confirmed it -- a frame that then shows it waiting or in force says so.
+  function answeredLong(sent) {
+    // Not before (the fix wave's re-review, N1): Enter then Esc to leave the field, the design's
+    // keys, comes before the rig's next frame, and must leave the change on its way.
+    return Boolean(sent && sent.answered && framesSeen - sent.at >= 1);
+  }
   function discard(name, field) {
     var box = cardOf(name);
     var sent = out[name];
-    if (!box || (sent && sent.phase === "sending" && !sent.answered)) { return; }
+    if (!box || (sent && sent.phase === "sending" && !answeredLong(sent))) { return; }
     var picked = field ? fieldOf(field) : null;
     if (sent && sent.phase === "sending") {
       delete out[name];
@@ -7481,7 +7487,7 @@ _SCRIPT = """
     if (e.key === "Enter") { e.preventDefault(); applyBox(name); }
     else if (e.key === "Escape") {
       e.preventDefault();
-      var waited = out[name] && out[name].phase === "sending" && out[name].answered;
+      var waited = out[name] && out[name].phase === "sending" && answeredLong(out[name]);
       if (drafts[name] || waited) { discard(name, typed === field ? field : null); } else { typed.blur(); }
     }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
@@ -7496,7 +7502,10 @@ _SCRIPT = """
     }
   }
   document.addEventListener("focusout", function (e) {
-    var box = e.target && e.target.closest ? e.target.closest(".box") : null;
+    var copy = pinOf(e.target);
+    // A pinned copy's field ends its box's fraction as the box's own does (the re-review's M-a).
+    var box = copy ? cardOf(copy.getAttribute("data-pin"))
+      : e.target && e.target.closest ? e.target.closest(".box") : null;
     if (box && fractions[nameOf(box)]) {
       delete fractions[nameOf(box)];
       refresh(box);

@@ -39,8 +39,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   and `Withdraw` (change kind `withdrawn`, accepted by wl-preproc 2026-11-19, XC-529 closed), whole settings, groups,
   percents, one bar, find and pins, telemetry schema 23; then its whole-build review's fix wave (a withdraw is read
   ahead of the boundary, C1; "withdrawn" said only on the rig's word, `Telemetry.withdrawals`, I1; I2 to I5, I7,
-  M2, M4, M5; I6 and the other Minors parked as XC-535 to XC-541). **6518 passed**, none skipped; the browser
-  module in Chromium and WebKit, 147 each. Its ledger, git-ignored: `.superpowers/sdd/2026-11-19-console-interface/`
+  M2, M4, M5; I6 and the other Minors parked as XC-535 to XC-541; its re-review's N1, M-a and M-c fixed, M-d XC-542).
+  **6521 passed**, none skipped; the browser module in Chromium and WebKit, 149 each. Its ledger, git-ignored:
+  `.superpowers/sdd/2026-11-19-console-interface/`
   (`progress.md`, one report per task); the earlier build's: `.superpowers/sdd/2026-11-16-console-settings/`.
 - **wl-xtasks `console-settings-2026-11-16`** (worktree `/Users/jakewesterberg/GitHub/wl-xtasks-worktrees/console-settings-2026-11-16`,
   `d25e203`, from wl-xtasks `64929fe`, **not merged, not pushed**): the tasks' bounds, sections, and, since the rework's
@@ -50,7 +51,7 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   step and floor as percents too?
 - **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the pop-out's
   revision, designed with the PI and approved (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks,
-  ask XC-514, codes from 4139). Its counter text must say the next free code (XC-542) when it is built.
+  ask XC-514, codes from 4139). Its counter text must say the next free code (XC-543) when it is built.
 - **wl-preproc accepted XC-513 in full on 2026-11-18** (groups 1 to 4 and the addendum, no renames), and `light_xy`
   in place of the xy saturation formula, as named; the ask is marked answered in `docs/pending-wl-preproc-amendments.md`.
 

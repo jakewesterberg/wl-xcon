@@ -1672,6 +1672,20 @@ def test_while_paused_the_controls_show_the_fluid_total_and_what_the_last_press_
     assert "fluid session" not in _controls(), "said beside the live button alone"
 
 
+def test_the_scripts_top_level_names_are_each_declared_once():
+    """The page's script is one closure, so a second `function NAME` or `var NAME` at its top level
+    silently replaces the first wherever either is called -- the fix wave's round 2 found two
+    (`UNCONFIRMED`, the sign-in's word taken by a box's; `letGo`, the demo's taking a box's gate),
+    each passing every test of its own part. Each top-level name is declared once."""
+    import collections
+
+    declared = [function or variable for function, variable in re.findall(
+        r"^  (?:function (\w+)\(|var (\w+)\b)", _SCRIPT, re.M)]
+    assert len(declared) > 200, "the script's top level is read"
+    twice = sorted(name for name, count in collections.Counter(declared).items() if count > 1)
+    assert twice == [], twice
+
+
 def test_the_script_sends_one_reward_per_click_and_holds_the_button_until_its_answer():
     """No accidental doubles (PI, 2026-09-28). Python cannot run the script, so its text
     is pinned where it is load-bearing: a click while a reward is on its way does

@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-542.**
+**Next free ID: XC-543.**
 
 ## Brainstorms queued for the PI
 
@@ -254,6 +254,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-538** A drawn setting's value in force is cut in its head at 1024 and 1280 wide ("drawn eac…", "fix_acquis… drawn …"), its whole in the title only (whole-build review M6). — 2026-11-19, [console interface plan, the whole-build review, Task 8](superpowers/plans/2026-11-19-console-interface.md#task-8-the-page-around-the-boxes-one-bar-find-counts-pins-the-demo-panel) — waits on: nothing
 - **XC-539** A tall box (a drawn `fix_hold`, a refusal) stretches every box of its row (whole-build review M7; seen in Task 8's shots). — 2026-11-19, [console interface plan, the whole-build review, Task 8](superpowers/plans/2026-11-19-console-interface.md#task-8-the-page-around-the-boxes-one-bar-find-counts-pins-the-demo-panel) — waits on: nothing
 - **XC-540** *withdraw* is offered on, and accepted from, any console, and two pages making the same command id (a random six-character prefix and a count each) would be withdrawn together; the record names who staged and who withdrew (whole-build review M8; told to the PI with the fix wave). — 2026-11-19, [console interface plan, the whole-build review, Task 6](superpowers/plans/2026-11-19-console-interface.md#task-6-drafts-apply-apply-all-withdraw-and-a-frame-that-never-eats-a-press) — waits on: the PI's try-out
+- **XC-542** A box's three-frame bound on an act the rig has not answered (`web.ANSWER_FRAMES`) counts `wlx serve`'s keepalives, one every 15 s between boundaries, so an act answered early in a trial longer than about 45 s is said "not confirmed by the rig" before its own boundary shows it waiting (the fix wave's re-review, M-d); count boundary frames, or bound it by the trial. — 2026-11-19, [console interface plan, Task 6](superpowers/plans/2026-11-19-console-interface.md#task-6-drafts-apply-apply-all-withdraw-and-a-frame-that-never-eats-a-press) — waits on: nothing
 
 ## Debt
 

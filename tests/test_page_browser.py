@@ -4348,7 +4348,8 @@ def test_an_act_the_rig_never_answers_lets_its_box_go(rig):
     """The whole-build review's I2, its probe: an Apply answered *sent* that no frame then answers
     -- here another person's 0.35 comes into force and nothing names the act -- never leaves its
     box *sending…* with Apply, Discard and Esc dead. Esc lets it go at once, the box back to the
-    value in force, saying the rig has not confirmed it; and left alone, `ANSWER_FRAMES` frames
+    value in force, saying the rig has not confirmed it, once a frame has come without the rig's
+    word (before one, see the next test); and left alone, `ANSWER_FRAMES` frames
     later the box says so itself, the edit a draft again, Apply and Discard live, until its news
     changes."""
     from wl_xcon.link import Applied
@@ -4359,9 +4360,11 @@ def test_an_act_the_rig_never_answers_lets_its_box_go(rig):
     unconfirmed = "not confirmed by the rig · check the value in force"
 
     page.fill(field, "0.5")
+    page.evaluate("document.getElementById('sent').textContent = ''")
     page.press(field, "Enter")
     rig.wait_for(lambda: rig.dispatch.seen)
     rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+    assert page.is_disabled(f'{_b("fix_hold")} [data-discard]'), "held until a frame has come"
     _offer(rig, 41, params=other)
     _arrived(page, 41)
     assert _say(page, "fix_hold") == "sending…"
@@ -4388,6 +4391,35 @@ def test_an_act_the_rig_never_answers_lets_its_box_go(rig):
     assert not page.is_disabled(f'{_b("fix_hold")} [data-discard]')
     _offer(rig, 45, params=_task6_rows(0.4, fix_hold={"applied": Applied(45, "Kim")}))
     _says(rig, page, "fix_hold", "not sent · Kim changed this from trial 45")
+
+
+def test_enter_then_escape_before_a_frame_keeps_the_change_on_its_way(rig):
+    """The fix wave's re-review, N1: type, Enter, Esc to leave the field -- the design's keys, done
+    before the rig's next frame -- never discards a change the rig has: the line stays *sending…*,
+    the field keeps the sent value, Discard stays held, Esc leaves the field, and the frame that
+    then shows it waiting says *waiting · you*. Discard and Esc let an answered act go only once a
+    frame has passed without the rig's word on it. Run in WebKit too, for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Staged
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.evaluate("document.getElementById('sent').textContent = ''")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+    assert page.is_disabled(f'{_b("fix_hold")} [data-discard]'), "Discard held before any frame"
+    page.press(field, "Escape")
+    assert page.evaluate("document.activeElement.getAttribute('data-param')") is None, (
+        "Esc with no draft leaves the field")
+    assert _say(page, "fix_hold") == "sending…"
+    assert page.input_value(field) == "0.5" and _bar(page) is None
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=_task6_rows(),
+           staged=(Staged("fix_hold", 0.3, 0.5, Box("Jake Westerberg"), False, cid=cid),))
+    _says(rig, page, "fix_hold", "waiting · you")
+    assert page.input_value(field) == "0.5"
 
 
 def test_a_fault_in_the_answers_handler_is_never_said_not_delivered(rig):
@@ -5305,6 +5337,28 @@ def test_a_pinned_copys_tick_segment_and_swatch_work_as_its_box(rig):
     rig.wait_for(lambda: rig.dispatch.seen)
     (sent,) = rig.dispatch.seen
     assert (type(sent), sent.name, sent.value) == (SetParameter, "pairings", 66 + 2048)
+
+
+def test_leaving_a_pinned_copys_field_ends_a_refused_points_fraction(rig):
+    """The fix wave's re-review, M-a: a point refused in a pinned copy of a whole box refuses the
+    digits after it, as in the box; leaving the copy's field ends that, as leaving the box's own
+    does, so the box's draft can be sent again (its note kept until the box's news or value moves).
+    Run in WebKit too, for Safari."""
+    page = _task6_page(rig)
+    _pin(page, "set_size")
+    page.click('label[for="t-runtime"]')
+    copy = _pinned("set_size")
+    field = f'{copy} input[data-param="set_size"]'
+    page.wait_for_selector(field, state="visible")
+    page.fill(field, "")
+    page.type(field, "12.5")
+    assert page.input_value(field) == "12"
+    assert page.text_content(f"{copy} > .status > .say").strip() == "cannot send · whole numbers only"
+    assert page.is_disabled(f"{copy} [data-apply]")
+    page.mouse.click(2, 2)  # a neutral spot: the copy's field loses focus
+    rig.wait_for(lambda: not page.is_disabled(f"{copy} [data-apply]"))
+    assert page.text_content(f"{copy} > .status > .say").strip() == "whole numbers only"
+    assert not page.is_disabled(f'{_b("set_size")} [data-apply]'), "the box's own Apply too"
 
 
 def test_a_pin_with_its_store_blocked_lasts_the_page_and_nothing_breaks(rig):

@@ -1520,7 +1520,8 @@ class Session:
     #: **The command ids of the acts a withdrawal took back** (`withdrawals`; `_withdrawn`; the
     #: console interface rework's whole-build review, I1), oldest first, the newest
     #: `link.REFUSAL_HISTORY` -- the depth a refusal of a withdrawal is kept to, so the page reads
-    #: either answer as long. Empty as each run starts.
+    #: either answer as long. Empty as each run starts and as a service's run ends
+    #: (`_after_service_run`), so between runs.
     _withdrawn_cids: list[str] = field(init=False, default_factory=list, repr=False)
     #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
     #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
@@ -7387,6 +7388,9 @@ class Session:
         self._acts.clear()
         self._answers.clear()
         self._act_moments.clear()
+        # No act of a run left to withdraw, so none is listed withdrawn (`withdrawals`; the fix
+        # wave's re-review, M-c).
+        self._withdrawn_cids = []
         self.paused_at = None
         self.phase = "between_runs"
 
