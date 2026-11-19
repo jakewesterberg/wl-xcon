@@ -80,7 +80,8 @@ from wl_xcon.task import Show, actions_of  # noqa: E402
 WIDTHS = (480, 640, 960)
 SUPERSAMPLES = (2, 4)
 REPEATS = 50
-#: The pop-out's most discs: its `set_size` setting's top.
+#: The pop-out's most discs a run's staircase draws: Crowd's hardest, 12. The `set_size` setting
+#: goes to 36 by hand since the PI, 2026-11-19; that screen is not yet measured (XC-526).
 SET_SIZE = 12
 #: The pop-out's two stimuli: the fixation point and the ring.
 SHOWN = ("fix", "search")

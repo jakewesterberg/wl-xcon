@@ -269,7 +269,9 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     `contrast-on-default`). In both, its plan has no end of its own (`endless-plan`): the trainer
     ends a run; and the suggestions' margin, up to 20 answers, can reach a bar's count on the
     smallest windows (`margin-reaches-bar`; the re-review 2, M-7), the training plan's settings
-    being read over their ranges. **Since the console settings plan's Task 11 nothing else**: its
+    being read over their ranges; and the set size read at its top, the PI's 36 (2026-11-19), which
+    crowds the ring's windows (`crowded-array`). **Since the console settings plan's Task 11 nothing
+    else**: its
     caps gone and its open sides judged at their starts (the controller's ruling 5), the layout
     warns of nothing there (`test_the_popout_loads_with_no_layout_warning_at_its_starts`) -- the
     windows that could overlap over the old ranges (`crowded-array`), the fixation window reaching
@@ -290,8 +292,13 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
-                                             "margin-reaches-bar", "endless-plan"}
-    assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan"}
+                                             "margin-reaches-bar", "endless-plan", "crowded-array"}
+    assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan", "crowded-array"}
+    # The set size's range is closed (a highest is kept for `unbounded-set-size`), so the load
+    # reads it at its top: the PI's 36 (2026-11-19) on the 8° ring crowds the 1.5° windows.
+    for found in (on_default, on_measured):
+        crowded = [f.detail for f in found if f.code == "crowded-array"]
+        assert len(crowded) == 1 and "36 objects ('set_size')" in crowded[0], crowded
 
 
 def test_it_holds_the_pis_values(task):
@@ -1408,7 +1415,7 @@ BOUNDS = {
     "ring_radius": (0.0, None),
     "fix_luminance": (0.0, 80.0),
     "color_luminance": (None, 80.0),
-    "set_size": (1, 12),
+    "set_size": (1, 36),
     "array_rotation": (0.0, 360.0),
     "distractor_fraction": (0.0, 1.0),
     "pairings": (1, None),
@@ -1456,7 +1463,7 @@ def test_the_popouts_bounds_are_impossible_ones_with_reasons(task):
         **dict.fromkeys(("fix_luminance", "color_luminance"),
                         "white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
         "set_size": "a run builds every disc before its first frame, so a set size needs a "
-                    "highest: 12, Crowd's hardest",
+                    "highest: 36, the PI's (2026-11-19)",
         **dict.fromkeys(PLANNED, PLANNED_WHY),
     }
     assert limit_reason(numbers["ring_radius"], "low") == BELOW_ZERO
@@ -1514,8 +1521,9 @@ def test_the_popouts_object_window_is_three_times_a_discs_radius(task):
 def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     """The console settings plan's Task 11 (the controller's ruling 5): with its caps gone and its
     open sides judged at their starts, **the pop-out loads with no layout warning** (`check.LAYOUT`)
-    on either calibration -- twelve 1° discs on the 8° ring, 4.13° apart, their 1.5° windows and
-    the 2° fixation window clear of each other -- and none at its starts set (`check.laid_out`),
+    on either calibration but the set size's top -- read at the PI's 36 (2026-11-19), whose 1.5°
+    windows crowd on the 8° ring -- and none at its starts set (`check.laid_out`; twelve 1° discs
+    on the 8° ring, 4.13° apart, their windows and the 2° fixation window clear of each other),
     nor any limit without its reason."""
     from wl_xcon.check import LAYOUT, UNEXPLAINED_LIMIT, laid_out
 
@@ -1524,8 +1532,9 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     for calibration in (SRGB, measured()):
         found = check_task(task, allocation, geometry=DIRECT, calibration=calibration,
                            deployment=Deployment.RIG_FIXED, source=TASK_FILE)
-        assert {f.code for f in found} & {*LAYOUT, UNEXPLAINED_LIMIT} == set(), [
-            f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}]
+        said = [f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}]
+        # Only the set size's top (a closed range is read at its ends): the PI's 36, 2026-11-19.
+        assert len(said) == 1 and "36 objects ('set_size')" in said[0], said
         at_starts = laid_out(task, {**starts, "set_size": 12}, allocation=allocation,
                              geometry=DIRECT, calibration=calibration,
                              deployment=Deployment.RIG_FIXED)

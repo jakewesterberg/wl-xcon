@@ -44,7 +44,7 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   reviews. The ledger, git-ignored: the worktree's `.superpowers/sdd/2026-11-16-console-settings/`.
 - **`tryout-design-2026-11-17`** (worktree `.claude/worktrees/tryout-design-2026-11-17`, not pushed): the pop-out's
   revision, designed with the PI and approved (`...-popout-revision-design.md`, plan `...-popout-revision.md`, 8 tasks,
-  ask XC-514, codes from 4139). Its counter text must say XC-526 (the next free) when it is built.
+  ask XC-514, codes from 4139). Its counter text must say XC-527 (the next free) when it is built.
 - **wl-preproc accepted XC-513 in full on 2026-11-18** (groups 1 to 4 and the addendum, no renames), and `light_xy`
   in place of the xy saturation formula, as named; the ask is marked answered in `docs/pending-wl-preproc-amendments.md`.
 
@@ -70,8 +70,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
 
 ## What is next (the PI, 2026-11-07, 2026-11-14 and 2026-11-16)
 1. **The console settings build to merge**, in this order (the scoped re-review of the fix wave and the PI's-answers build
-   is done, clean): the PI's review of the wl-xtasks branch `console-settings-2026-11-16` (its training bounds,
-   XC-519); his Safari try-out (the browser module passed in WebKit at `3c1075e`); push and CI (a sweep by hand on the
+   is done, clean; his review of the wl-xtasks branch `console-settings-2026-11-16` is done, 2026-11-19: the
+   training bounds kept for now, XC-519; the set size's top raised to 36; saturation read at the set's design
+   lightness, as built): his Safari try-out (the browser module passed in WebKit at `3c1075e`); push and CI (a sweep by hand on the
    branch); the merge on his yes by name. **Then the pop-out revision**, from `tryout-design-2026-11-17`.
 2. **The XC-505 warning**, a side build after demo mode (the PI, 2026-11-14: "Warn when settings allow it").
 3. **Then the display (build E)**, designed with the PI; "done" includes a real screen.

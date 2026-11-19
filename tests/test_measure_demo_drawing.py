@@ -46,11 +46,13 @@ def _popout():
 
 
 def test_it_draws_the_popouts_ring_at_its_most_discs_and_its_point():
-    """The heaviest screen: the ring at `set_size`'s top, twelve, and the fixation point, every one
-    a flat disc, resolved through the sRGB standard as a demo's world resolves a frame."""
+    """The heaviest screen a run's staircase draws: the ring at Crowd's hardest, twelve, and the
+    fixation point, every one a flat disc, resolved through the sRGB standard as a demo's world
+    resolves a frame. The `set_size` setting's top, 36 by hand since the PI, 2026-11-19, is past
+    it and not yet measured (XC-526)."""
     task = _popout()
     (set_size,) = [param for param in task.params if param.name == "set_size"]
-    assert tool.SET_SIZE == set_size.high == 12
+    assert tool.SET_SIZE == 12 < set_size.high
 
     shown = tool.heaviest(task, DIRECT)
 
