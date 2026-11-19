@@ -1369,9 +1369,9 @@ SECTIONS = {
     **dict.fromkeys(("fix_window", "object_window"), "Gaze windows"),
     **dict.fromkeys(("fix_size", "fix_luminance"), "Stimuli/fixation point"),
     **dict.fromkeys(("disc_size", "ring_radius", "set_size", "array_rotation"), "Stimuli/array"),
-    **dict.fromkeys(("odd_color", "distractor_color", "color_luminance", "distractor_fraction"),
-                    "Colors"),
-    "pairings": "Pairings",
+    # The pairings with the colors they pair (the console interface rework's Task 9).
+    **dict.fromkeys(("odd_color", "distractor_color", "color_luminance", "distractor_fraction",
+                     "pairings"), "Colors"),
     **dict.fromkeys(("move_up_bar", "move_up_window", "move_back_bar", "move_back_window"),
                     "Training/bars"),
     **dict.fromkeys(("staircase_down", "staircase_up", "fade_in_step", "crowd_step",
@@ -1382,8 +1382,9 @@ SECTIONS = {
 
 def test_the_popout_declares_the_companion_designs_sections(task):
     """§7 of the console settings design ("The task file names it") and the companion design's §5:
-    Timing; Gaze windows; Stimuli, as fixation point and array; Colors; Pairings; and the Training
-    tab's bars, staircases and suggestions. **Every setting has its section**, none falling to
+    Timing; Gaze windows; Stimuli, as fixation point and array; Colors, the pairings among them
+    since the console interface rework's Task 9; and the Training tab's bars, staircases and
+    suggestions. **Every setting has its section**, none falling to
     Other; the six times name none and go to Timing by their unit; the training ones sit under
     `TRAINING_SECTION`, which the Training tab gathers (Task 10)."""
     from wl_xcon.task import OTHER, TRAINING_SECTION, section_of
@@ -1866,3 +1867,167 @@ def test_a_margin_that_can_reach_a_bars_count_is_warned_at_load_and_live(task, t
               and said.startswith("margin-reaches-bar")]
     assert len(warned) == 1 and "as few as 4 right answers" in warned[0]
 
+
+
+# --- The console interface rework's Task 9: plain names, one sentence, whole numbers, groups ---
+
+#: **The pop-out's counts** (the console interface design's goal 6; the PI, 2026-11-19, of a set
+#: size: "there should not be a decimal option for entry"): every setting that can only be a whole
+#: number -- the set size, the pool's value, the bars' windows, the margin, the staircases' counts,
+#: Crowd's step and floor -- and nothing legitimately fractional.
+WHOLE = ("set_size", "pairings", "move_up_window", "move_back_window", "suggestion_margin",
+         "staircase_down", "staircase_up", "crowd_step", "crowd_floor")
+#: The units that count, each held whole.
+COUNTS = ("objects", "answers", "pairings")
+#: **The training rules as the trainer reads them** (the design's goal 8; its own example, "Move up
+#: when at least [80]% of the last [50] answers are right"): each group's title, its settings in
+#: its box's order, and its sentence. The PI reviews the words on the wl-xtasks branch.
+GROUPS = (
+    ("Move up", ("move_up_bar", "move_up_window"),
+     "Move up when at least {move_up_bar} of the last {move_up_window} answers at the hardest "
+     "step are right"),
+    ("Move back", ("move_back_bar", "move_back_window"),
+     "Move back when fewer than {move_back_bar} of the last {move_back_window} answers are right"),
+    ("Staircase", ("staircase_down", "staircase_up"),
+     "One level harder after {staircase_down} right in a row, one level easier after "
+     "{staircase_up} wrong in a row"),
+)
+
+
+def test_every_popout_setting_has_a_label_and_help(task):
+    """The design's goal 5 (the PI, 2026-11-19: "descriptions are too long ... what are
+    pairings?"): **every setting has a plain name and one sentence saying what it is**. The name is
+    the trainer's words, `LABEL_LIMIT` at most, no code name's underscore, none two alike (the
+    load's `bad-label` refuses that); the code name stays as it is, the record's and the task's. The
+    sentence is one, `REASON_LIMIT` at most, ending in its one full stop, and names no number: its
+    value, limits and their reasons are the box's and its *more*'s, not the sentence's. **The
+    pairings' sentence says what a pairing is**: an odd disc's color with the distractors'."""
+    import re
+
+    from wl_xcon.check import BAD_LABEL
+    from wl_xcon.task import LABEL_LIMIT, REASON_LIMIT
+
+    for param in task.params:
+        assert param.label and len(param.label) <= LABEL_LIMIT, param.name
+        assert "_" not in param.label and param.label != param.name, param.name
+        assert param.help and len(param.help) <= REASON_LIMIT, param.name
+        assert param.help.endswith(".") and param.help.count(".") == 1, param.name
+        assert not re.search(r"[0-9]", param.help), param.name
+    labels = [" ".join(param.label.split()).casefold() for param in task.params]
+    assert len(set(labels)) == len(labels)
+    assert BAD_LABEL not in {f.code for f in check_task(
+        task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=measured(),
+        deployment=Deployment.RIG_FIXED, source=TASK_FILE)}
+    (pairings,) = [param for param in task.params if param.name == "pairings"]
+    assert "odd" in pairings.help and "distractor" in pairings.help and "pair" in pairings.help
+
+
+def test_the_popouts_counts_are_whole(task):
+    """The design's goal 6: **each count is declared whole** -- `WHOLE`, every setting in a unit
+    that counts and none other -- so its box steps by 1 with no decimals, the load finds no
+    `bad-whole`, and **a fraction given one is refused** before a run starts (`preflight.values`)
+    with the sentence that says it is a whole number."""
+    from wl_xcon import preflight
+    from wl_xcon.check import BAD_WHOLE
+    from wl_xcon.task import step_of
+
+    assert {param.name for param in task.params if param.whole} == set(WHOLE)
+    assert {param.name for param in task.params if param.unit in COUNTS} == set(WHOLE)
+    assert {param.name: step_of(param) for param in task.params if param.whole} == dict.fromkeys(
+        WHOLE, 1)
+    assert BAD_WHOLE not in {f.code for f in check_task(
+        task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=measured(),
+        deployment=Deployment.RIG_FIXED, source=TASK_FILE)}
+    starts = _values(task)
+    assert preflight.values(task, starts).result == preflight.PASS
+    for param in task.params:
+        if param.whole:
+            item = preflight.values(task, {**starts, param.name: param.start + 0.5})
+            assert item.result == preflight.FAIL, param.name
+            assert (f"'{param.name}' is a whole number of {param.unit}, and "
+                    f"{param.start + 0.5:g} is not one") in item.said, (param.name, item.said)
+
+
+def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
+    """The design's goal 8 (the PI, 2026-11-19, "One box after Timing"): **the bars and the
+    staircases read as three rules, each one box with one Apply** -- *Move up*, *Move back* and
+    *Staircase* (`GROUPS`), their settings sharing a section, none a reward size (the load's
+    `bad-group`); **the two bars are percents**, and no other setting is; at the starts the rules
+    read "Move up when at least 80% of the last 50 answers at the hardest step are right". **The
+    path to the page**: a session on the task sends each group and each setting's plain name, help,
+    wholeness and percent, and the Training tab draws each rule as one box whose sentence holds its
+    fields, its settings drawing no box of their own."""
+    import re
+
+    from _frames import frame, view
+    from wl_xcon import web
+    from wl_xcon.link import GroupRow, ParamRow
+
+    assert [(group.name, group.settings, group.sentence) for group in task.groups] == list(GROUPS)
+    assert {param.name for param in task.params if param.percent} == {"move_up_bar",
+                                                                      "move_back_bar"}
+    assert "bad-group" not in {f.code for f in check_task(
+        task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=measured(),
+        deployment=Deployment.RIG_FIXED, source=TASK_FILE)}
+    starts = {param.name: (f"{param.start * 100:g}%" if param.percent else f"{param.start:g}")
+              for param in task.params if param.start is not None}
+    assert [group.sentence.format(**starts) for group in task.groups] == [
+        "Move up when at least 80% of the last 50 answers at the hardest step are right",
+        "Move back when fewer than 50% of the last 50 answers are right",
+        "One level harder after 3 right in a row, one level easier after 1 wrong in a row"]
+
+    session = Session(_spec(tmp_path, seed=1), card=Card(), pump=Pump())
+    groups = tuple(GroupRow(*group) for group in session.groups)
+    assert [(group.name, group.settings, group.section) for group in groups] == [
+        ("Move up", ("move_up_bar", "move_up_window"), "Training/bars"),
+        ("Move back", ("move_back_bar", "move_back_window"), "Training/bars"),
+        ("Staircase", ("staircase_down", "staircase_up"), "Training/staircases")]
+    rows = tuple(ParamRow.of(*row) for row in session.parameters)
+    by_name = {row.name: row for row in rows}
+    declared = {param.name: param for param in task.params}
+    for name, row in by_name.items():
+        if name in declared:
+            param = declared[name]
+            assert (row.label, row.help, row.whole, row.percent) == (
+                param.label, param.help, param.whole, param.percent), name
+    training = web.fragments(frame(params=rows, groups=groups), view())["training-params"]
+    cards = re.findall(r'data-card="([^"]+)"', training)
+    assert {"Move up", "Move back", "Staircase"} <= set(cards)
+    assert not {"move_up_bar", "move_up_window", "move_back_bar", "move_back_window",
+                "staircase_down", "staircase_up"} & set(cards)
+    sentence = re.search(r'data-card="Move up".*?<div class="sentence">(.*?)</div>',
+                         training).group(1)
+    words = re.findall(r'<span class="gs">(.*?)</span>', sentence)
+    assert words == ["Move up when at least ", " of the last ",
+                     " answers at the hardest step are right"]
+    assert 'data-param="move_up_bar"' in sentence and 'data-percent="1"' in sentence
+    assert 'data-param="move_up_window"' in sentence and 'data-whole="1"' in sentence
+
+
+def test_pairings_sit_with_the_colors(task, tmp_path):
+    """The design (Task 9): **the pairings sit in Colors, with the colors they pair**, not in a
+    section of their own; on the page their grid is a box of the Colors section."""
+    import re
+
+    from _frames import frame, view
+    from wl_xcon import web
+    from wl_xcon.link import GroupRow, ParamRow
+    from wl_xcon.task import section_of
+
+    sections = {param.name: section_of(param) for param in task.params}
+    assert sections["pairings"] == "Colors"
+    assert "Pairings" not in set(sections.values())
+    assert [name for name, section in sections.items() if section == "Colors"] == [
+        "odd_color", "distractor_color", "color_luminance", "distractor_fraction", "pairings"]
+    session = Session(_spec(tmp_path, seed=1), card=Card(), pump=Pump())
+    rows = tuple(ParamRow.of(*row) for row in session.parameters)
+    params = web.fragments(frame(params=rows, groups=tuple(GroupRow(*group)
+                                                           for group in session.groups)),
+                           view())["params"]
+    sections = re.findall(
+        r'<details class="sec" data-sec="([^"]+)"(.*?)(?=<details class="sec" |$)', params, re.S)
+    boxed = {section: re.findall(r'<div class="box[^"]*" data-card="([^"]+)"', body)
+             for section, body in sections}
+    assert boxed["Colors"] == ["odd_color", "distractor_color", "color_luminance",
+                               "distractor_fraction", "pairings"], boxed
+    assert "Pairings" not in boxed
