@@ -61,7 +61,7 @@ from wl_xcon.web import (
     _clock_time,
     CONTROLS_AT_THE_BOX,
     CONTROLS_ELSEWHERE,
-    DEBOUNCE_MS,
+    APPLY_ALL_LIMIT,
     END_CONFIRM,
     FONTS,
     FRAGMENT_IDS,
@@ -667,7 +667,7 @@ def test_parameters_show_value_range_ceiling_and_what_is_staged():
     )["params"]
 
     assert params.count('<div class="box') == 5
-    assert '<div class="box staged" data-card="fix_hold">' in params
+    assert '<div class="box staged" data-card="fix_hold" ' in params
     assert f"staged → 0.40 by {_who(Box('jake'))}" in params
     assert '<span class="ceil">ceiling</span>' in params
     # Review fix round 1: the ceiling keeps its own decimals (`_significant`), unlike
@@ -1063,7 +1063,7 @@ def test_the_nonce_is_escaped_into_its_attribute():
 def test_the_page_tells_its_script_when_a_stream_is_stale():
     document = page(fragments(frame(), view()), stale_after_s=45.0, nonce="n0nce")
 
-    assert ('<body data-stale-after="45" data-can-write="0" data-debounce-ms="600" '
+    assert ('<body data-stale-after="45" data-can-write="0" data-apply-all-limit="50" '
             'data-can-gaze="0" data-gaze-every-ms="100">') in document
 
 
@@ -1135,10 +1135,14 @@ def test_the_script_does_only_what_spec_4_3_and_5_2_ask():
     # would have slipped past a pin that only read the trailing word -- and allow
     # only the fragment renderer's own two forms. No other way to write markup -- but a demo's
     # drawing and its key list (demo mode's Task 9), each rendered by `wlx serve` too
-    # (`demoscreen.render`, `web.demo_keys`) and sent as its own event, `drawn`. The Training tab's
-    # cards held while typed in (the console settings build's Task 10) are a fragment it rendered.
+    # (`demoscreen.render`, `web.demo_keys`) and sent as its own event, `drawn`. The boxes' own
+    # fragment is parsed into a `<template>` and patched in box by box (the console interface
+    # rework's Task 6, `patchCards`): the first `html`.
     assert re.findall(r"\.innerHTML\s*\+?=\s*([^;]+);", _SCRIPT) == [
-        "html", "heldParams", "heldTraining", "heldMoments", "payload.keys", "payload.svg"]
+        "html", "html", "heldMoments", "payload.keys", "payload.svg"]
+    patch = _SCRIPT.split("  function patchCards(id, html) {", 1)[1].split("\n  }\n", 1)[0]
+    assert 'var made = document.createElement("template");' in patch
+    assert "made.innerHTML = html;" in patch
     assert "outerHTML" not in _SCRIPT
     assert "insertAdjacentHTML" not in _SCRIPT
     assert "document.write" not in _SCRIPT
@@ -1438,19 +1442,24 @@ def test_every_control_string_is_escaped():
     assert EVIL not in text
 
 
-def test_the_page_tells_its_script_whether_it_may_write_and_the_debounce():
+def test_the_page_tells_its_script_whether_it_may_write_and_apply_alls_limit():
     """The page is rendered per request, so the box's own page says it may write and
     a LAN viewer's says it may not; the script reads both from `<body>`. The 600 ms
-    debounce is the mockup's, housekeeping and not a measurement."""
+    debounce that rode there went with the arrows' sends (the console interface rework's Task
+    6: nothing is sent until Apply); Apply all's limit rides there now, 50, below the rig's 64
+    (`link.APPLY_LIMIT`), so a refused act's every refusal fits in a frame's last 50."""
     box = page(fragments(frame(), view()), stale_after_s=30.0, nonce="n0nce", can_write=True)
     lan = page(
         fragments(frame(), view(can_write=False)), stale_after_s=30.0, nonce="n0nce"
     )
 
-    assert DEBOUNCE_MS == 600
-    assert ('<body data-stale-after="30" data-can-write="1" data-debounce-ms="600" '
+    from wl_xcon.link import APPLY_LIMIT, REFUSAL_HISTORY
+
+    assert APPLY_ALL_LIMIT == 50 == REFUSAL_HISTORY < APPLY_LIMIT
+    assert "data-debounce-ms" not in box
+    assert ('<body data-stale-after="30" data-can-write="1" data-apply-all-limit="50" '
             'data-can-gaze="0" data-gaze-every-ms="100">') in box
-    assert ('<body data-stale-after="30" data-can-write="0" data-debounce-ms="600" '
+    assert ('<body data-stale-after="30" data-can-write="0" data-apply-all-limit="50" '
             'data-can-gaze="0" data-gaze-every-ms="100">') in lan
     for control in ('id="sched-kind"', 'id="sched-value"', 'id="sched-set"'):
         assert re.search(control + r"[^>]* disabled", lan), control
@@ -1469,11 +1478,13 @@ def test_the_page_holds_the_stop_confirm_and_the_mark_note_hidden():
     assert 'id="mark-note" maxlength="500"' in document
 
 
-def test_the_script_debounces_the_arrows_and_keeps_p_and_m_out_of_text_boxes():
-    """Spec §5.2: a change is sent once the arrows stop being clicked, and the keys do
-    nothing while a text box has focus, or when held (a held key does not repeat)."""
-    assert "setTimeout(function () { delete timers[key]; send(input); }, debounceMs)" in _SCRIPT
-    assert "clearTimeout(timers[key]);" in _SCRIPT
+def test_the_script_sends_nothing_from_the_arrows_and_keeps_p_and_m_out_of_text_boxes():
+    """Spec §5.2, as the console interface rework's Task 6 left it: the arrows send nothing (they
+    make a draft, sent by the box's Apply; the 600 ms debounce and its timers are gone), and the
+    keys do nothing while a text box has focus, or when held (a held key does not repeat)."""
+    assert "debounce" not in _SCRIPT and "timers[" not in _SCRIPT
+    step = _SCRIPT.split("  function stepInput(input, dir) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "post(" not in step and "refresh(box);" in step
     assert "if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) { return; }" in _SCRIPT
     assert '/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable' in _SCRIPT
 
@@ -1488,11 +1499,19 @@ def test_the_script_asks_for_the_name_once_and_keeps_it_where_it_may():
     assert '"not sent: give your name first -- every command records who sent it"' in _SCRIPT
 
 
-def test_the_script_holds_a_parameter_card_it_is_being_typed_into():
-    """A frame that re-renders the parameter cards while a person types into one, or
-    while an arrow's debounce is pending, would replace the input under them; the
-    script holds the newest cards and swaps them in once the person is done."""
-    assert 'if (id === "params" && busy()) { heldParams = html; return; }' in _SCRIPT
+def test_the_script_keeps_the_editor_of_a_box_it_is_being_typed_into():
+    """A frame that re-renders the parameter cards while a person types into one would replace
+    the input under them. Since the console interface rework's Task 6 the script patches box by
+    box: a box with a draft, its act out or a field focused keeps its editor's nodes
+    (`patchDirty`), and only a pointer down holds a tab's frame whole (`heldCards`). The browser
+    tests drive it (`test_page_browser.py`'s `test_a_press_during_frames_acts_once`)."""
+    swap = _SCRIPT.split("  function swap(id, html) {", 1)[1].split("\n  }\n", 1)[0]
+    assert 'if (id === "params" || id === "training-params") {' in swap
+    assert "patchCards(id, html);" in swap
+    patch = _SCRIPT.split("  function patchCards(id, html) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "if (pressing()) { heldCards[id] = html; return; }" in patch
+    assert "} else if (dirty(box)) { held[name] = true; }" in patch
+    assert "patchDirty(box, given[name], before[name]);" in patch
 
 
 # --- Task 10 review, fix round 1 ----------------------------------------------------
@@ -2833,7 +2852,9 @@ def test_a_held_reward_stays_held_through_a_sign_in_state_change():
     # The held button is released through `applySignIn`, which disables it if signed out.
     released = _script_between("  function reward() {", "  // P4d-2b b3a-2 (spec §6.2): a run")
     assert released.index("held.disabled = false;") < released.index("applySignIn();")
-    assert "applySignIn();" in _script_between("  function release() {", "  function choose(")
+    # A press's end makes every box current through `settle`, which ends with the sign-in's gray.
+    assert "settle();" in _script_between("  function release() {", "  // The boxes as the page")
+    assert "applySignIn();" in _script_between("  function settle() {", "  // **The drafts bar**")
 
 
 def test_a_lapsed_tab_renews_on_load_and_whoami_reads_the_reason_word():
@@ -3371,8 +3392,9 @@ def test_a_setting_its_conditions_set_shows_no_spinner():
 def test_a_setting_without_live_numbers_shows_no_range_editor():
     """Review M-4 and Call 22: a card whose draw has numbers a person may change live
     (`ParamRow.numbers`: a uniform's ends, a normal's mean, spread and cut, a wait's three) has a
-    field for each, holding it as the wire carried it, and *change the range*; no other card has
-    either -- not one declared not live, a direction (XC-445), a weighted set or a list (XC-443),
+    field for each, holding it as the wire carried it, sent by its box's Apply (the console
+    interface rework's Task 6: *change the range* is gone); no other card has
+    any -- not one declared not live, a direction (XC-445), a weighted set or a list (XC-443),
     each sent with `numbers` `None`, nor one with no draw. Greyed away from the box."""
     rows = (
         ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
@@ -3388,18 +3410,18 @@ def test_a_setting_without_live_numbers_shows_no_range_editor():
     lan = fragments(frame(params=rows), view(can_write=False))["params"]
     cards = _cards(params)
 
-    assert params.count('data-cmd="range"') == 2
+    assert 'data-cmd="range"' not in params and "change the range" not in params
     assert ('<div class="rng"><label class="rn">low<input class="field mono" data-number="low" '
             'inputmode="decimal" value="0.75" aria-label="wait: low"><span class="unit">s</span>'
             '</label>') in cards["wait"]
     assert 'data-number="high" inputmode="decimal" value="1.25"' in cards["wait"]
-    assert ('<button type="button" class="btn small" data-cmd="range" data-name="wait">'
-            "change the range</button></div>") in cards["wait"]
+    assert ('<label class="rn">high<input class="field mono" data-number="high" inputmode="decimal" '
+            'value="1.25" aria-label="wait: high"><span class="unit">s</span></label></div>'
+            ) in cards["wait"]
     assert 'data-number="mean" inputmode="decimal" value="1"' in cards["gap"]
     assert 'data-number="sd" inputmode="decimal" value="0.1"' in cards["gap"]
     for name in ("angle", "fix_hold"):
-        assert "data-number" not in cards[name] and 'data-cmd="range"' not in cards[name], name
-    assert lan.count(f'data-name="wait" disabled title="{CONTROLS_AT_THE_BOX}">') == 1
+        assert "data-number" not in cards[name], name
     assert lan.count(f'aria-label="wait: low" disabled title="{CONTROLS_AT_THE_BOX}">') == 1
 
 
@@ -3589,10 +3611,10 @@ def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escap
     assert EVIL not in text
     # Five on the held card (its condition, its draw, a number's name thrice), the other card's
     # conditions and its staged hand-back -- in its *more*, and in its head after the arrow and
-    # that head's `title` (the console interface rework's Task 5) -- seven in the feed (a range's
-    # block among them), the moment's words and what a revert to it changes, and the setting the
-    # eased line names.
-    assert text.count(html.escape(EVIL, quote=True)) == 18
+    # that head's `title` (the console interface rework's Task 5), and in who is changing it under
+    # a draft, `data-under` (its Task 6) -- seven in the feed (a range's block among them), the
+    # moment's words and what a revert to it changes, and the setting the eased line names.
+    assert text.count(html.escape(EVIL, quote=True)) == 19
 
 
 def test_the_page_says_while_a_persons_change_keeps_trials_out_of_moving_up():
@@ -4335,8 +4357,9 @@ def test_a_timing_card_offers_fixed_and_drawn_with_each_shapes_fields():
                     f'inputmode="decimal" value=""') in fields, (shape, number)
     assert fixed.count('data-fields="non_aging">') == 1
     assert 'data-fields="uniform" hidden>' in fixed
-    assert ('<button type="button" class="btn small" data-cmd="form" data-name="fix_hold">'
-            "apply</button>") in fixed
+    # The box's Apply sends the drawn side (the console interface rework's Task 6): no *apply* of
+    # its own.
+    assert 'data-cmd="form"' not in fixed and 'data-apply="fix_hold"' in fixed
 
     drawn = cards["wait"]
     assert '<div class="side drawn" data-side="drawn">' in drawn
@@ -4349,11 +4372,11 @@ def test_a_timing_card_offers_fixed_and_drawn_with_each_shapes_fields():
     assert 'data-cmd="hand_back" data-name="wait"' in drawn
     assert '<option value="uniform" selected>uniform</option>' in cards["gap"]
     assert 'data-form="low" inputmode="decimal" value="0.2"' in cards["gap"]
-    assert 'data-cmd="range" data-name="gap"' in cards["gap"], "the block's range still changes"
+    assert 'data-number="low"' in cards["gap"], "the block's range still changes"
     assert 'data-form="values" inputmode="decimal" value="0.3, 0.5"' in cards["hold"]
     assert 'data-form="weights" inputmode="decimal" value="3.0, 1.0"' in cards["hold"]
-    assert "data-switch" not in cards["fix_window"] and 'data-cmd="form"' not in cards["fix_window"]
-    assert lan.count(f'data-cmd="form" data-name="fix_hold" disabled title="{CONTROLS_AT_THE_BOX}"'
+    assert "data-switch" not in cards["fix_window"] and 'data-form' not in cards["fix_window"]
+    assert lan.count(f'data-apply="fix_hold" tabindex="0" disabled title="{CONTROLS_AT_THE_BOX}"'
                      ) == 1
 
 
@@ -4404,7 +4427,7 @@ def test_a_drawn_card_draws_its_histogram_and_hazard_against_flat():
     assert "<svg" not in cards["fix_hold"] and "<svg" not in cards["fix_window"]
     drawn = cards["wait"]
     assert drawn.count("<svg") == 1
-    assert drawn.index('data-cmd="form"') < drawn.index("<svg"), "inside the drawn side"
+    assert drawn.index('data-form="shortest"') < drawn.index("<svg"), "the drawn side first"
     svg = _svg(drawn)
     bars = re.findall(r'<rect class="bar" x="[\d.]+" y="[\d.]+" width="[\d.]+" height="([\d.]+)"',
                       svg)
@@ -4487,8 +4510,7 @@ def test_a_size_card_offers_fixed_and_scaled_and_says_what_each_object_gets():
     assert ('<label class="rn">factor<input class="field mono" data-form="factor" '
             'inputmode="decimal" value="" aria-label="disc_size: factor">'
             '<span class="unit">× each object&#x27;s eccentricity</span></label>') in fixed
-    assert ('<button type="button" class="btn small" data-cmd="form" data-name="disc_size">'
-            'apply</button>') in fixed
+    assert 'data-cmd="form"' not in fixed and 'data-apply="disc_size"' in fixed
     assert "select" not in fixed.split('data-side="scaled"')[1]
     assert "staged scaled → scaled, 0.3 times its eccentricity by" in fixed
     assert "gives" not in fixed
@@ -4553,7 +4575,7 @@ def test_the_color_card_offers_set_hue_and_two_levels_and_says_approximate():
     assert ('<select class="field" data-colorset="distractor_appearance" '
             'aria-label="distractor_appearance: color set"><option value="isohue" selected>'
             'isohue</option></select>') in among
-    assert ('<button type="button" class="btn small hue on" data-cmd="color" '
+    assert ('<button type="button" class="btn small hue on" '
             'data-name="distractor_appearance" data-colorset="isohue" data-color="green" '
             'aria-pressed="true"><span class="chip" style="background:#4a9a3e"></span>green'
             '</button>') in among
@@ -4846,7 +4868,7 @@ def test_a_box_keeps_its_reasons_behind_more():
     assert [(n.attrs.get("data-discard"), n.attrs.get("data-apply")) for n in acts.walk()
             if n.tag == "button"] == [("fix_hold", None), (None, "fix_hold")]
     assert re.search(r"\.box \.status \.acts \{[^}]*visibility: hidden", _CSS)
-    assert re.search(r"\.box\.draft \.status \.acts \{[^}]*visibility: visible", _CSS)
+    assert re.search(r"\.box\.draft \.status \.acts[^{]*\{[^}]*visibility: visible", _CSS)
 
 
 def test_every_field_says_its_unit_the_drawn_side_too():
@@ -4909,3 +4931,58 @@ def test_runtime_still_needed_reads_as_words():
     rule = re.search(r"\.kv\.wrap \{([^}]*)\}", _CSS).group(1)
     assert "flex-wrap: wrap" in rule
     assert re.search(r"\.kv\.wrap > span \{[^}]*flex: 1 1 \d+em", _CSS)
+
+
+# --- the console interface rework's Task 6: what the script reads off a box ---------------------
+
+
+def test_a_box_carries_what_the_script_reads_of_its_verdicts():
+    """The page's script ties each verdict to the press it answers and says who changed a box
+    under a draft (the console interface rework's Task 6), from marks the box carries: the staged
+    change's command id, the refusal's key and id, the trial the change in force took effect at,
+    who changed it (`data-under`), and on a refusal's line what it says once a later change is
+    accepted. A change waiting under an id offers *withdraw*, saying first how many it takes back;
+    a reward size never does. A refused withdrawal rides in `.wdrs`, by the act's id; the run
+    in progress on the sections (`data-run`, "" between runs); a whole field says so
+    (`data-whole`); Apply and Discard are in the Tab order."""
+    from wl_xcon.link import Applied, Refused, Staged
+
+    jake, ana = Box("jake"), Box("Ana")
+    rows = (ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, step=0.05),
+            ParamRow.of("response_deadline", "s", 0.2, 2.0, 0.6, False, step=0.05),
+            ParamRow.of("set_size", "objects", 1.0, 36.0, 4, False, whole=True, step=1.0,
+                        applied=Applied(39, "Ana (box, unverified)")),
+            ParamRow.of("reward_correct", "mL", 0.0, 0.4, 0.15, True))
+    staged = (Staged("fix_hold", 0.3, 0.5, jake, False, cid="p-1"),
+              Staged("response_deadline", 0.6, 0.8, jake, False, cid="p-1"),
+              Staged("reward_correct", 0.15, 0.2, jake, True, cid="p-2"))
+    refusals = (Refused("set_size", ana, "'set_size' at 40 is refused, and the previous value "
+                        "stands: it is past 36", cid="p-0", value=40),
+                Refused("withdraw", jake, "the change sent as 'p-9' is not withdrawn: it is "
+                        "already in force from trial 41, so nothing of it waits", cid="p-9"))
+    params = fragments(frame(params=rows, staged=staged, refusals=refusals), view())["params"]
+    cards = _cards(params)
+
+    hold, size, reward = cards["fix_hold"], cards["set_size"], cards["reward_correct"]
+    assert 'data-staged-cid="p-1"' in hold and 'data-under="jake (box, unverified) is changing this to 0.50"' in hold
+    assert ('<span class="wd" title="withdraws the 2 applied together: fix_hold, '
+            'response_deadline"><button type="button" class="btn small" data-withdraw="p-1" '
+            'tabindex="0">withdraw all 2</button></span>') in hold
+    assert 'data-staged-cid="p-2"' in reward and "data-withdraw" not in reward
+    assert ('data-refusal="p-0" data-refusal-cid="p-0" data-applied="39" '
+            'data-under="Ana (box, unverified) changed this from trial 39"') in size
+    assert ('data-rest="in force from trial 39" data-rest-state="applied">refused 40 · it is past 36'
+            ) in size
+    assert 'data-param="set_size" data-step="1" data-min="1.0" data-max="36.0" data-whole="1"' in size
+    assert 'data-whole' not in hold
+    for card in cards.values():
+        assert ' data-discard="' in card and 'tabindex="0">Discard' in card
+        assert 'tabindex="0">Apply</button>' in card
+    assert params.endswith('<div class="wdrs" hidden><span class="wdr" data-cid="p-9">it is '
+                           'already in force from trial 41, so nothing of it waits</span></div>')
+    assert 'data-run="2027-01-14_01/0"' in params
+    between = fragments(frame(params=rows, phase="between_runs"), view())["params"]
+    assert 'data-run=""' in between
+    lone = fragments(frame(params=rows, staged=staged[:1]), view())["params"]
+    assert 'title="takes this change back before the next trial"' in lone
+    assert 'tabindex="0">withdraw</button>' in lone

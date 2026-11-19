@@ -2071,9 +2071,10 @@ def test_a_next_block_the_rig_may_still_apply_says_so(rig):
 def test_hand_back_a_range_and_revert_send_their_bodies(rig):
     """Engine build C3 (the PI, 2026-10-30, Q7a: "Yes, a 'hand back' button"; Q7b: "Yes, range
     changes live"; TSK-43, "Yes, with revert"): *hand back* on a card a person holds sends its
-    setting's name, *change the range* the numbers of the card's draw a person changed, by name,
-    and *revert to this* its moment's change id, each reaching the rig as the signed-in member's.
-    Through the wire, in a real browser."""
+    setting's name, the box's Apply the numbers of the card's draw a person changed, by name, and
+    *revert to this* its moment's change id, each reaching the rig as the signed-in member's.
+    Rewritten for the console interface rework's Task 6: *change the range* is gone, the box's
+    Apply its one send. Through the wire, in a real browser."""
     from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
 
     rows = (
@@ -2092,7 +2093,7 @@ def test_hand_back_a_range_and_revert_send_their_bodies(rig):
     page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: rig.dispatch.seen)
     page.fill('#params input[data-number="high"]', "1.5")
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     page.click('#moments [data-cmd="revert"][data-change="3"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
@@ -2107,8 +2108,10 @@ def test_hand_back_a_range_and_revert_send_their_bodies(rig):
 
 def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
     """The page's own refusals of a range, each said and nothing sent, as a setting's are: a
-    range none of whose numbers was changed -- `0.750` is the 0.75 shown -- which would record a
-    change that changed nothing, and a number that is not one."""
+    range none of whose numbers was changed -- `0.750` is the 0.75 shown -- is no draft at all,
+    which would record a change that changed nothing, and a number that is not one is *cannot
+    send*, its Apply off. Rewritten for the console interface rework's Task 6: the box's status
+    line says it, where `#sent` did for *change the range*."""
     from wl_xcon.link import ParamRow, decode, encode
 
     row = ParamRow("wait", "s", 0.5, 2.0, None, False, None, "draw", (),
@@ -2120,11 +2123,13 @@ def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
     _more(page)
 
     page.fill('#params input[data-number="low"]', "0.750")
-    page.click('[data-cmd="range"][data-name="wait"]')
-    page.wait_for_selector("#sent:has-text(\"not sent: no number of wait's range was changed\")")
+    assert "draft" not in _classes(page, "wait") and _bar(page) is None
+    assert not page.is_visible('#params [data-apply="wait"]')
     page.fill('#params input[data-number="high"]', "soon")
-    page.click('[data-cmd="range"][data-name="wait"]')
-    page.wait_for_selector("#sent:has-text(\"not sent: wait's high needs a number\")")
+    assert _say(page, "wait") == "cannot send · wait's high needs a number"
+    assert page.is_disabled('#params [data-apply="wait"]')
+    page.press('#params input[data-number="high"]', "Enter")
+    time.sleep(0.3)  # housekeeping: room for a wrong send to arrive
 
     assert rig.dispatch.seen == []
 
@@ -2132,7 +2137,9 @@ def test_a_range_with_nothing_changed_or_a_word_for_a_number_is_not_sent(rig):
 def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
     """Each of the three is held as *clear one* is (the engine C2a plan's Task 9 fix round,
     Important 1): a double click, or two quick clicks, sends one command, never two -- a second
-    hand-back the rig would refuse, a second range or revert it would record again."""
+    hand-back the rig would refuse, a second range or revert it would record again. Rewritten for
+    the console interface rework's Task 6: the range goes by the box's Apply, which is off while
+    its act is out."""
     from wl_xcon.link import HandBack, MomentRow, ParamRow, Revert, SetRange, decode, encode
 
     rows = (
@@ -2150,7 +2157,7 @@ def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
     page.dblclick('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: rig.dispatch.seen)
     page.fill('#params input[data-number="high"]', "1.5")
-    page.dblclick('[data-cmd="range"][data-name="wait"]')
+    page.dblclick('#params [data-apply="wait"]', force=True)
     rig.wait_for(lambda: len(rig.dispatch.seen) >= 2)
     page.dblclick('#moments [data-cmd="revert"][data-change="0"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) >= 3)
@@ -2161,11 +2168,11 @@ def test_a_double_click_on_hand_back_change_the_range_or_revert_is_one_act(rig):
 
 def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_left(rig):
     """Fix round 1 of the C3 plan's Task 18 (review, Important 1): a person types a range's number,
-    a frame that changes the cards arrives, and the field is left before *change the range* is
-    pressed -- in WebKit, Safari's engine, pressing a button does not focus it, so the press
-    itself leaves the field. The frame was held while the field had focus; leaving it must not
-    swap the held frame in over the typed number and the button (the click would then land on
-    nothing: nothing sent, nothing said). The range is sent, with the number typed, and said."""
+    a frame that changes the cards arrives, and the field is left before the send is pressed -- in
+    WebKit, Safari's engine, pressing a button does not focus it, so the press itself leaves the
+    field. Rewritten for the console interface rework's Task 6 (the per-box rule): the frame is no
+    longer held for the tab -- the other box shows it at once -- and the box typed in keeps its
+    draft and its nodes, so its Apply sends the number typed."""
     from wl_xcon.link import ParamRow, SetRange, decode, encode
 
     def rows(hold):
@@ -2184,10 +2191,11 @@ def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_le
     page.fill('#params input[data-number="high"]', "1.5")
     _offer(rig, 41, params=rows(0.4))
     _arrived(page, 41)
-    assert "0.30" in page.inner_text("#params")  # held while the field has focus
+    rig.wait_for(lambda: _head(page, "fix_hold") == "0.40 s")  # the other box follows the frame
+    assert page.input_value('#params input[data-number="high"]') == "1.5"
     page.evaluate("document.activeElement.blur()")
     time.sleep(0.3)  # housekeeping: the focus-out's release runs on a timer
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: rig.dispatch.seen)
 
     (sent,) = rig.dispatch.seen
@@ -2199,9 +2207,11 @@ def test_a_range_typed_while_a_frame_arrives_is_still_sent_after_the_field_is_le
 def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
     """Fix round 1 of the C3 plan's Task 18 (review, Important 2): Chromium focuses a button it
     clicks, and the page held every parameter frame while anything inside the cards had focus, so
-    after *hand back* or *change the range* the card went on saying a person held the setting,
-    with a live *hand back*, after the rig had applied it. Only a field being typed in holds the
-    cards; the card shows the applied hand-back and the applied range."""
+    after *hand back* or a range's send the card went on saying a person held the setting, with a
+    live *hand back*, after the rig had applied it. A focused button keeps nothing; the boxes show
+    the applied hand-back and the applied range. Rewritten for the console interface rework's
+    Task 6: the range goes by its box's Apply, and its box keeps its act's numbers until the frame
+    shows them in force."""
     from wl_xcon.link import HandBack, ParamRow, SetRange, decode, encode
 
     held = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.4, False, None, "person", ("near",)),
@@ -2216,7 +2226,7 @@ def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
     page.click('[data-cmd="hand_back"][data-name="fix_hold"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
     page.fill('#params input[data-number="high"]', "1.5")
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     applied = (ParamRow("fix_hold", "s", 0.1, 1.0, 0.3, False, None, "conditions", ("near",)),
                ParamRow("wait", "s", 0.5, 2.0, None, False, None, "range", (),
@@ -2224,9 +2234,11 @@ def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
     rig.hub.offer(decode(encode(frame(params=applied))))
 
     rig.wait_for(lambda: "set or drawn by its conditions" in page.inner_text("#params")
-                 and page.input_value('#params input[data-number="high"]') == "1.5")
+                 and page.input_value('#params input[data-number="high"]') == "1.5"
+                 and _say(page, "wait") != "sending…")
     assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange]
     assert 'data-cmd="hand_back"' not in page.inner_html("#params")
+    assert "draft" not in _classes(page, "wait")
 
 
 def _offer(rig, trial, **fields) -> None:
@@ -2255,11 +2267,12 @@ def _range_rows(hold=0.3):
     )
 
 
-def test_a_range_typed_and_left_unsent_says_the_cards_wait_for_it(rig):
-    """Fix round 2 of the C3 plan's Task 18 (re-review, New Breakage 1): a number typed into a
-    range and walked away from holds the parameter cards, and the page says so, under that card's
-    range editor, with the field marked pending -- never a silent freeze. Put back, or sent, the
-    line goes and the held frame is shown."""
+def test_a_range_typed_and_left_unsent_says_not_sent_and_the_boxes_follow_the_frame(rig):
+    """Was `test_a_range_typed_and_left_unsent_says_the_cards_wait_for_it` (fix round 2 of the C3
+    plan's Task 18, New Breakage 1: never a silent freeze of the cards). Rewritten for the console
+    interface rework's Task 6, whose per-box rule replaces the freeze: a number typed into a range
+    and walked away from is a draft its box says is *not sent*, Apply live, while every other box
+    follows the frame at once; put back, the draft goes."""
     from wl_xcon.link import decode, encode
 
     rig.hub.offer(decode(encode(frame(params=_range_rows(0.3)))))
@@ -2269,22 +2282,21 @@ def test_a_range_typed_and_left_unsent_says_the_cards_wait_for_it(rig):
     _more(page)
     page.fill('#params input[data-number="high"]', "1.5")
     page.mouse.click(2, 2)  # a neutral spot: the field loses focus
-    rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
+    _offer(rig, 41, params=_range_rows(0.4))
 
-    page.wait_for_selector("#params .rhold", state="visible", timeout=5000)
-    assert "not sent: press change the range, or put its numbers back" in (
-        page.inner_text("#params .rhold"))
-    assert "pending" in page.get_attribute('#params input[data-number="high"]', "class")
-    assert "0.30" in page.inner_text("#params")
+    rig.wait_for(lambda: _head(page, "fix_hold") == "0.40 s")
+    assert _say(page, "wait") == "not sent" and page.is_visible('#params [data-apply="wait"]')
+    assert page.input_value('#params input[data-number="high"]') == "1.5"
+    assert _bar(page) == "1 edit not sent: wait"
 
     page.fill('#params input[data-number="high"]', "1.25")
-    page.mouse.click(2, 2)
-    rig.wait_for(lambda: "0.40" in page.inner_text("#params"))
+    assert "draft" not in _classes(page, "wait") and _bar(page) is None
 
 
 def test_a_range_typed_as_the_same_number_does_not_hold_the_cards(rig):
-    """Fix round 2 (New Breakage 1): "1.250" over 1.25 is the number in force, as *change the
-    range* reads it ("no number was changed"), so it holds nothing: the cards follow the next
+    """Fix round 2 (New Breakage 1): "1.250" over 1.25 is the number in force, as the rig reads
+    it, so it is no draft (the console interface rework's Task 6: "a draft equal to what is in
+    force is no draft"): its box says nothing is waiting to be sent, and the boxes follow the next
     frame."""
     from wl_xcon.link import decode, encode
 
@@ -2298,13 +2310,14 @@ def test_a_range_typed_as_the_same_number_does_not_hold_the_cards(rig):
     rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
 
     rig.wait_for(lambda: "0.40" in page.inner_text("#params"))
-    assert not page.is_visible("#params .rhold")
+    assert "draft" not in _classes(page, "wait") and _bar(page) is None
 
 
 def test_a_range_press_the_rig_did_not_take_can_be_sent_again(rig):
     """Fix round 2 (New Breakage 2): the typed numbers count as sent only when the answer says
-    "sent". After "not delivered" the same press is sent again, not refused as "no number was
-    changed"."""
+    "sent". After "not delivered" the box has its draft back, saying why, and the same Apply
+    sends it again. Rewritten for the console interface rework's Task 6: the box's Apply for *change
+    the range*, its status line for `#sent`."""
     from wl_xcon.link import SetRange, decode, encode
     from wl_xcon import serve
 
@@ -2315,15 +2328,15 @@ def test_a_range_press_the_rig_did_not_take_can_be_sent_again(rig):
     _more(page)
     rig.dispatch.answers = serve.not_delivered("the rig is not connected")
     page.fill('#params input[data-number="high"]', "1.5")
-    page.click('[data-cmd="range"][data-name="wait"]')
-    page.wait_for_selector("#sent:has-text('not delivered')")
+    page.click('#params [data-apply="wait"]')
+    _says(rig, page, "wait", "not sent · not delivered", start=True)
+    assert not page.is_disabled('#params [data-apply="wait"]')
     rig.dispatch.answers = None
-    time.sleep(1.2)  # housekeeping: past the double-click hold
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
 
+    assert [seen.numbers for seen in rig.dispatch.seen] == [{"high": 1.5}, {"high": 1.5}]
     assert [type(seen) for seen in rig.dispatch.seen] == [SetRange, SetRange]
-    assert "no number" not in page.inner_text("#sent")
 
 
 def test_a_press_is_not_lost_when_a_frame_lands_between_the_mouse_down_and_up(rig):
@@ -2441,9 +2454,11 @@ def test_a_press_the_page_never_sees_end_shows_the_held_frame(rig):
 
 def test_a_correction_typed_while_a_range_press_is_out_stays_to_be_sent(rig):
     """Fix round 3 (New Breakage 2): the rig answers a range at its next trial boundary. A number
-    typed meanwhile (1.6 after 1.5 was sent) is not what was sent, so when the answer comes it is
-    still pending, and sends."""
-    from wl_xcon.link import SetRange, decode, encode
+    typed meanwhile (1.6 after 1.5 was sent) is not what was sent, so once the rig stages the
+    first it is a draft over it, saying the first waits, and its Apply sends it. Rewritten for the
+    console interface rework's Task 6: the box keeps its nodes while its act is out."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import SetRange, Staged, decode, encode
 
     rig.hub.offer(decode(encode(frame(params=_range_rows()))))
     page = rig.browser_page()
@@ -2452,23 +2467,29 @@ def test_a_correction_typed_while_a_range_press_is_out_stays_to_be_sent(rig):
     _more(page)
     rig.dispatch.delay = 3.0
     page.fill('#params input[data-number="high"]', "1.5")
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: rig.dispatch.seen)
     page.fill('#params input[data-number="high"]', "1.6")
+    assert _say(page, "wait") == "sending…"
     page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
     rig.dispatch.delay = 0.0
+    _offer(rig, 41, params=_range_rows(), staged=(Staged(
+        "wait", "uniform from 0.75 s to 1.25 s", "uniform from 0.75 s to 1.5 s", Box("Jake Westerberg"),
+        False, kind="range", cid=rig.dispatch.seen[-1].cid),))
 
-    assert "pending" in page.get_attribute('#params input[data-number="high"]', "class")
-    time.sleep(1.2)  # housekeeping: past the double-click hold
-    page.click('[data-cmd="range"][data-name="wait"]')
+    _says(rig, page, "wait", "not sent · range uniform from 0.75 s to 1.5 s is waiting")
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert [seen.numbers for seen in rig.dispatch.seen if isinstance(seen, SetRange)] == [
         {"high": 1.5}, {"high": 1.6}]
 
 
-def test_a_second_range_press_while_the_first_is_out_is_refused_and_said(rig):
-    """Fix round 3 (New Breakage 3): while a card's range is out and unanswered, a second press
-    (past the double-click hold) is not sent again, and the page says why."""
+def test_a_second_apply_while_the_first_is_out_is_held_off_and_the_box_says_sending(rig):
+    """Was `test_a_second_range_press_while_the_first_is_out_is_refused_and_said` (fix round 3, New
+    Breakage 3: while a card's range is out and unanswered, a second press is not sent again).
+    Rewritten for the console interface rework's Task 6: the box says *sending…* and its Apply is
+    off while its act is out (the controls review's §2, rule 5), so a second press sends
+    nothing."""
     from wl_xcon.link import decode, encode
 
     rig.hub.offer(decode(encode(frame(params=_range_rows()))))
@@ -2478,11 +2499,12 @@ def test_a_second_range_press_while_the_first_is_out_is_refused_and_said(rig):
     _more(page)
     rig.dispatch.delay = 3.0
     page.fill('#params input[data-number="high"]', "1.5")
-    page.click('[data-cmd="range"][data-name="wait"]')
+    page.click('#params [data-apply="wait"]')
     rig.wait_for(lambda: rig.dispatch.seen)
-    time.sleep(1.3)  # housekeeping: past the double-click hold
-    page.click('[data-cmd="range"][data-name="wait"]')
-    page.wait_for_selector("#sent:has-text('still being sent')", timeout=5000)
+    time.sleep(1.3)  # housekeeping: past a double click's span
+    assert _say(page, "wait") == "sending…"
+    assert page.is_disabled('#params [data-apply="wait"]')
+    page.click('#params [data-apply="wait"]', force=True)
     page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
 
     assert len(rig.dispatch.seen) == 1
@@ -2524,11 +2546,11 @@ def test_a_press_a_menu_or_a_drag_takes_over_or_no_primary_press_leaves_the_card
 
 def test_a_double_click_on_change_the_range_never_says_not_sent_while_the_rig_answers(rig):
     """The C3 plan's Task 18, its deferred minor (re-review 3, minor 2): the rig answers a range at
-    its next trial boundary, and a double click's second press reached the refusal of a range
-    still out, so the page said in red "not sent: the range of wait is still being sent" until the
-    answer came, up to a trial, though the range was sent. The second press of a double click is
-    dropped first, as a clear's is: the line never reads "not sent" -- each text it shows is kept
-    as it is shown -- and one range is sent."""
+    its next trial boundary, and a double click's second press said in red "not sent: the range
+    of wait is still being sent" until the answer came, though the range was sent. Rewritten for
+    the console interface rework's Task 6, where the box's Apply sends the range: neither `#sent`
+    nor the box's status line ever reads "not sent" -- each text shown is kept as it is shown --
+    and one range is sent."""
     from wl_xcon.link import SetRange, decode, encode
 
     rig.hub.offer(decode(encode(frame(params=_range_rows()))))
@@ -2536,22 +2558,29 @@ def test_a_double_click_on_change_the_range_never_says_not_sent_while_the_rig_an
     _sign_in(page)
     page.click('label[for="t-task"]')
     _more(page)
+    page.fill('#params input[data-number="high"]', "1.5")
     page.evaluate("""() => {
       window.__said = [];
-      new MutationObserver(function () {
+      const keep = () => {
         window.__said.push(document.getElementById('sent').textContent);
-      }).observe(document.getElementById('sent'),
-                 {childList: true, characterData: true, subtree: true});
+        const say = document.querySelector('#params .box[data-card="wait"] > .status > .say');
+        if (say) { window.__said.push(say.textContent); }
+      };
+      new MutationObserver(keep).observe(document.getElementById('sent'),
+        {childList: true, characterData: true, subtree: true});
+      new MutationObserver(keep).observe(document.getElementById('params'),
+        {childList: true, characterData: true, subtree: true});
     }""")
     rig.dispatch.delay = 3.0
-    page.fill('#params input[data-number="high"]', "1.5")
-    page.dblclick('[data-cmd="range"][data-name="wait"]')
+    page.dblclick('#params [data-apply="wait"]', force=True)
     page.wait_for_selector("#sent:has-text('sent: test')", timeout=10000)
     rig.dispatch.delay = 0.0
 
     said = page.evaluate("window.__said")
-    assert [line for line in said if line.startswith("not sent")] == []
-    assert said[-1] == "sent: test"
+    # Before the press the box rightly says its draft is *not sent*; from the press on, never.
+    assert "sending…" in said and "sent: test" in said
+    after = said[said.index("sending…"):]
+    assert [line for line in after if line.startswith("not sent")] == []
     assert [type(seen) for seen in rig.dispatch.seen] == [SetRange]
 
 
@@ -3301,9 +3330,10 @@ def test_holding_b_is_tracker_lost(live, began):
 def test_switching_fix_hold_to_nonaging_sends_its_shortest_and_longest(rig):
     """The timing switch (the console settings design's §3; the PI, 2026-11-16): on the card of a
     timing setting held fixed, *drawn* opens its shapes; non-aging, its shortest and longest typed,
-    and *apply* sends a `form` of those two numbers, reaching the rig as the signed-in member's.
-    A frame arriving meanwhile leaves the card on its drawn side. Through the wire, in a real
-    browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    and the box's Apply (since the console interface rework's Task 6; its drawn side's own *apply*
+    is gone) sends a `form` of those two numbers, reaching the rig as the signed-in member's. A
+    frame arriving meanwhile leaves the card on its drawn side, a draft. Through the wire, in a
+    real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.link import ParamRow, SetForm, decode, encode
 
     rows = (ParamRow.of("fix_hold", "s", 0.05, 2.0, 0.3, False, (), "task", (), None, None,
@@ -3319,7 +3349,7 @@ def test_switching_fix_hold_to_nonaging_sends_its_shortest_and_longest(rig):
     fields = '#params [data-fields="non_aging"]'
     page.fill(f'{fields} input[data-form="shortest"]', "0.75")
     page.fill(f'{fields} input[data-form="longest"]', "1.25")
-    page.click('[data-cmd="form"][data-name="fix_hold"]')
+    page.click('#params [data-apply="fix_hold"]')
     rig.wait_for(lambda: rig.dispatch.seen)
 
     (sent,) = rig.dispatch.seen
@@ -3330,10 +3360,11 @@ def test_switching_fix_hold_to_nonaging_sends_its_shortest_and_longest(rig):
 
 def test_scaling_disc_size_sends_its_factor(rig):
     """A size's switch (the console settings design's §5; the PI, 2026-11-16, "Size = factor x
-    eccentricity"): on the card of a size held fixed, *scaled* opens its factor; typed, *apply*
-    sends a `form` of shape `scaled` with that one number, reaching the rig as the signed-in
-    member's. A frame arriving meanwhile leaves the card on its scaled side. Through the wire, in a
-    real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    eccentricity"): on the card of a size held fixed, *scaled* opens its factor; typed, the box's
+    Apply (since the console interface rework's Task 6) sends a `form` of shape `scaled` with that
+    one number, reaching the rig as the signed-in member's. A frame arriving meanwhile leaves the
+    card on its scaled side. Through the wire, in a real browser: run with `WLX_BROWSER=webkit`
+    too, for Safari."""
     from wl_xcon.link import ParamRow, SetForm, decode, encode
 
     rows = (ParamRow.of("disc_size", "deg", 0.0, None, 1.0, False, (), "task", (), None, None,
@@ -3347,7 +3378,7 @@ def test_scaling_disc_size_sends_its_factor(rig):
     rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
     assert page.is_visible('#params [data-fields="scaled"] input[data-form="factor"]')
     page.fill('#params [data-fields="scaled"] input[data-form="factor"]', "0.3")
-    page.click('[data-cmd="form"][data-name="disc_size"]')
+    page.click('#params [data-apply="disc_size"]')
     rig.wait_for(lambda: rig.dispatch.seen)
 
     (sent,) = rig.dispatch.seen
@@ -3358,10 +3389,12 @@ def test_scaling_disc_size_sends_its_factor(rig):
 
 def test_picking_a_hue_swatch_sends_color(rig):
     """A color setting's card (the console settings design's §6; the PI, 2026-11-16, "you select a
-    set, and then you have hue options from the set"): pressing a hue's swatch sends a `color` of
-    its set and hue, reaching the rig as the signed-in member's; a frame arriving meanwhile leaves
-    the card as it was. Through the wire, in a real browser: run with `WLX_BROWSER=webkit` too, for
-    Safari."""
+    set, and then you have hue options from the set"): pressing a hue's swatch is a draft, the
+    swatch pressed and nothing sent (the console interface design's call: "a swatch or a tick is a
+    draft"), and the box's Apply sends a `color` of its set and hue, reaching the rig as the
+    signed-in member's; a frame arriving meanwhile leaves the box as it was. Rewritten for the
+    rework's Task 6: the swatch sent on its click before. Through the wire, in a real browser: run
+    with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.link import ParamRow, SetColor, decode, encode
 
     color = {
@@ -3380,8 +3413,12 @@ def test_picking_a_hue_swatch_sends_color(rig):
     page.click('label[for="t-task"]')
 
     page.select_option('select[data-colorset="distractor_appearance"]', "isohue")
+    page.click('#params .hue[data-name="distractor_appearance"][data-color="red"]')
     rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
-    page.click('[data-cmd="color"][data-name="distractor_appearance"][data-color="red"]')
+    _arrived(page, 41)
+    assert rig.dispatch.seen == [] and _say(page, "distractor_appearance") == "not sent"
+    assert page.get_attribute('#params .hue[data-color="red"]', "aria-pressed") == "true"
+    page.click('#params [data-apply="distractor_appearance"]')
     rig.wait_for(lambda: rig.dispatch.seen)
 
     (sent,) = rig.dispatch.seen
@@ -3839,3 +3876,657 @@ def test_runtime_still_needed_reads_as_words_at_three_widths(rig):
         narrow = [(said, round(wide, 1), round(tall, 1)) for said, wide, tall in shapes
                   if wide < 8 or tall > 3.2]
         assert narrow == [], (width, narrow)
+
+
+# --- the console interface rework's Task 6: drafts, Apply, Apply all and withdraw ---------------
+#
+# The PI, 2026-11-19: "i prefer an apply button in each box for making a change". Nothing a box
+# holds is sent until its Apply, Enter in one of its fields, or Apply all; each box says where it
+# stands in one status line (the plan's "Words on the page"); a frame is patched box by box, so a
+# press lands on a node no frame replaced. Through the wire, in a real browser: each runs in
+# Chromium in the suite and in WebKit (`WLX_BROWSER=webkit`), for Safari, by the builder.
+
+def _b(name: str, root: str = "#params") -> str:
+    return f'{root} .box[data-card="{name}"]'
+
+
+def _say(page, name: str, root: str = "#params") -> str:
+    return page.text_content(f"{_b(name, root)} > .status > .say").strip()
+
+
+def _says(rig, page, name: str, said: str, root: str = "#params", start: bool = False) -> None:
+    """Wait until box `name`'s status line says `said` (or starts with it), failing with what it
+    said instead."""
+    end = time.monotonic() + WAIT_S
+    while time.monotonic() < end:
+        now = _say(page, name, root)
+        if (now.startswith(said) if start else now == said):
+            return
+        page.wait_for_timeout(50)
+    pytest.fail(f"{name}'s status line says {_say(page, name, root)!r}, not {said!r}")
+
+
+def _classes(page, name: str, root: str = "#params") -> list:
+    return page.get_attribute(_b(name, root), "class").split()
+
+
+def _head(page, name: str, root: str = "#params") -> str:
+    return page.text_content(f"{_b(name, root)} > .head .now").strip()
+
+
+def _bar(page) -> str | None:
+    """The drafts bar's words, or None while it is hidden."""
+    if not page.is_visible("#drafts"):
+        return None
+    return page.text_content("#drafts-say").strip()
+
+
+def _sent_of(rig, kind) -> list:
+    return [seen for seen in rig.dispatch.seen if isinstance(seen, kind)]
+
+
+def _task6_rows(hold=0.3, deadline=0.6, size=4, **over):
+    """A Timing section's two holds, a whole count in Stimuli and the reward size, each as the rig
+    makes their rows (`ParamRow.of`): `fix_hold` 0.1 to 1 s at a 0.05 step, `set_size` 1 to 36
+    whole; `over` replaces fields of a row by its name."""
+    from wl_xcon.link import ParamRow
+
+    rows = {
+        "fix_hold": ParamRow.of("fix_hold", "s", 0.1, 1.0, hold, False, source="task", step=0.05,
+                                section="Timing"),
+        "response_deadline": ParamRow.of("response_deadline", "s", 0.2, 2.0, deadline, False,
+                                         source="task", step=0.05, section="Timing"),
+        "set_size": ParamRow.of("set_size", "objects", 1.0, 36.0, size, False, source="task",
+                                whole=True, step=1.0, section="Stimuli"),
+        "reward_correct": ParamRow.of("reward_correct", "mL", 0.0, 0.4, 0.15, True, step=0.01),
+    }
+    for name, fields in over.items():
+        rows[name] = dataclasses.replace(rows[name], **fields)
+    return tuple(rows.values())
+
+
+def _task6_page(rig, trial=40, **fields):
+    _offer(rig, trial, params=fields.pop("params", _task6_rows()), **fields)
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.wait_for_selector(_b("fix_hold"), state="visible")
+    return page
+
+
+def test_nothing_is_sent_until_apply(rig):
+    """The design's goal 2: typing, −/+ (Shift-click steps ten times as far) and a segment of the
+    fixed/drawn switch each make a draft the box shows as *not sent*, and nothing is sent -- past
+    the 600 ms the old fields and arrows waited before sending on their own; the head still says
+    the value in force; a frame arriving leaves every draft; the drafts bar counts them in the
+    boxes' order."""
+    from wl_xcon.link import ParamRow
+
+    wait = ParamRow.of("wait", "s", 0.05, 2.0, 0.5, False, source="task", step=0.05,
+                       switch="drawn", section="Timing")
+    page = _task6_page(rig, params=_task6_rows() + (wait,))
+
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.click(f'{_b("set_size")} [data-dir="1"]')
+    page.click(f'{_b("set_size")} [data-dir="1"]', modifiers=["Shift"])
+    page.click(f'{_b("wait")} [data-switch="drawn"]')
+    page.fill(f'{_b("wait")} [data-fields="non_aging"] input[data-form="shortest"]', "0.4")
+    page.fill(f'{_b("wait")} [data-fields="non_aging"] input[data-form="longest"]', "0.9")
+    _offer(rig, 41, params=_task6_rows() + (wait,))
+    _arrived(page, 41)
+    time.sleep(0.8)  # housekeeping: past the old fields' and arrows' 600 ms
+
+    assert rig.dispatch.seen == []
+    for name in ("fix_hold", "set_size", "wait"):
+        assert _say(page, name) == "not sent", name
+        assert "draft" in _classes(page, name), name
+    assert page.input_value(f'{_b("set_size")} input[data-param="set_size"]') == "15"
+    assert page.input_value(f'{_b("fix_hold")} input[data-param="fix_hold"]') == "0.5"
+    assert _head(page, "fix_hold") == "0.30 s"
+    assert _head(page, "set_size") == "4 objects"
+    assert page.is_visible(f'{_b("wait")} [data-side="drawn"]')
+    assert _bar(page) == "3 edits not sent: fix_hold, wait, set_size"
+    assert "draft" not in _classes(page, "response_deadline")
+
+
+def test_enter_applies_and_escape_undoes(rig):
+    """The controls review's F7, as the design takes it: in a box's field Esc puts the box back to
+    the value in force, the field keeping focus, and a second Esc leaves the field; ↑ and ↓ step
+    it, Shift ten steps; Enter is Apply, sending the box's one change under a command id of the
+    page's own, and the box says *sending…* until a frame answers it."""
+    from wl_xcon.link import SetParameter
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+
+    page.fill(field, "0.5")
+    assert _say(page, "fix_hold") == "not sent"
+    page.press(field, "Escape")
+    assert page.input_value(field) == "0.30"
+    assert _say(page, "fix_hold") == "0.10 to 1.00"
+    assert page.evaluate("document.activeElement.getAttribute('data-param')") == "fix_hold"
+    page.press(field, "Escape")
+    assert page.evaluate("document.activeElement.getAttribute('data-param')") is None
+
+    size = f'{_b("set_size")} input[data-param="set_size"]'
+    page.focus(size)
+    page.press(size, "ArrowUp")
+    assert page.input_value(size) == "5"
+    page.press(size, "Shift+ArrowUp")
+    assert page.input_value(size) == "15"
+    page.press(size, "Escape")
+    assert page.input_value(size) == "4"
+
+    page.fill(field, "0.45")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    _says(rig, page, "fix_hold", "sending…")
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.value, sent.by.name) == (
+        SetParameter, "fix_hold", 0.45, "Jake Westerberg")
+    assert isinstance(sent.cid, str) and 1 <= len(sent.cid) <= 64
+    assert page.is_disabled(f'{_b("fix_hold")} [data-apply]')
+
+
+def test_a_draft_equal_to_the_value_in_force_is_no_draft(rig):
+    """The controls review's §2, rule 4: typing a value back to the one in force, as a number
+    (`0.3` is `0.30`), or stepping away and back, clears *not sent*: no draft, no Apply, nothing
+    in the drafts bar."""
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+
+    page.fill(field, "0.8")
+    assert _say(page, "fix_hold") == "not sent" and _bar(page) == "1 edit not sent: fix_hold"
+    page.fill(field, "0.3")
+    assert _say(page, "fix_hold") == "0.10 to 1.00"
+    assert "draft" not in _classes(page, "fix_hold")
+    assert not page.is_visible(f'{_b("fix_hold")} [data-apply]')
+    assert _bar(page) is None
+    page.click(f'{_b("set_size")} [data-dir="1"]')
+    assert _say(page, "set_size") == "not sent"
+    page.click(f'{_b("set_size")} [data-dir="-1"]')
+    assert _say(page, "set_size") == "1 to 36 · whole number"
+    assert _bar(page) is None
+    assert rig.dispatch.seen == []
+
+
+def test_the_box_walks_through_its_states(rig):
+    """The design's goal 4, every outcome in one reserved line: *not sent* → *sending…* →
+    *waiting for the next trial · you* (the rig's staged row naming the page's command id, the head
+    saying what waits, *withdraw* offered) → *in force from trial N*; then *refused <value> ·
+    <reason>*, the draft kept for correction with Apply live; and *in force, with a warning*."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, Refused, Staged
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+
+    page.fill(field, "0.5")
+    assert _say(page, "fix_hold") == "not sent"
+    page.click(f'{_b("fix_hold")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    assert _say(page, "fix_hold") == "sending…"
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=cid),))
+    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    assert _head(page, "fix_hold") == "0.30 s → 0.50"
+    assert page.is_visible(f'{_b("fix_hold")} [data-withdraw="{cid}"]')
+    assert "staged" in _classes(page, "fix_hold") and "draft" not in _classes(page, "fix_hold")
+    _offer(rig, 42, params=_task6_rows(0.5, fix_hold={"applied": Applied(42, str(jake))}))
+    _says(rig, page, "fix_hold", "in force from trial 42")
+    assert page.input_value(field) == "0.50"
+
+    page.fill(field, "0.95")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    again = rig.dispatch.seen[-1].cid
+    why = ("'fix_hold' at 0.95 is refused, and the previous value stands: the hold and the time "
+           "to acquire the point no longer fit inside the timeout")
+    _offer(rig, 43, params=_task6_rows(0.5, fix_hold={"applied": Applied(42, str(jake))}),
+           refusals=(Refused("fix_hold", jake, why, cid=again, value=0.95),))
+    _says(rig, page, "fix_hold", "refused 0.95 · the hold and the time to acquire", start=True)
+    assert page.input_value(field) == "0.95"
+    assert {"refused", "draft"} <= set(_classes(page, "fix_hold"))
+    assert page.is_visible(f'{_b("fix_hold")} [data-apply]')
+    assert not page.is_disabled(f'{_b("fix_hold")} [data-apply]')
+
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
+    page.click(f'{_b("response_deadline")} [data-apply]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    warned = "crowded-array: 12 objects on a 6° ring leave 1.1° between windows of 1.6°"
+    _offer(rig, 44, params=_task6_rows(0.5, 0.8, fix_hold={"applied": Applied(42, str(jake))},
+                                       response_deadline={"applied": Applied(44, str(jake)),
+                                                          "warned": (warned,)}),
+           refusals=(Refused("fix_hold", jake, why, cid=again, value=0.95),))
+    _says(rig, page, "response_deadline", "in force, with a warning · from trial 44")
+    assert "warned" in _classes(page, "response_deadline")
+
+
+def test_a_later_accepted_change_clears_the_refusal(rig):
+    """The design's goal 4: "a refusal is cleared by a later accepted change of that setting". The
+    frame keeps its last refusals, so the rig still sends this one after a later change of the
+    setting was staged and applied; the box says the change in force, not the old refusal."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, Refused, Staged
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.95")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    refused = (Refused("fix_hold", jake, "'fix_hold' at 0.95 is refused, and the previous value "
+                       "stands: it does not fit", cid=rig.dispatch.seen[-1].cid, value=0.95),)
+    _offer(rig, 41, params=_task6_rows(), refusals=refused)
+    _says(rig, page, "fix_hold", "refused 0.95 · it does not fit")
+
+    page.fill(field, "0.4")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 42, params=_task6_rows(), refusals=refused,
+           staged=(Staged("fix_hold", 0.3, 0.4, jake, False, cid=cid),))
+    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    _offer(rig, 43, params=_task6_rows(0.4, fix_hold={"applied": Applied(43, str(jake))}),
+           refusals=refused)
+
+    _says(rig, page, "fix_hold", "in force from trial 43")
+    assert "refused" not in _classes(page, "fix_hold")
+    assert "applied" in _classes(page, "fix_hold")
+
+
+def test_apply_all_sends_one_command_and_both_take_effect_on_one_trial(rig):
+    """The design's goal 2: "Apply all stages them together, on the same trial". Two drafts, one
+    press: one `apply_many` of both changes under one command id; both boxes say *sending…*, then
+    *waiting* as the rig stages them under that id, and *in force from trial 41* together."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, ApplyMany, SetParameter, Staged
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
+    assert _bar(page) == "2 edits not sent: fix_hold, response_deadline"
+
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    time.sleep(0.3)  # housekeeping: room for a wrong second send to arrive
+
+    (sent,) = rig.dispatch.seen
+    assert type(sent) is ApplyMany and sent.by.name == "Jake Westerberg"
+    assert [(type(change), change.name, change.value) for change in sent.changes] == [
+        (SetParameter, "fix_hold", 0.5), (SetParameter, "response_deadline", 0.8)]
+    assert _say(page, "fix_hold") == _say(page, "response_deadline") == "sending…"
+    assert _bar(page) is None
+    _offer(rig, 41, params=_task6_rows(), staged=(
+        Staged("fix_hold", 0.3, 0.5, jake, False, cid=sent.cid),
+        Staged("response_deadline", 0.6, 0.8, jake, False, cid=sent.cid)))
+    _says(rig, page, "response_deadline", "waiting for the next trial · you")
+    assert _say(page, "fix_hold") == "waiting for the next trial · you"
+    applied = Applied(41, str(jake))
+    _offer(rig, 42, params=_task6_rows(0.5, 0.8, fix_hold={"applied": applied},
+                                       response_deadline={"applied": applied}))
+    _says(rig, page, "response_deadline", "in force from trial 41")
+    assert _say(page, "fix_hold") == "in force from trial 41"
+
+
+def test_a_reward_box_is_left_out_of_apply_all_and_says_so(rig):
+    """The design's call (XC-527): a reward size is sent alone, by its own Apply, never in Apply
+    all and never withdrawn, and its box says so ("sent alone · cannot be withdrawn"); the bar says
+    so too, and Apply all sends the rest without it."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import ApplyMany, SetParameter, Staged
+
+    page = _task6_page(rig)
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.fill(f'{_b("reward_correct")} input[data-param="reward_correct"]', "0.2")
+
+    assert _say(page, "reward_correct") == "not sent · sent alone · cannot be withdrawn"
+    assert _bar(page) == ("2 edits not sent: fix_hold, reward_correct · reward_correct is sent "
+                          "alone, by its own Apply")
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (together,) = rig.dispatch.seen
+    assert type(together) is ApplyMany and [c.name for c in together.changes] == ["fix_hold"]
+    assert _bar(page) == "1 edit not sent: reward_correct · reward_correct is sent alone, by its own Apply"
+    assert page.is_disabled("#drafts-apply")
+    assert _say(page, "reward_correct") == "not sent · sent alone · cannot be withdrawn"
+
+    page.click(f'{_b("reward_correct")} [data-apply]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    alone = rig.dispatch.seen[-1]
+    assert (type(alone), alone.name, alone.value) == (SetParameter, "reward_correct", 0.2)
+    _offer(rig, 41, params=_task6_rows(), staged=(
+        Staged("reward_correct", 0.15, 0.2, Box("Jake Westerberg"), True, cid=alone.cid),))
+    _says(rig, page, "reward_correct", "waiting for the next trial · you")
+    assert page.locator(f'{_b("reward_correct")} [data-withdraw]').count() == 0
+
+
+def test_withdraw_on_one_box_says_it_takes_back_the_whole_act(rig):
+    """The design's call: "withdrawing from any of its boxes withdraws all of it, and the box says
+    so first". Three applied together each offer *withdraw all 3*, its title naming them; one
+    press sends one `withdraw` of the act's id, and all three go back to the value in force,
+    saying so. And the plan's Review Focus 3: a withdrawal after the boundary passed is refused,
+    "already in force from trial N", and the box says it is in force."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, Refused, Staged, Withdraw
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    for name, value in (("fix_hold", "0.5"), ("response_deadline", "0.8"), ("set_size", "6")):
+        page.fill(f'{_b(name)} input[data-param="{name}"]', value)
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    cid = rig.dispatch.seen[-1].cid
+    staged = (Staged("fix_hold", 0.3, 0.5, jake, False, cid=cid),
+              Staged("response_deadline", 0.6, 0.8, jake, False, cid=cid),
+              Staged("set_size", 4, 6, jake, False, cid=cid))
+    _offer(rig, 41, params=_task6_rows(), staged=staged)
+    _says(rig, page, "set_size", "waiting for the next trial · you")
+
+    for name in ("fix_hold", "response_deadline", "set_size"):
+        button = f'{_b(name)} [data-withdraw="{cid}"]'
+        assert page.text_content(button) == "withdraw all 3", name
+        assert page.get_attribute(f'{_b(name)} .wd', "title") == (
+            "withdraws the 3 applied together: fix_hold, response_deadline, set_size")
+    page.click(f'{_b("set_size")} [data-withdraw="{cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert _say(page, "fix_hold") == "withdrawing…"
+    _offer(rig, 42, params=_task6_rows())
+    for name, value in (("fix_hold", "0.30"), ("response_deadline", "0.60"), ("set_size", "4")):
+        _says(rig, page, name, "withdrawn · it never applied")
+        assert page.input_value(f'{_b(name)} input[data-param="{name}"]') == value, name
+    taken = rig.dispatch.seen[-1]
+    assert (type(taken), taken.cid) == (Withdraw, cid)
+    assert len(_sent_of(rig, Withdraw)) == 1
+
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    late = rig.dispatch.seen[-1].cid
+    _offer(rig, 43, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=late),))
+    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    assert page.text_content(f'{_b("fix_hold")} [data-withdraw]') == "withdraw"
+    page.click(f'{_b("fix_hold")} [data-withdraw="{late}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 4)
+    why = (f"the change sent as '{late}' is not withdrawn: it is already in force from trial 44, "
+           "so nothing of it waits to be taken back; change the setting again to move it")
+    _offer(rig, 44, params=_task6_rows(0.5, fix_hold={"applied": Applied(44, str(jake))}),
+           refusals=(Refused("withdraw", jake, why, cid=late),))
+    _says(rig, page, "fix_hold", "not withdrawn · it is already in force from trial 44", start=True)
+    assert "applied" in _classes(page, "fix_hold")
+    assert page.input_value(field) == "0.50"
+
+
+def test_a_change_under_a_draft_leaves_the_draft_and_says_who(rig):
+    """The plan's Review Focus 4: someone else changes a setting under a trainer's draft (another
+    console, a staircase, a revert): the draft is untouched, the head shows the new value in force,
+    and the status says who changed it -- while it waits, and once it is in force; the trainer's
+    Apply still sends the draft."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, SetParameter, Staged
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.8")
+    _offer(rig, 41, params=_task6_rows(), staged=(
+        Staged("fix_hold", 0.3, 0.6, Box("Ana"), False, cid="other-console-1"),))
+    _arrived(page, 41)
+
+    _says(rig, page, "fix_hold", "not sent · Ana (box, unverified) is changing this to 0.60")
+    assert page.input_value(field) == "0.8"
+    assert _head(page, "fix_hold") == "0.30 s → 0.60"
+    page.evaluate("document.activeElement.blur()")
+    _offer(rig, 42, params=_task6_rows(0.6, fix_hold={"applied": Applied(42, "Ana (box, unverified)")}))
+    _arrived(page, 42)
+    _says(rig, page, "fix_hold", "not sent · Ana (box, unverified) changed this from trial 42")
+    assert page.input_value(field) == "0.8"
+    assert _head(page, "fix_hold") == "0.60 s"
+
+    page.click(f'{_b("fix_hold")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.value) == (SetParameter, "fix_hold", 0.8)
+
+
+def _matrix_rows(trial):
+    """The boxes a press is tried on, each with a head the frame of trial 41 changes: a plain
+    field, a whole count's −/+, a timing switch, a color's swatches and a held setting's *hand
+    back*."""
+    from wl_xcon.link import ParamRow
+
+    later = trial > 40
+    color = {
+        "sets": {"isohue": {"apex": [0.31272, 0.329], "luminance_cd_m2": 15.0, "design": None,
+                            "hues": {"green": {"xy": [0.31324, 0.50711], "srgb": "#4a9a3e"},
+                                     "red": {"xy": [0.45955, 0.32918], "srgb": "#c76f6a"}}}},
+        "set": "isohue", "hue": "green", "approximate": True,
+        "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+        "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False},
+    }
+    look = ParamRow.of("distractor_appearance", "appearance", None, None, None, False,
+                       source="run", color=color, section="Colors")
+    look = dataclasses.replace(look, words="Disc, " + ("darker" if later else "green"))
+    return _task6_rows(0.35 if later else 0.3, size=6 if later else 4) + (
+        ParamRow.of("wait", "s", 0.05, 2.0, 0.55 if later else 0.5, False, source="task",
+                    step=0.05, switch="drawn", section="Timing"),
+        ParamRow.of("gap", "s", 0.1, 2.0, 0.65 if later else 0.6, False, source="person",
+                    conditions=("near",), step=0.05, section="Timing"),
+        look)
+
+
+_PRESSED = {
+    "field": (_b("fix_hold") + ' input[data-param="fix_hold"]', "fix_hold", "0.35 s"),
+    "stepper": (_b("set_size") + ' [data-dir="1"]', "set_size", "6 objects"),
+    "segment": (_b("wait") + ' [data-switch="drawn"]', "wait", "0.55 s"),
+    "tick": (_b("pairings") + ' input[type="checkbox"]', "pairings", ""),
+    "swatch": (_b("distractor_appearance") + ' .hue[data-color="red"]', "distractor_appearance",
+               "Disc, darker"),
+    "apply": (_b("fix_hold") + " [data-apply]", "fix_hold", "0.35 s"),
+    "withdraw": (_b("fix_hold") + " [data-withdraw]", "fix_hold", "0.35 s → 0.50"),
+    "hand back": (_b("gap") + ' [data-cmd="hand_back"]', "gap", "0.65 s"),
+}
+
+
+@pytest.mark.parametrize("control", [
+    "field", "stepper", "segment",
+    pytest.param("tick", marks=pytest.mark.xfail(strict=True, reason=(
+        "waits on the console interface plan's Task 7, the pairings grid: no box has a tick "
+        "until it lands; strict, so its landing fails here until this mark is removed"))),
+    "swatch", "apply", "withdraw", "hand back"])
+def test_a_press_during_frames_acts_once(rig, control):
+    """The plan's Review Focus 1: a frame lands while a trainer presses a box's control -- a field,
+    −/+, a segment of the switch, a tick, a swatch, Apply, *withdraw*, *hand back* -- a frame that
+    changes that box's head and every neighbor's: the press acts once, and the box shows the
+    frame's news after. The mouse goes down, the frame of trial 41 arrives, the mouse comes up.
+    Run in WebKit too, where earlier fix rounds found a frame replacing the button under a press."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import HandBack, SetColor, SetParameter, Staged, Withdraw
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig, params=_matrix_rows(40))
+    if control == "hand back":
+        _more(page)
+    staged = ()
+    if control == "apply":
+        page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    if control == "withdraw":
+        page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+        page.press(f'{_b("fix_hold")} input[data-param="fix_hold"]', "Enter")
+        rig.wait_for(lambda: rig.dispatch.seen)
+        staged = (Staged("fix_hold", 0.3, 0.5, jake, False, cid=rig.dispatch.seen[-1].cid),)
+        _offer(rig, 40, params=_matrix_rows(40), staged=staged)
+        _says(rig, page, "fix_hold", "waiting for the next trial · you")
+        page.evaluate("document.activeElement.blur()")
+    before = len(rig.dispatch.seen)
+    target, name, news = _PRESSED[control]
+
+    page.hover(target)
+    page.mouse.down()
+    _offer(rig, 41, params=_matrix_rows(41), staged=staged)
+    _arrived(page, 41)
+    page.mouse.up()
+    rig.wait_for(lambda: _head(page, name) == news)
+    time.sleep(0.3)  # housekeeping: room for a wrong second send to arrive
+    sent = rig.dispatch.seen[before:]
+
+    if control == "field":
+        field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+        assert page.evaluate("document.activeElement.getAttribute('data-param')") == "fix_hold"
+        assert page.input_value(field) == "0.35", "an untouched field follows the frame"
+        assert _say(page, "fix_hold") != "not sent"
+        page.fill(field, "0.5")
+        page.press(field, "Enter")
+        rig.wait_for(lambda: len(rig.dispatch.seen) == before + 1)
+        assert [(type(s), s.value) for s in rig.dispatch.seen[before:]] == [(SetParameter, 0.5)]
+    elif control == "stepper":
+        assert sent == []
+        assert page.input_value(f'{_b("set_size")} input[data-param="set_size"]') == "5"
+        assert _say(page, "set_size") == "not sent"
+    elif control == "segment":
+        assert sent == []
+        assert page.is_visible(f'{_b("wait")} [data-side="drawn"]')
+        assert _say(page, "wait") == "cannot send · wait's shortest needs a number"
+    elif control == "tick":
+        assert sent == []
+    elif control == "swatch":
+        assert sent == []
+        assert page.get_attribute(target, "aria-pressed") == "true"
+        assert _say(page, "distractor_appearance") == "not sent"
+        page.click(f'{_b("distractor_appearance")} [data-apply]')
+        rig.wait_for(lambda: len(rig.dispatch.seen) == before + 1)
+        (picked,) = rig.dispatch.seen[before:]
+        assert (type(picked), picked.colorset, picked.color) == (SetColor, "isohue", "red")
+    elif control == "apply":
+        assert [(type(s), s.name, s.value) for s in sent] == [(SetParameter, "fix_hold", 0.5)]
+        assert _say(page, "fix_hold") == "sending…"
+    elif control == "withdraw":
+        assert [(type(s), s.cid) for s in sent] == [(Withdraw, staged[0].cid)]
+    else:
+        assert [(type(s), s.name) for s in sent] == [(HandBack, "gap")]
+    for neighbor, shown in (("response_deadline", "0.60 s"), ("set_size", "6 objects"),
+                            ("wait", "0.55 s"), ("gap", "0.65 s")):
+        assert _head(page, neighbor) == shown, neighbor
+
+
+def test_tab_reaches_apply_on_every_box(rig):
+    """The controls review's F7: in Safari, Tab did not reach a single button on a card (its
+    default Tabs to fields and pop-ups only). From a box's field with a draft, Tab reaches that
+    box's Discard and then its Apply, on every box, before leaving it: both carry `tabindex="0"`.
+    Run in WebKit, where this is the test."""
+    page = _task6_page(rig)
+    for name, value in (("fix_hold", "0.5"), ("response_deadline", "0.8"), ("set_size", "6"),
+                        ("reward_correct", "0.2")):
+        field = f'{_b(name)} input[data-param="{name}"]'
+        page.fill(field, value)
+        page.focus(field)
+        reached = []
+        for _ in range(2):
+            page.keyboard.press("Tab")
+            reached.append(page.evaluate(
+                "(() => { const at = document.activeElement; const box = at.closest('.box');"
+                " return [box ? box.getAttribute('data-card') : null,"
+                " at.getAttribute('data-discard') !== null ? 'Discard' :"
+                " at.getAttribute('data-apply') !== null ? 'Apply' : at.tagName]; })()"))
+        assert reached == [[name, "Discard"], [name, "Apply"]], (name, reached)
+
+
+def test_drafts_survive_a_tab_switch_and_are_dropped_at_the_runs_end(rig):
+    """The design's call: drafts are kept per setting across frames and tab switches, dropped at
+    the run's end and on a reload, and closing the page with drafts asks once (`beforeunload`)."""
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.click('label[for="t-training"]')
+    _offer(rig, 41, params=_task6_rows())
+    _arrived(page, 41)
+    page.click('label[for="t-task"]')
+
+    assert page.input_value(field) == "0.5" and _say(page, "fix_hold") == "not sent"
+    asked = []
+    page.on("dialog", lambda dialog: (asked.append(dialog.type), dialog.accept()))
+    page.reload()
+    page.click('label[for="t-task"]')
+    assert page.input_value(field) == "0.30" and _bar(page) is None
+    assert asked in ([], ["beforeunload"]), asked
+
+    page.fill(field, "0.5")
+    page.fill(f'{_b("set_size")} input[data-param="set_size"]', "6")
+    page.evaluate("document.activeElement.blur()")
+    _offer(rig, 42, params=_task6_rows(), phase="between_runs")
+    _arrived(page, 42)
+    rig.wait_for(lambda: page.input_value(field) == "0.30")
+    assert page.input_value(f'{_b("set_size")} input[data-param="set_size"]') == "4"
+    assert "draft" not in _classes(page, "fix_hold") and _bar(page) is None
+
+
+def test_a_whole_box_refuses_a_point_at_the_keyboard_and_on_paste(rig):
+    """The plan's Review Focus 5 and the design's goal 6: a whole setting's field takes no `.` at
+    the keyboard, saying so; a fraction that arrives anyway -- pasted, here inserted as a paste
+    inserts it, with no key pressed -- is *cannot send · whole numbers only*, its Apply off, Enter
+    and Apply all sending nothing."""
+    page = _task6_page(rig)
+    field = f'{_b("set_size")} input[data-param="set_size"]'
+    page.fill(field, "")
+    page.type(field, "4.")
+    assert page.input_value(field) == "4"
+    assert _say(page, "set_size") == "whole numbers only"
+    page.type(field, "5")
+    assert page.input_value(field) == "45" and _say(page, "set_size") == "not sent"
+
+    page.fill(field, "")
+    page.focus(field)
+    page.keyboard.insert_text("4.5")
+    assert page.input_value(field) == "4.5"
+    assert _say(page, "set_size") == "cannot send · whole numbers only"
+    assert "cannot" in _classes(page, "set_size")
+    assert page.is_disabled(f'{_b("set_size")} [data-apply]')
+    page.press(field, "Enter")
+    assert _bar(page) == "1 edit not sent: set_size · set_size cannot send: whole numbers only"
+    assert page.is_disabled("#drafts-apply")
+    time.sleep(0.3)  # housekeeping: room for a wrong send to arrive
+    assert rig.dispatch.seen == []
+
+
+def test_an_act_refused_on_one_box_is_refused_on_every_box_of_it(rig):
+    """The controls' ruling (the plan's Review Focus 2): a frame keeps only the last refusals, so a
+    large act refused whole may not leave one on every box of it; any refusal carrying the act's
+    id refuses all of it. A box of the act with no refusal of its own in the frame says it was
+    refused with the changes applied together, its draft back; the one that has its own says it."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Refused
+
+    page = _task6_page(rig)
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.95")
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=_task6_rows(), refusals=(Refused(
+        "fix_hold", Box("Jake Westerberg"), "'fix_hold' at 0.95 is refused, and the previous "
+        "value stands: it does not fit; so none of the 2 applied together is staged", cid=cid,
+        value=0.95),))
+
+    _says(rig, page, "response_deadline", "refused · with the changes applied together")
+    assert {"refused", "draft"} <= set(_classes(page, "response_deadline"))
+    assert page.input_value(f'{_b("response_deadline")} input[data-param="response_deadline"]') == "0.8"
+    assert _say(page, "fix_hold").startswith("refused 0.95 · it does not fit")
+    assert _bar(page) == "2 edits not sent: fix_hold, response_deadline"
+
+
+def test_a_box_the_find_box_hides_stays_hidden_while_its_act_is_out(rig):
+    """The find box's mark is the page's own (`nofind`), kept when the script brings a box up to
+    date: Apply all of a draft the find box now hides leaves it hidden while its act is out."""
+    page = _task6_page(rig)
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
+    page.fill("#pfind", "fix_")
+    assert not page.is_visible(_b("response_deadline")) and page.is_visible(_b("fix_hold"))
+    rig.dispatch.delay = 2.0
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    assert _say(page, "response_deadline") == "sending…"
+    assert not page.is_visible(_b("response_deadline")) and page.is_visible(_b("fix_hold"))

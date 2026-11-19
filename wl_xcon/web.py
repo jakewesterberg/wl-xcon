@@ -280,10 +280,11 @@ NO_MARK_ENDPOINT = (
 #: taskd` session, it gives one between runs and while the return is awaited (PI,
 #: 2026-09-29, spec §6.0; `taskd.Session._manual_reward`).
 REWARD_ONLY_PAUSED = "a manual reward is given only while the session is paused: pause first"
-#: How long after the last click on a parameter's arrows the change is sent, in
-#: milliseconds: the mockup's debounce (spec §5.2), housekeeping and not a
-#: measurement. The page's script reads it from `<body>`.
-DEBOUNCE_MS = 600
+#: **The most changes Apply all sends as one act** (the console interface rework's Task 6): a
+#: refused act writes a refusal per change, and a frame keeps only the last
+#: `link.REFUSAL_HISTORY` (50) of them, so an act of more could lose some boxes' own reasons. Below
+#: `link.APPLY_LIMIT` (64), which the rig takes. The page's script reads it from `<body>`.
+APPLY_ALL_LIMIT = 50
 #: The trials the plain run is offered with: `wlx run --trials`'s default (`cli`), the flat run
 #: of N trials, one block (the b3a-2 plan, decision 6). A run of one of its task's plans has its
 #: plan's lengths, and the box is hidden while a plan is chosen (engine build C2b). A starting
@@ -1968,12 +1969,13 @@ def _field(row, view: View) -> str:
         if edge is not None
     )
     keys = "numeric" if row.whole else "decimal"
+    whole = ' data-whole="1"' if row.whole else ""
     return (
         f'<span class="fu"><span class="spin">'
         f'<button type="button" class="stp" data-dir="-1" tabindex="-1" '
         f'aria-label="decrease {name}"{off}>−</button>'
         f'<input class="field mono" data-param="{name}" '
-        f'data-step="{step:g}"{edges} inputmode="{keys}" value="{_e(value)}" '
+        f'data-step="{step:g}"{edges}{whole} inputmode="{keys}" value="{_e(value)}" '
         f'aria-label="{name}"{off}>'
         f'<button type="button" class="stp" data-dir="1" tabindex="-1" '
         f'aria-label="increase {name}"{off}>+</button></span>{_unit(row.unit)}</span>'
@@ -2054,8 +2056,8 @@ def _switch(row, view: View, drawn: bool, other: str = "drawn") -> str:
     """**A timing card's switch, *fixed* or *drawn*** (`ParamRow.switch`; the console settings
     design's §3: "every timing setting gets the switch on its card"), **or a size's, *fixed* or
     *scaled*** (`other`; the design's §5): two buttons, the side open pressed. Pressing one opens
-    its side on the page alone; nothing is sent until the fixed side's value or the other side's
-    *apply*. Greyed away from the box."""
+    its side on the page alone, a draft of its box; nothing is sent until the box's Apply (the
+    console interface rework's Task 6). Greyed away from the box."""
     name, off = _e(row.name), _gate(view)
 
     def side(which: str, on: bool) -> str:
@@ -2078,9 +2080,9 @@ WEIGHTS_UNIT = "relative"
 
 def _scaled_side(row, view: View) -> str:
     """**A size card's scaled side** (the console settings design's §5; the PI, 2026-11-16, "Size =
-    factor x eccentricity"): its factor, filled from the scaling in force (`ParamRow.shape`), and
-    *apply*, which sends `form` with shape `scaled` (`link.SetForm`), staged until the next trial:
-    each object is then drawn at the factor times its own eccentricity. Greyed away from the
+    factor x eccentricity"): its factor, filled from the scaling in force (`ParamRow.shape`); the
+    box's Apply sends it as `form` with shape `scaled` (`link.SetForm`), staged until the next
+    trial: each object is then drawn at the factor times its own eccentricity. Greyed away from the
     box."""
     off, name = _gate(view), _e(row.name)
     shape = row.shape or {}
@@ -2088,9 +2090,7 @@ def _scaled_side(row, view: View) -> str:
     return (f'<div class="shp rng" data-fields="scaled"><label class="rn">factor'
             f'<input class="field mono" data-form="factor" inputmode="decimal" '
             f'value="{_e(_typed(factor))}" aria-label="{name}: factor"{off}>'
-            f"{_unit(SCALED_UNIT)}</label></div>"
-            f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
-            f"apply</button>")
+            f"{_unit(SCALED_UNIT)}</label></div>")
 
 
 def _drawn_side(row, view: View) -> str:
@@ -2099,9 +2099,9 @@ def _drawn_side(row, view: View) -> str:
     max; a list of values: shuffled passes, or a weight each"): the shape select, the shape in
     force selected (`ParamRow.shape`, a person's or the block's) or non-aging, and each shape's
     fields, only the selected shape's shown, each filled from the shape in force where it is that
-    shape, each with its unit beside it (a weighted list's weights `WEIGHTS_UNIT`); then *apply*,
-    which sends `form` (`link.SetForm`), staged until the next trial. Its profile is in the box's
-    *more* (`_profile`). Greyed away from the box."""
+    shape, each with its unit beside it (a weighted list's weights `WEIGHTS_UNIT`); the box's Apply
+    sends them as `form` (`link.SetForm`), staged until the next trial. Its profile is in the
+    box's *more* (`_profile`). Greyed away from the box."""
     off, name = _gate(view), _e(row.name)
     shape = row.shape or {}
     chosen = shape.get("shape", "non_aging")
@@ -2123,9 +2123,7 @@ def _drawn_side(row, view: View) -> str:
         groups.append(f'<div class="shp rng" data-fields="{key}"'
                       f'{"" if key == chosen else " hidden"}>{cells}</div>')
     return (f'<select class="field" data-shape="{name}" aria-label="{name}: shape"{off}>'
-            f"{options}</select>{''.join(groups)}"
-            f'<button type="button" class="btn small" data-cmd="form" data-name="{name}"{off}>'
-            f"apply</button>")
+            f"{options}</select>{''.join(groups)}")
 
 
 #: **The profile's drawing, in the SVG's own units** (`_profile`): its width, each panel's left,
@@ -2289,8 +2287,9 @@ def _color_card(row, frame, view: View) -> str:
     2026-11-16: "you select a set, and then you have hue options from the set, then you have
     salience options for each hue"), three steps: **the set** (a select of the sets its choices
     show, the run's value's chosen), **the hue** (a swatch with its name for each hue the set
-    offers, the run's value's pressed; pressing one sends `color`, `link.SetColor`, staged until
-    the next trial), and **two levels** (`_color_level`): its saturation, gray to full, its luminance
+    offers, the run's value's pressed; pressing one is a draft of its box, which the box's Apply
+    sends as `color`, `link.SetColor`, staged until the next trial: the console interface rework's
+    Task 6), and **two levels** (`_color_level`): its saturation, gray to full, its luminance
     held, and its luminance, its saturation held -- the latter the light's fraction setting, or its
     set's luminance setting, which moves every light of the set that reads it. The caption,
     `COLOR_APPROXIMATE`, is in its box's *more*, its status line saying "approximate on this
@@ -2316,7 +2315,7 @@ def _color_card(row, frame, view: View) -> str:
                     else '<span class="chip none"></span>')
             buttons.append(
                 f'<button type="button" class="btn small hue{" on" if on else ""}" '
-                f'data-cmd="color" data-name="{name}" data-colorset="{_e(named)}" '
+                f'data-name="{name}" data-colorset="{_e(named)}" '
                 f'data-color="{_e(hue)}" aria-pressed="{"true" if on else "false"}"{off}>'
                 f"{chip}{_e(hue)}</button>")
         groups.append(f'<div class="hues" data-hues="{_e(named)}" data-name="{name}"'
@@ -2359,7 +2358,7 @@ def _over(row, place: str, view: View) -> str:
     value is one, else a number, as `_field` reads it; greyed away from the box."""
     word = isinstance(row.value, str)
     keys = ' data-kind="word"' if word else (
-        ' inputmode="numeric"' if row.whole else ' inputmode="decimal"')
+        ' data-whole="1" inputmode="numeric"' if row.whole else ' inputmode="decimal"')
     name = _e(row.name)
     return (f'<span class="fu"><input class="field mono over" data-param="{name}"{keys} value="" '
             f'placeholder="{place}" aria-label="{name}: {place}"{_gate(view)}>'
@@ -2369,12 +2368,12 @@ def _over(row, place: str, view: View) -> str:
 def _range_editor(row, view: View) -> str:
     """**The numbers of the card's draw a person may change live** (`ParamRow.numbers`; the PI,
     2026-10-30, Q7b: "Yes, range changes live"), each in a field of its own as the wire carried
-    it, every digit (a float's `str` is the shortest that reads back the same), and *change the
-    range*, which sends those a person changed (`SetRange`), laid by the rig over the numbers in
-    force. On a
-    card whose `numbers` is not `None` alone: none for a setting declared not live, a
-    direction, a weighted set or a list (review M-4; XC-443, XC-445). Greyed away from the
-    box."""
+    it, every digit (a float's `str` is the shortest that reads back the same). A number changed
+    is a draft of its box, sent by the box's Apply as a `range` of those a person changed
+    (`SetRange`), laid by the rig over the numbers in force (the console interface rework's Task
+    6: *change the range* is gone, the box's Apply its one send). On a card whose `numbers` is not
+    `None` alone: none for a setting declared not live, a direction, a weighted set or a list
+    (review M-4; XC-443, XC-445). Greyed away from the box."""
     off, name = _gate(view), _e(row.name)
     fields = "".join(
         f'<label class="rn">{_e(number)}<input class="field mono" data-number="{_e(number)}" '
@@ -2382,10 +2381,7 @@ def _range_editor(row, view: View) -> str:
         f"{_unit(row.unit)}</label>"
         for number, value in row.numbers.items()
     )
-    return (f'<div class="rng">{fields}<button type="button" class="btn small" data-cmd="range" '
-            f'data-name="{name}"{off}>change the range</button></div>'
-            f'<span class="src rhold" hidden>not sent: press change the range, or put its '
-            f'numbers back; the cards wait for it</span>')
+    return f'<div class="rng">{fields}</div>'
 
 
 def _whence(row, view: View, over: str = "") -> str:
@@ -2487,7 +2483,42 @@ def _status(row, change, refusal) -> tuple[str, str]:
     return "", _e("approximate on this screen" if row.color is not None else _limits(row))
 
 
-def _box(row, frame, view: View, value: str, editor: str, change, refusal) -> str:
+def _under(row, change) -> str:
+    """**Who changed a box under a person's draft, in words** (the console interface plan's Review
+    Focus 4: "the draft is untouched, the head shows the new value in force, the status says who
+    changed it"): a change waiting for the next trial, who sent it and what it leaves the setting
+    with; else the change in force, who made it and the trial it took effect at. Plain text, for
+    the box's `data-under`, which the script says after *not sent* while a draft stands over it;
+    "" for neither."""
+    if change is not None:
+        return f"{_plain(_who(change.by))} is changing this to {_plain(_becomes(change, row))}"
+    if row.applied is not None:
+        return f"{row.applied.by} changed this from trial {row.applied.trial}"
+    return ""
+
+
+def _withdraw(change, together: tuple, view: View) -> str:
+    """**A waiting change's *withdraw*** (the console interface design's goal 3; the PI,
+    2026-11-19: "Yes, a withdraw button"), in its box's status line beside Apply: it sends
+    `withdraw` naming the act's command id (`Staged.cid`, `link.Withdraw`), which takes back the
+    whole act, so it says so first where the act holds more than this box ("withdraw all 3",
+    "withdraws the 3 applied together: ..." in its title; the design's call). None for a change
+    no page sent (no cid). Greyed away from the box."""
+    if change is None or not change.cid:
+        return ""
+    if len(together) > 1:
+        said, title = (f"withdraw all {len(together)}",
+                       f"withdraws the {len(together)} applied together: {', '.join(together)}")
+    else:
+        said, title = "withdraw", "takes this change back before the next trial"
+    # The title rides on a wrapper: the button's own is the gate's ("controls work only at the rig
+    # PC"), which the sign-in's script takes while it is live.
+    return (f'<span class="wd" title="{_e(title)}"><button type="button" class="btn small" '
+            f'data-withdraw="{_e(change.cid)}" tabindex="0"{_gate(view)}>{_e(said)}</button></span>')
+
+
+def _box(row, frame, view: View, value: str, editor: str, change, refusal,
+         together: tuple = ()) -> str:
     """**One setting's box** (the console interface design's goal 1; the PI, 2026-11-19, "Small
     boxes"; the controls review's §2, "three zones, fixed places"), the markup the page's script
     works on:
@@ -2498,15 +2529,25 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal) -> st
                                waits for the next trial after an arrow
           <div class="editor"> the field with − and + and its unit, or the fixed/drawn switch and
                                its sides, or a color's set and swatches
-          <div class="status"> one line (`_status`) and, at its right, Discard and Apply, hidden
-                               by `visibility` until the script marks the box `draft`, so its
-                               height never jumps
+          <div class="status"> one line (`_status`) and, at its right, *withdraw* for a change
+                               waiting under a command id (`_withdraw`), Discard and Apply, hidden
+                               by `visibility` until the script marks the box `draft` (or the box
+                               is `staged`), so its height never jumps; Apply and Discard are
+                               in the Tab order, Safari's too (`tabindex="0"`)
           <details class="more"> opened in place: what it is (`ParamRow.help`), its limits and
                                why (`_range`), where its value comes from and *hand back*
                                (`_whence`), what it gives, the staged change, the warnings and the
                                last refusal whole, and a draw's profile
 
-    Every text a narrow box may cut short carries its whole in its `title`."""
+    Every text a narrow box may cut short carries its whole in its `title`.
+
+    **What the script reads off a box** (the console interface rework's Task 6): `data-staged-cid`,
+    the command id of the change waiting (`Staged.cid`); `data-refusal`, a key of the last
+    refusal shown, and `data-refusal-cid`, its command id (`Refused.cid`); `data-applied`, the
+    trial the change in force took effect at; `data-under`, who changed it under a draft
+    (`_under`); and on a refusal's status line, `data-rest` and `data-rest-state`, what the line
+    says once a later change has been accepted (the design's goal 4: "a refusal is cleared by a
+    later accepted change of that setting")."""
     name, off = _e(row.name), _gate(view)
     if row.label:
         names = (f'<span class="names"><span class="lbl" title="{_e(row.label)}">{_e(row.label)}'
@@ -2547,15 +2588,32 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal) -> st
         more.append(f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span>')
     classes = " ".join(word for word in ("box", state, "ceiling" if row.bounded else "",
                                          "wide" if row.color is not None else "") if word)
+    marks = []
+    if change is not None and change.cid:
+        marks.append(f' data-staged-cid="{_e(change.cid)}"')
+    if refusal is not None:
+        marks.append(f' data-refusal="{_e(refusal.cid or refusal.why)}"')
+        if refusal.cid:
+            marks.append(f' data-refusal-cid="{_e(refusal.cid)}"')
+    if row.applied is not None:
+        marks.append(f' data-applied="{_e(row.applied.trial)}"')
+    under = _under(row, change)
+    if under:
+        marks.append(f' data-under="{_e(under)}"')
+    rest = ""
+    if state == "refused":
+        rest_state, rest_said = _status(row, change, None)
+        rest = f' data-rest="{_e(_plain(rest_said))}" data-rest-state="{rest_state}"'
     return (
-        f'<div class="{classes}" data-card="{name}">'
+        f'<div class="{classes}" data-card="{name}"{"".join(marks)}>'
         f'<div class="head">{names}{flag}<span class="now" title="{_e(_plain(now))}">{now}</span>'
         f"</div>"
         f'<div class="editor">{editor}</div>'
-        f'<div class="status"><span class="say" title="{_e(_plain(said))}">{said}</span>'
-        f'<span class="acts"><button type="button" class="btn small" data-discard="{name}"{off}>'
+        f'<div class="status"><span class="say" title="{_e(_plain(said))}"{rest}>{said}</span>'
+        f'<span class="acts">{_withdraw(None if row.bounded else change, together, view)}'
+        f'<button type="button" class="btn small" data-discard="{name}" tabindex="0"{off}>'
         f'Discard</button><button type="button" class="btn small primary" '
-        f'data-apply="{name}"{off}>Apply</button></span></div>'
+        f'data-apply="{name}" tabindex="0"{off}>Apply</button></span></div>'
         f'<details class="more"><summary>more</summary><div class="detail">{"".join(more)}</div>'
         f"</details></div>"
     )
@@ -2596,6 +2654,12 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
         return '<span class="nm">this task declares no parameters</span>'
     staged = {change.name: change for change in frame.staged}
     refused = {refusal.name: refusal for refusal in frame.refusals}
+    # The settings of each act waiting under a command id, in order (`_withdraw`: one act's
+    # *withdraw* takes back all of it).
+    acts: dict = {}
+    for change in frame.staged:
+        if change.cid:
+            acts.setdefault(change.cid, []).append(change.name)
     cards = []
     for row in frame.params:
         change = staged.get(row.name)
@@ -2643,9 +2707,19 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
             editor = _color_card(row, frame, view)
         else:
             editor = entry
+        together = tuple(acts.get(change.cid, ())) if change is not None and change.cid else ()
         cards.append((row.section or OTHER, row.changed,
-                      _box(row, frame, view, label, editor, change, refusal)))
-    return _sections(frame.task, [card for card in cards if _training(card[0]) == training])
+                      _box(row, frame, view, label, editor, change, refusal, together)))
+    # **A withdrawal the rig refused** (`Refused` named `withdraw`, its `cid` the act's; the
+    # console interface rework's Task 4), its reason in short, for the script to say on the act's
+    # boxes ("not withdrawn · it is already in force from trial 41 ..."): no box is named
+    # `withdraw`, so none carries it.
+    declined = "".join(f'<span class="wdr" data-cid="{_e(refusal.cid)}">{_e(_gist(refusal.why))}'
+                       f"</span>" for refusal in frame.refusals
+                       if refusal.name == "withdraw" and refusal.cid)
+    run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
+    return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run)
+            + f'<div class="wdrs" hidden>{declined}</div>')
 
 
 def _training(section: str) -> bool:
@@ -2728,7 +2802,7 @@ def _count(settings: int, changed: int) -> str:
     return f"{settings} setting{'' if settings == 1 else 's'} · {changed} changed"
 
 
-def _sections(task: str, cards: list) -> str:
+def _sections(task: str, cards: list, run: str = "") -> str:
     """**The cards in their sections** (the console settings design's §7; the PI, 2026-11-16:
     "The task file names it", "As you last left them"): each `(section, changed, html)` under the
     section its row names (`ParamRow.section`; a row naming none, one made by hand, under Other),
@@ -2736,7 +2810,9 @@ def _sections(task: str, cards: list) -> str:
     point"`) nested in its parent, which keeps its own settings first. Each is a `<details>`
     headed by its name and `_count`, a parent's count taking in its subsections' -- all open as
     sent: the page opens each as last left, per `task` (`data-task`), in `localStorage`
-    (`applySections`), which the rig never reads. A section with no setting is not made."""
+    (`applySections`), which the rig never reads. A section with no setting is not made. `run`
+    names the run in progress (`data-run`; "" between runs): the script drops every draft when it
+    changes (the console interface design's call: "drafts ... dropped at the run's end")."""
     tree: dict = {}
     for named, changed, html in cards:
         top, _, sub = named.partition("/")
@@ -2755,7 +2831,8 @@ def _sections(task: str, cards: list) -> str:
         subs = "".join(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
         every = node["own"] + [one for found in node["subs"].values() for one in found]
         parts.append(block(top, node["own"], every, subs))
-    return f'<div class="secs" data-task="{_e(task)}">{"".join(parts)}</div>'
+    return (f'<div class="secs" data-task="{_e(task)}" data-run="{_e(run)}">'
+            f'{"".join(parts)}</div>')
 
 
 def _reverting(changes: tuple) -> str:
@@ -3456,7 +3533,11 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .box > .status { position: relative; display: flex; align-items: center; min-height: 24px; min-width: 0; font-size: 12px; color: var(--muted); }
 .box .status .say { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .box .status .acts { position: absolute; right: 0; top: 0; bottom: 0; display: flex; gap: 4px; align-items: center; padding-left: 6px; background: inherit; visibility: hidden; }
-.box.draft .status .acts { position: static; flex: none; visibility: visible; }
+.box.draft .status .acts, .box.sending .status .acts, .box.staged .status .acts:has([data-withdraw]) { position: static; flex: none; visibility: visible; }
+.box:not(.draft):not(.sending) .status .acts [data-apply], .box:not(.draft):not(.sending) .status .acts [data-discard] { display: none; }
+.box.draft { border-color: var(--accent); border-style: dashed; }
+.box.draft .status .say, .box.sending .status .say { color: var(--accent); }
+.box.cannot .status .say { color: var(--crit); }
 .box.staged { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .box.staged .status .say { color: var(--accent); }
 .box.refused { border-color: var(--crit); box-shadow: inset 3px 0 0 var(--crit); }
@@ -3508,6 +3589,11 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .who b { color: var(--ink); font-weight: 600; }
 body:not([data-signed-in="1"]) .si{display:none} body[data-signed-in="1"] .so{display:none}
 .sent { font-size: 12.5px; }
+.drafts { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 20; display: flex; gap: 8px; align-items: center; max-width: min(960px, calc(100vw - 32px)); padding: 6px 10px; font-size: 13px; }
+.drafts[hidden] { display: none; }
+.drafts .say { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drafts .btn { flex: none; }
+body.drafted > .wrap { padding-bottom: 56px; }
 .sent.ok { color: var(--ok); } .sent.crit { color: var(--crit); }
 .inline { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 12px; border-radius: 6px; font-size: 13px; background: var(--surface-2); }
 .inline.crit { background: var(--crit-soft); } .inline.info { background: var(--accent-soft); }
@@ -3667,10 +3753,12 @@ _LOGO = (
 #: wl.works member is signed in there (`data-signin`, the sign-in's block below);
 #: everywhere else every control is disabled in the HTML and `post` sends nothing. The
 #: name is asked once, kept in `localStorage` -- inside `try`, since a private window
-#: may refuse it -- and a prompt refused or cleared sends nothing. An arrow steps its
-#: input and the change is sent `debounceMs` after the last click; while an input has
-#: focus or a change is pending, a new parameters fragment is held and swapped in
-#: afterwards, so a frame never replaces an input under a person's hands. P and M do
+#: may refuse it -- and a prompt refused or cleared sends nothing. **A setting's box sends
+#: nothing until its Apply** (the console interface rework's Task 6): an edit is a draft, Enter
+#: in a field is Apply, Esc is Discard, Apply all sends every box's draft as one act, a waiting
+#: act can be withdrawn; each box is patched alone, and one with a draft, a focused field or its
+#: act out keeps its editor's nodes, so a frame never replaces an input under a person's hands;
+#: a frame for a root a pointer is down in waits for the press to end. P and M do
 #: nothing in a text box or when held. A mark sends its signal at once with
 #: `pressed_at` -- the browser's clock, and the only `Date.now()` outside the sign-in's
 #: block, which reads it for its tokens' expiry -- then opens the note box: Enter
@@ -3690,7 +3778,6 @@ _SCRIPT = """
   var body = document.body;
   var staleMs = Number(body.getAttribute("data-stale-after")) * 1000;
   var canWrite = body.getAttribute("data-can-write") === "1";
-  var debounceMs = Number(body.getAttribute("data-debounce-ms"));
   var NAME_KEY = "wlx-console-name";
   // P4d-2b b2b (spec §4): signing a member in on the rig's https page. The tokens live
   // in this tab's sessionStorage only; Python renders every word a person reads.
@@ -4156,29 +4243,67 @@ _SCRIPT = """
   var live = false;
   var lost = false;
   var closed = false;
-  var timers = {};
-  var heldParams = null;
   var heldMoments = null;
-  // The Training tab's cards (the console settings build's Task 10), held as the Task parameters
-  // tab's are, by every protection theirs have (the whole-build review's I3: a field typed in, a
-  // number typed and not sent, a pointer down, a press out): the bars, staircases and margin moved
-  // there from `#params`, and in WebKit a frame landing under a press there lost it.
-  var heldTraining = null;
-  // **The two tabs of setting cards**, which every hold and every card lookup reads alike.
+  // **The two tabs of setting boxes**, which every patch and every box lookup reads alike.
   var CARDS = ["#params", "#training-params"];
   function inCards(selector) {
     return CARDS.map(function (root) { return root + " " + selector; }).join(", ");
   }
   var pressedAt = null;
+  // The root a pointer went down in (`#params`, `#training-params` or `#moments`): only its
+  // frames wait for the press to end.
+  var pressedIn = null;
   var PRESS_MS = 10000;
-  var rangeOut = {};
-  // The timing switch (the console settings build; the PI, 2026-11-16, "fixed or drawn"): the
-  // side of each timing card a person opened and the shape chosen on its drawn side, by setting,
-  // kept across the frames that replace the cards until a draw is sent from it; and each card
-  // whose draw is out, as `rangeOut` holds a range's.
-  var sides = {};
-  var shapes = {};
-  var formOut = {};
+  // **A frame held while a pointer is down in its root** (fix round 2 of the C3 plan's Task 18: a
+  // frame landing between the mouse going down and up replaced the button under it, in WebKit
+  // above all), by root id, patched in once the press ends (`release`). The newest only.
+  var heldCards = {};
+  // **Drafts, Apply, Apply all and withdraw** (the console interface rework's Task 6; the PI,
+  // 2026-11-19: "i prefer an apply button in each box for making a change"; the controls
+  // review's §2 and §3). Nothing a box holds is sent until its Apply, Enter in one of its fields,
+  // or Apply all. Each box is patched alone (`patchCards`): a box with a draft, a field or select
+  // focused in it, or its act out keeps its editor's nodes, and only its head and status line --
+  // and *more*, but for a draft's range numbers -- take the frame's news, so a press lands on a
+  // node no frame replaced. By setting name:
+  // - `served`, each box as the latest frame drew it, never shown: what a draft is judged against
+  //   and what Discard puts back;
+  // - `drafts`, each box's draft, `{changes, error}` (`draftOf`), kept across frames and tab
+  //   switches, dropped at the run's end (`data-run`) and on a reload;
+  // - `out`, each box whose act this page sent and the rig has not yet answered in a frame,
+  //   `{cid, state, snapshot, phase: "sending" | "waiting", answered}`: what was sent, which a draft
+  //   is judged against meanwhile;
+  // - `refusedAt`, the act of the box the rig refused and the draft it refused, so the box says
+  //   *refused* while that draft stands; `notes`, a line the page says on a box until its news
+  //   changes (a send not delivered, a withdrawal's answer); `refusals`, each box's refusal as
+  //   first seen and whether a later change of the setting has been accepted since (the design's
+  //   goal 4); `since`, the trial in force when each draft began, so a change made under it is said.
+  // And by command id: `acts`, the settings of each act this page sent; `mine`, every id it made;
+  // `withdrawing`, each act whose withdrawal is out.
+  var served = {};
+  var drafts = {};
+  var out = {};
+  var refusedAt = {};
+  var notes = {};
+  var refusals = {};
+  var since = {};
+  var kept = {};
+  var acts = {};
+  var mine = {};
+  var withdrawing = {};
+  var runKey = null;
+  // The page's own command ids: a random prefix per page and a count, printable, at most 64
+  // characters (`link.CID_LIMIT`).
+  var pageId = random(6);
+  var cidCount = 0;
+  var APPLY_ALL_LIMIT = Number(body.getAttribute("data-apply-all-limit")) || 50;
+  // The box's words (the console interface design's goal 4; the plan's "Words on the page").
+  var NOT_SENT = "not sent";
+  var SENDING = "sending…";
+  var CANNOT = "cannot send · ";
+  var ALONE = "sent alone · cannot be withdrawn";
+  var TOGETHER = "refused · with the changes applied together";
+  var WITHDRAWN = "withdrawn · it never applied";
+  var WHOLE = "whole numbers only";
   // A color card's set a person chose to see the hues of (the design's §6), by setting, kept
   // across the frames that replace the cards until a hue of it is picked.
   var colorSets = {};
@@ -4241,31 +4366,6 @@ _SCRIPT = """
       say("");
     }
   }
-  // A range's number typed and not yet sent (fix round 1 of the C3 plan's Task 18): its field
-  // differs from the number in force, **read as `sendRange` reads it** (fix round 2): a text that
-  // is no finite number, or a different number -- "1.250" over 1.25 is the same number, which
-  // *change the range* would refuse as unchanged, so it holds nothing. It keeps the cards held
-  // as a field with focus does, since WebKit (Safari) takes focus off the field as the mouse
-  // goes down on *change the range*, and a frame swapped in then would put the old number back
-  // and the clicked button out from under the click.
-  function rangeChanged(input) {
-    var raw = input.value.trim();
-    var value = Number(raw);
-    return raw === "" || !isFinite(value) || value !== Number(input.defaultValue);
-  }
-  function rangeEdited() {
-    var fields = document.querySelectorAll(inCards("input[data-number]"));
-    return Array.prototype.some.call(fields, rangeChanged) || formEdited();
-  }
-  // A drawn side's number typed and not yet applied holds the cards as a range's does (the
-  // console settings build), for the same reason: WebKit takes focus off the field as the mouse
-  // goes down on *apply*.
-  function formEdited() {
-    var fields = document.querySelectorAll(inCards("input[data-form]"));
-    return Array.prototype.some.call(fields, function (input) {
-      return input.value !== input.defaultValue;
-    });
-  }
   function cardOf(name) {
     return document.querySelector(inCards('.box[data-card="' + CSS.escape(name) + '"]'));
   }
@@ -4310,6 +4410,22 @@ _SCRIPT = """
   function writeSections(key, kept) {
     try { window.localStorage.setItem(key, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
   }
+  // The find box's marks alone, each box found or not and each section holding one or not, the
+  // sections left open or closed as they are: for boxes put back between frames (`settle`), where
+  // opening the sections as last kept would undo a click a store that throws could not keep.
+  function applyFind() {
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
+      var find = root.closest("#params") && el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
+        var label = card.querySelector(".head .lbl");
+        var name = (card.getAttribute("data-card") + " " + (label ? label.textContent : "")).toLowerCase();
+        card.classList.toggle("nofind", find !== "" && name.indexOf(find) === -1);
+      });
+      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
+        section.classList.toggle("nofind", find !== "" && section.querySelector(".box:not(.nofind)") === null);
+      });
+    });
+  }
   function applySections() {
     Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
       var kept = readSections(sectionsKey(root));
@@ -4352,27 +4468,16 @@ _SCRIPT = """
     var name = summary.closest(".box").getAttribute("data-card");
     if (summary.parentNode.open) { delete mores[name]; } else { mores[name] = true; }
   }
-  // After the cards are replaced: each timing card on the side and shape a person chose.
-  function restoreSides() {
-    applySections();
-    Object.keys(mores).forEach(function (name) {
-      var card = cardOf(name);
-      var more = card ? card.querySelector(":scope > details.more") : null;
-      if (more) { more.open = true; }
+  // **What a box shows that is the page's own**, put back after a frame replaces it: its *more*
+  // open, the color set a person chose to see the hues of, its New color panel as left.
+  function restoreBox(box) {
+    var name = box.getAttribute("data-card");
+    var more = box.querySelector(":scope > details.more");
+    if (more && mores[name]) { more.open = true; }
+    Array.prototype.forEach.call(box.querySelectorAll("select[data-colorset]"), function (select) {
+      var named = colorSets[select.getAttribute("data-colorset")];
+      if (named !== undefined) { showHues(select, named); }
     });
-    Object.keys(sides).forEach(function (name) {
-      var card = cardOf(name);
-      if (card) { showSide(card, sides[name]); }
-    });
-    Object.keys(shapes).forEach(function (name) {
-      var card = cardOf(name);
-      if (card) { showShape(card, shapes[name]); }
-    });
-    Object.keys(colorSets).forEach(function (name) {
-      var select = document.querySelector(inCards('select[data-colorset="' + CSS.escape(name) + '"]'));
-      if (select) { showHues(select, colorSets[name]); }
-    });
-    restoreNewColors();
   }
   function newColorKey(input) {
     if (input.hasAttribute("data-newc-num")) {
@@ -4486,52 +4591,803 @@ _SCRIPT = """
       group.hidden = group.getAttribute("data-hues") !== named;
     });
   }
-  // A number typed and not sent is marked pending, and, while a frame is held because of it,
-  // its card says so under the editor: never a silent freeze of the cards (fix round 2).
-  function markRanges() {
-    Array.prototype.forEach.call(document.querySelectorAll(inCards(".box")), function (card) {
-      var fields = card.querySelectorAll("input[data-number]");
-      var edited = false;
-      Array.prototype.forEach.call(fields, function (input) {
-        var changed = rangeChanged(input);
-        input.classList.toggle("pending", changed);
-        edited = edited || changed;
-      });
-      var line = card.querySelector(".rhold");
-      var held = card.closest("#training-params") ? heldTraining : heldParams;
-      if (line) { line.hidden = !(edited && held !== null); }
-    });
-  }
-  // A pointer down inside the cards or the moments pane holds them until it is up (fix round 2:
-  // a frame landing between the mouse going down and up replaced the button under it, so the
-  // press was lost -- in WebKit, which never focuses a clicked button, and now in Chromium). A
-  // release the page never sees ends the hold after ten seconds.
+  // A pointer down inside the boxes or the moments pane holds their frames until it is up (fix
+  // round 2: a frame landing between the mouse going down and up replaced the button under it,
+  // so the press was lost -- in WebKit, which never focuses a clicked button, and in Chromium),
+  // so nothing moves under the pointer, a neighbor growing above it included. A release the page
+  // never sees ends the hold after ten seconds.
   function pressing() {
     return pressedAt !== null && performance.now() - pressedAt < PRESS_MS;
   }
-  // Only a field being typed in holds the cards, not a button clicked: Chromium focuses the
-  // button a person pressed (*hand back*, *change the range*), and the cards then never showed
-  // what the press did.
-  function busy() {
+  function boxes() { return document.querySelectorAll(inCards(".box")); }
+  function nameOf(box) { return box.getAttribute("data-card"); }
+  // **A box's controls as they stand**, keyed by what each sends: the side open (`side`), each
+  // value field shown (`p:` and the setting it sets), the shape chosen and its fields (`shape`,
+  // `f:`), the hue pressed (`hue`), and a draw's live numbers in its *more* (`n:`). A number is
+  // compared as a number -- `0.50` is `0.5`, as `1.250` is `1.25` -- a list as its numbers, and
+  // what is no number as typed.
+  function numberOf(raw) {
+    var value = Number(raw);
+    return raw === "" ? "" : isFinite(value) ? "#" + value : raw;
+  }
+  function listOf(raw) {
+    return raw.split(/[\\s,]+/).filter(Boolean).map(numberOf).join(",");
+  }
+  function shownIn(box, node) {
+    for (var at = node; at && at !== box; at = at.parentElement) {
+      if (at.hidden) { return false; }
+    }
+    return true;
+  }
+  function paneOf(box, side) {
+    return box.querySelector('.editor [data-side="' + CSS.escape(side) + '"]');
+  }
+  function shapeOf(pane) {
+    var select = pane ? pane.querySelector("select[data-shape]") : null;
+    return select ? select.value : "scaled";
+  }
+  function formFields(box, side) {
+    var pane = paneOf(box, side);
+    var group = pane ? pane.querySelector('[data-fields="' + CSS.escape(shapeOf(pane)) + '"]') : null;
+    return group ? group.querySelectorAll("input[data-form]") : [];
+  }
+  function stateOf(box) {
+    var state = {};
+    var side = box.querySelector(".editor [data-switch].on");
+    if (side) { state.side = side.getAttribute("data-switch"); }
+    Array.prototype.forEach.call(box.querySelectorAll(".editor input[data-param]"), function (input) {
+      if (!shownIn(box, input)) { return; }
+      var raw = input.value.trim();
+      state["p:" + input.getAttribute("data-param")] =
+        input.getAttribute("data-kind") === "word" ? raw : numberOf(raw);
+    });
+    if (state.side && state.side !== "fixed") {
+      state.shape = shapeOf(paneOf(box, state.side));
+      Array.prototype.forEach.call(formFields(box, state.side), function (input) {
+        var field = input.getAttribute("data-form");
+        var raw = input.value.trim();
+        state["f:" + field] = field === "values" || field === "weights" ? listOf(raw) : numberOf(raw);
+      });
+    }
+    var hue = box.querySelector(".editor .hue.on[data-color]");
+    if (hue) { state.hue = hue.getAttribute("data-colorset") + "/" + hue.getAttribute("data-color"); }
+    Array.prototype.forEach.call(box.querySelectorAll(".detail > .rng input[data-number]"), function (input) {
+      state["n:" + input.getAttribute("data-number")] = numberOf(input.value.trim());
+    });
+    return state;
+  }
+  function same(a, b) {
+    var keys = Object.keys(a);
+    return keys.length === Object.keys(b).length &&
+      keys.every(function (key) { return a[key] === b[key]; });
+  }
+  // **A box's draft** (the controls review's §2, rules 1, 2 and 4): what its Apply would send, as
+  // changes -- each `{kind, name, ...}` by its own kind's fields, `set`, `range`, `form` or
+  // `color` (`link.APPLY_KINDS`) -- and why it cannot be sent (`error`, the page's own checks: a
+  // number that is not one, a fraction for a whole setting); `null` where the box holds what it
+  // is headed to, the value in force or what this page sent and the rig has not yet applied ("a
+  // draft equal to what is in force is no draft"). A range sends the numbers that differ from
+  // those in force, which the rig lays over them.
+  function draftOf(box) {
+    var name = nameOf(box);
+    var now = stateOf(box);
+    var given = served[name] ? stateOf(served[name]) : now;
+    var base = out[name] ? out[name].state : given;
+    if (same(now, base)) { return null; }
+    var changes = [];
+    var error = "";
+    function wrong(why) { if (!error) { error = why; } }
+    Object.keys(now).forEach(function (key) {
+      if (key.indexOf("p:") !== 0 || now[key] === base[key]) { return; }
+      var setting = key.slice(2);
+      var field = null;
+      Array.prototype.forEach.call(box.querySelectorAll(".editor input[data-param]"), function (input) {
+        if (input.getAttribute("data-param") === setting && shownIn(box, input)) { field = input; }
+      });
+      var raw = field.value.trim();
+      if (field.getAttribute("data-kind") === "word") {
+        if (raw === "") { wrong(setting + " needs a word"); }
+        changes.push({ kind: "set", name: setting, value: raw });
+        return;
+      }
+      var value = Number(raw);
+      if (raw === "" || !isFinite(value)) { wrong(setting + " needs a number"); return; }
+      if (field.hasAttribute("data-whole") && Math.floor(value) !== value) { wrong(WHOLE); return; }
+      changes.push({ kind: "set", name: setting, value: value });
+    });
+    var drawn = now.side !== undefined && now.side !== "fixed";
+    var reshaped = drawn && (now.side !== base.side || now.shape !== base.shape ||
+      Object.keys(now).some(function (key) { return key.indexOf("f:") === 0 && now[key] !== base[key]; }));
+    if (reshaped) {
+      var command = { kind: "form", name: name, shape: now.shape };
+      var numbers = {};
+      Array.prototype.forEach.call(formFields(box, now.side), function (input) {
+        var field = input.getAttribute("data-form");
+        var raw = input.value.trim();
+        if (field === "values" || field === "weights") {
+          var items = raw.split(/[\\s,]+/).filter(Boolean).map(Number);
+          if (!items.length || items.some(function (item) { return !isFinite(item); })) {
+            wrong(name + "'s " + field + " needs a number");
+          }
+          command[field] = items;
+          return;
+        }
+        var value = Number(raw);
+        if (raw === "" || !isFinite(value)) { wrong(name + "'s " + field + " needs a number"); }
+        numbers[field] = value;
+      });
+      if (Object.keys(numbers).length) { command.numbers = numbers; }
+      changes.push(command);
+    }
+    if (now.hue !== undefined && now.hue !== base.hue) {
+      var hue = box.querySelector(".editor .hue.on[data-color]");
+      changes.push({ kind: "color", name: name, colorset: hue.getAttribute("data-colorset"),
+                     color: hue.getAttribute("data-color") });
+    }
+    var ranged = {};
+    var moved = Object.keys(now).some(function (key) {
+      return key.indexOf("n:") === 0 && now[key] !== base[key];
+    });
+    if (moved) {
+      Object.keys(now).forEach(function (key) {
+        if (key.indexOf("n:") !== 0 || now[key] === given[key]) { return; }
+        var number = key.slice(2);
+        var raw = box.querySelector('.detail > .rng input[data-number="' + CSS.escape(number) + '"]').value.trim();
+        var value = Number(raw);
+        if (raw === "" || !isFinite(value)) { wrong(name + "'s " + number + " needs a number"); return; }
+        ranged[number] = value;
+      });
+      if (Object.keys(ranged).length) { changes.push({ kind: "range", name: name, numbers: ranged }); }
+    }
+    var named = {};
+    changes.forEach(function (change) {
+      if (named[change.name]) { wrong("a value over " + change.name + "'s draw and its range go one at a time"); }
+      named[change.name] = true;
+    });
+    if (!changes.length && !error) { return null; }
+    return { changes: changes, error: error };
+  }
+  // What a frame says of a box that the page tells news by: the change waiting, the refusal, the
+  // change in force.
+  function newsOf(box) {
+    return [box.classList.contains("staged") ? "staged" : "", box.getAttribute("data-staged-cid"),
+            box.getAttribute("data-refusal"), box.getAttribute("data-applied")].join("|");
+  }
+  function noted(box, said) {
+    notes[nameOf(box)] = { said: said, news: newsOf(box), state: stateOf(box) };
+  }
+  // A button the page holds off for a reason of its own (no draft, a draft it cannot send, an
+  // act out), or lets go to what this page may do: `data-held`, which the sign-in leaves alone.
+  function hold(button, off) {
+    if (!button) { return; }
+    if (off) {
+      button.disabled = true;
+      button.setAttribute("data-held", "");
+      return;
+    }
+    button.removeAttribute("data-held");
+    button.disabled = signinPage ? !(signedIn() && confirmed) : !canWrite;
+  }
+  // **A box's one status line**, where the page has its own word to say (the plan's "Words on
+  // the page"): *sending…* while its act is out; *cannot send · why* for a draft its checks
+  // refuse; a line kept until the box's news changes (a send not delivered, a withdrawal's
+  // answer); *refused* for the draft the rig refused, by its own reason or, for an act refused
+  // whole, as applied together; *not sent* for a draft, saying a reward size is sent alone and
+  // never withdrawn, and who changed the box under it (the plan's Review Focus 4); *waiting for
+  // the next trial · you* for a change this page sent. `null`: the rig's own line.
+  function lineOf(box, draft) {
+    var name = nameOf(box);
+    var sent = out[name];
+    if (sent && sent.phase === "sending") { return SENDING; }
+    if (draft && draft.error) { return CANNOT + draft.error; }
+    var note = notes[name];
+    if (note && note.news === newsOf(box) && same(note.state, stateOf(box))) { return note.said; }
+    delete notes[name];
+    var refused = refusedAt[name];
+    if (refused && draft && same(refused.state, stateOf(box))) {
+      return box.getAttribute("data-refusal-cid") === refused.cid ? null : TOGETHER;
+    }
+    var waiting = box.getAttribute("data-staged-cid");
+    var under = box.getAttribute("data-under");
+    if (draft) {
+      var said = NOT_SENT;
+      if (box.classList.contains("ceiling")) { said += " · " + ALONE; }
+      if (box.classList.contains("staged")) {
+        if (waiting && mine[waiting]) {
+          var to = box.querySelector(".head .to");
+          said += " · " + (to ? to.textContent.replace(/^→\\s*/, "") : "a change") + " is waiting";
+        } else if (under) { said += " · " + under; }
+      } else if (under && (box.getAttribute("data-applied") || "") !== (since[name] || "")) {
+        said += " · " + under;
+      }
+      return said;
+    }
+    if (box.classList.contains("staged") && waiting && mine[waiting]) {
+      return "waiting for the next trial · you";
+    }
+    return null;
+  }
+  // **A box brought up to date with the page's own state**: its draft judged, its marks
+  // (`draft`, `sending`, `cannot`), its status line, and Apply and Discard live only where they
+  // would do something. The rig's line and state come from `served`; a refusal a later accepted
+  // change has cleared says what the line would say without it.
+  function refresh(box) {
+    var name = nameOf(box);
+    var fresh = served[name];
+    var draft = draftOf(box);
+    if (draft) {
+      if (!drafts[name]) { since[name] = box.getAttribute("data-applied") || ""; }
+      drafts[name] = draft;
+    } else {
+      delete drafts[name];
+      delete since[name];
+    }
+    var sending = Boolean(out[name] && out[name].phase === "sending");
+    // The rig's state from the frame; the find box's marks follow in `settle` (`applyFind`).
+    if (fresh) { box.className = fresh.className; }
+    var said = lineOf(box, draft);
+    var say = box.querySelector(":scope > .status > .say");
+    var given = fresh ? fresh.querySelector(":scope > .status > .say") : null;
+    if (say && given) {
+      var copy = given.cloneNode(true);
+      say.replaceWith(copy);
+      say = copy;
+    }
+    var seen = refusals[name];
+    if (said === null && seen && seen.cleared && box.classList.contains("refused") && say &&
+        say.hasAttribute("data-rest")) {
+      box.classList.remove("refused");
+      if (say.getAttribute("data-rest-state")) { box.classList.add(say.getAttribute("data-rest-state")); }
+      said = say.getAttribute("data-rest");
+    }
+    if (said === TOGETHER) { box.classList.add("refused"); }
+    if (said !== null && say) {
+      say.textContent = said;
+      say.title = said;
+    }
+    box.classList.toggle("draft", Boolean(draft) && !sending);
+    box.classList.toggle("sending", sending);
+    box.classList.toggle("cannot", Boolean(draft && draft.error) && !sending);
+    hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
+    hold(box.querySelector("[data-discard]"), !draft || sending);
+  }
+  // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
+  // in it (the controls review's §3, rule 2); a button focused is not one, Chromium focusing
+  // the button it pressed (*hand back*).
+  function dirty(box) {
+    var name = nameOf(box);
     var focused = document.activeElement;
-    return Boolean(focused && focused.matches && focused.matches(inCards("input") + ", " + inCards("select"))) ||
-      rangeEdited() || pressing() || Object.keys(timers).length > 0;
+    return Boolean(drafts[name] || out[name] ||
+      (focused && box.contains(focused) && focused.matches && focused.matches("input, select")));
+  }
+  // A refusal as first seen on a box, and whether a change of the setting has been accepted since
+  // (the design's goal 4: "a refusal is cleared by a later accepted change of that setting"): a
+  // change waiting that was not when it was first seen, or the change in force moving on.
+  function track(box) {
+    var name = nameOf(box);
+    var fresh = served[name] || box;
+    var key = fresh.getAttribute("data-refusal") || "";
+    var staged = fresh.classList.contains("staged") ? (fresh.getAttribute("data-staged-cid") || "staged") : "";
+    var applied = fresh.getAttribute("data-applied") || "";
+    var seen = refusals[name];
+    if (!key) { delete refusals[name]; return; }
+    if (!seen || seen.key !== key) {
+      refusals[name] = { key: key, staged: staged, applied: applied, cleared: false };
+      return;
+    }
+    if (!seen.cleared && ((staged && staged !== seen.staged) || (!seen.staged && applied !== seen.applied))) {
+      seen.cleared = true;
+    }
+  }
+  // **A kept editor's controls a person has not touched follow the frame**: each that still holds
+  // what the last frame drew moves to what this one draws, its node kept -- its value set, never
+  // replaced -- so a box kept only for a field focused, or kept for one edit, never shows a value
+  // the rig no longer holds as a draft of its own; one a person changed stays.
+  function controlsOf(node) {
+    var found = {};
+    Array.prototype.forEach.call(node.querySelectorAll(
+        ".editor input[data-param], .editor input[data-form], .editor select[data-shape], " +
+        ".detail > .rng input[data-number]"), function (control) {
+      var key = control.hasAttribute("data-param") ? "p:" + control.getAttribute("data-param")
+        : control.hasAttribute("data-number") ? "n:" + control.getAttribute("data-number")
+        : control.hasAttribute("data-form") ? "f:" + control.closest("[data-fields]").getAttribute("data-fields") +
+          "/" + control.getAttribute("data-form")
+        : "shape";
+      found[key] = control;
+    });
+    return found;
+  }
+  function valueOf(control) {
+    var raw = control.value.trim();
+    return control.tagName === "SELECT" || control.getAttribute("data-kind") === "word" ? raw
+      : control.getAttribute("data-form") === "values" || control.getAttribute("data-form") === "weights"
+      ? listOf(raw) : numberOf(raw);
+  }
+  function follow(box, before, given) {
+    var have = controlsOf(box);
+    var was = controlsOf(before);
+    var now = controlsOf(given);
+    Object.keys(have).forEach(function (key) {
+      var control = have[key];
+      if (!was[key] || !now[key] || valueOf(control) !== valueOf(was[key]) ||
+          valueOf(now[key]) === valueOf(was[key])) { return; }
+      control.value = now[key].value;
+      if (key === "shape") { showShape(box, control.value); }
+    });
+    var sideOf = function (node) {
+      var on = node.querySelector(".editor [data-switch].on");
+      return on ? on.getAttribute("data-switch") : null;
+    };
+    if (sideOf(box) !== null && sideOf(box) === sideOf(before) && sideOf(given) !== sideOf(before)) {
+      showSide(box, sideOf(given));
+    }
+    var hueOf = function (node) {
+      var on = node.querySelector(".editor .hue.on[data-color]");
+      return on ? on.getAttribute("data-colorset") + "/" + on.getAttribute("data-color") : "";
+    };
+    if (hueOf(box) === hueOf(before) && hueOf(given) !== hueOf(before)) {
+      Array.prototype.forEach.call(box.querySelectorAll(".editor .hue[data-color]"), function (hue) {
+        var on = hue.getAttribute("data-colorset") + "/" + hue.getAttribute("data-color") === hueOf(given);
+        hue.classList.toggle("on", on);
+        hue.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    }
+  }
+  // **A dirty box patched by zone** (the controls review's §3): its head and its status line's
+  // news from the frame, its *withdraw* as the frame has it, its *more* -- but a draft's or a
+  // sent act's live range numbers, and not while a field in it is focused -- and its marks; its
+  // editor's nodes, and Apply and Discard, never replaced.
+  function patchDirty(box, given, before) {
+    // Not while its act is out: what it sent is judged against the editor as sent.
+    if (before && !out[nameOf(box)]) { follow(box, before, given); }
+    box.querySelector(":scope > .head").replaceWith(given.querySelector(":scope > .head"));
+    var acts = box.querySelector(":scope > .status > .acts");
+    var gone = acts.querySelector(":scope > .wd");
+    var come = given.querySelector(":scope > .status > .acts > .wd");
+    if (gone && come) { gone.replaceWith(come); }
+    else if (gone) { gone.remove(); }
+    else if (come) { acts.insertBefore(come, acts.firstChild); }
+    var detail = box.querySelector(":scope > details.more > .detail");
+    var news = given.querySelector(":scope > details.more > .detail");
+    var focused = document.activeElement;
+    if (detail && news && !(focused && detail.contains(focused))) {
+      var range = detail.querySelector(":scope > .rng");
+      var fresh = news.querySelector(":scope > .rng");
+      var now = stateOf(box);
+      var was = before ? stateOf(before) : now;
+      var ranged = Boolean(out[nameOf(box)]) || Object.keys(now).some(function (key) {
+        return key.indexOf("n:") === 0 && now[key] !== was[key];
+      });
+      if (range && fresh && ranged) { fresh.replaceWith(range); }
+      detail.replaceWith(news);
+    }
+    ["data-staged-cid", "data-refusal", "data-refusal-cid", "data-applied", "data-under"].forEach(function (attr) {
+      if (given.hasAttribute(attr)) { box.setAttribute(attr, given.getAttribute(attr)); }
+      else { box.removeAttribute(attr); }
+    });
+    box.className = given.className;
+  }
+  function skeletonOf(root) {
+    var secs = root.querySelector(".secs");
+    if (!secs) { return null; }
+    return Array.prototype.map.call(secs.querySelectorAll("details.sec"), function (section) {
+      return section.getAttribute("data-sec") + ":" + Array.prototype.map.call(
+        section.querySelectorAll(":scope > .cards > .box"), nameOf).join(",");
+    }).join("|");
+  }
+  // Every draft dropped (the console interface design's call: "dropped at the run's end"), and a
+  // field focused in a box left, so no box keeps an editor of a run that is over.
+  function dropDrafts() {
+    drafts = {};
+    out = {};
+    refusedAt = {};
+    notes = {};
+    since = {};
+    withdrawing = {};
+    var focused = document.activeElement;
+    if (focused && focused.closest && focused.closest(CARDS.join(", "))) { focused.blur(); }
+    // Every box is put back as the frame draws it, an unchanged one too: its editor may hold a
+    // draft just dropped.
+    Array.prototype.forEach.call(boxes(), function (box) { kept[nameOf(box)] = true; });
+  }
+  // **A frame's boxes, patched box by box** (the console interface design's goal 10; the controls
+  // review's §3): held whole while a pointer is down (`pressing`); else each box the frame
+  // changed is replaced whole where it is clean, and patched by zone where it is dirty
+  // (`patchDirty`), its editor's nodes kept, so a press or a field being typed in is never under a
+  // node a frame replaced. The sections' headers are rewritten in place. Where the frame lays the
+  // boxes out anew (a setting come or gone, a section moved), the tab is rebuilt around the dirty
+  // boxes' own nodes, the field that had focus focused again.
+  function patchCards(id, html) {
+    var root = el(id);
+    if (!root) { return; }
+    if (pressing()) { heldCards[id] = html; return; }
+    delete heldCards[id];
+    var made = document.createElement("template");
+    made.innerHTML = html;
+    var next = made.content;
+    var secs = next.querySelector(".secs");
+    // Only a tab that lays out boxes names the run: the Training tab of a task with no Training
+    // section names none.
+    if (secs) {
+      var run = secs.getAttribute("data-run") || "";
+      if (runKey !== null && run !== runKey) { dropDrafts(); }
+      runKey = run;
+    }
+    var given = {};
+    var before = {};
+    Array.prototype.forEach.call(next.querySelectorAll(".box"), function (box) {
+      var name = nameOf(box);
+      given[name] = box;
+      before[name] = served[name] || null;
+      served[name] = box.cloneNode(true);
+    });
+    var held = {};
+    Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) {
+      var name = nameOf(box);
+      if (!given[name]) {
+        delete drafts[name];
+        delete out[name];
+        delete kept[name];
+      } else if (dirty(box)) { held[name] = true; }
+    });
+    var layout = skeletonOf(root);
+    if (layout !== null && layout === skeletonOf(next)) {
+      var live = root.querySelector(".secs");
+      ["data-task", "data-run"].forEach(function (attr) {
+        live.setAttribute(attr, secs.getAttribute(attr) || "");
+      });
+      Array.prototype.forEach.call(live.querySelectorAll("details.sec"), function (section) {
+        var other = secs.querySelector('details.sec[data-sec="' + CSS.escape(section.getAttribute("data-sec")) + '"]');
+        var summary = section.querySelector(":scope > summary");
+        var said = other.querySelector(":scope > summary").textContent;
+        if (summary.textContent !== said) { summary.textContent = said; }
+      });
+      var oldRefused = root.querySelector(":scope > .wdrs");
+      var newRefused = next.querySelector(".wdrs");
+      if (oldRefused && newRefused) { oldRefused.replaceWith(newRefused); }
+      else if (newRefused) { root.appendChild(newRefused); }
+      else if (oldRefused) { oldRefused.remove(); }
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) {
+        var name = nameOf(box);
+        if (held[name]) {
+          patchDirty(box, given[name], before[name]);
+          kept[name] = true;
+        } else if (kept[name] || !before[name] || !before[name].isEqualNode(given[name])) {
+          box.replaceWith(given[name]);
+          delete kept[name];
+          restoreBox(given[name]);
+        }
+      });
+    } else {
+      var focused = document.activeElement;
+      var mark = null;
+      if (focused && root.contains(focused) && focused.matches("input")) {
+        try { mark = [focused.selectionStart, focused.selectionEnd]; } catch (e) { mark = null; }
+      }
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) {
+        var name = nameOf(box);
+        if (held[name]) {
+          patchDirty(box, given[name], before[name]);
+          given[name].replaceWith(box);
+          kept[name] = true;
+        } else { delete kept[name]; }
+      });
+      root.replaceChildren(next);
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) {
+        if (!kept[nameOf(box)]) { restoreBox(box); }
+      });
+      if (focused && root.contains(focused) && document.activeElement !== focused) {
+        focused.focus();
+        if (mark) { try { focused.setSelectionRange(mark[0], mark[1]); } catch (e) { /* not a text field */ } }
+      }
+    }
+    Array.prototype.forEach.call(root.querySelectorAll(".box"), track);
+    applySections();
+    judge();
+    settle();
+  }
+  // **The rig's answers to this page's acts, read off the frame**: an act whose id a box's
+  // refusal carries is refused whole, every box of it (the controls' ruling: a frame keeps only
+  // the last refusals, so not every box of a large act may carry its own); one a box's waiting
+  // change carries is waiting; one waiting no more, or answered *sent* with the boxes now holding
+  // what it sent, has applied or been replaced. A withdrawal the rig refused (`.wdr`, by the act's
+  // id) is said on its boxes; one answered *sent* whose act waits no more has taken it back, and
+  // its boxes go back to the value in force.
+  function judge() {
+    var staged = {};
+    var refused = {};
+    var declined = {};
+    Array.prototype.forEach.call(boxes(), function (box) {
+      var cid = box.getAttribute("data-staged-cid");
+      if (cid) { staged[cid] = true; }
+      var no = box.getAttribute("data-refusal-cid");
+      if (no) { refused[no] = true; }
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".wdrs .wdr")), function (row) {
+      var cid = row.getAttribute("data-cid");
+      declined[cid] = { count: (declined[cid] ? declined[cid].count : 0) + 1, said: row.textContent };
+    });
+    Object.keys(withdrawing).forEach(function (cid) {
+      var asked = withdrawing[cid];
+      var no = declined[cid];
+      if (no && no.count > asked.seen) {
+        asked.names.forEach(function (name) {
+          var box = cardOf(name);
+          if (box) { noted(box, "not withdrawn · " + no.said); }
+        });
+        delete withdrawing[cid];
+      } else if (asked.answered && !staged[cid]) {
+        asked.names.forEach(function (name) {
+          var sent = out[name];
+          var box = cardOf(name);
+          if (sent && sent.cid === cid) {
+            delete out[name];
+            if (box && same(stateOf(box), sent.state) && served[name]) {
+              var back = served[name].cloneNode(true);
+              box.replaceWith(back);
+              delete kept[name];
+              restoreBox(back);
+              box = back;
+            }
+          }
+          if (served[name]) {
+            notes[name] = { said: WITHDRAWN, news: newsOf(served[name]), state: stateOf(served[name]) };
+          }
+        });
+        delete withdrawing[cid];
+      }
+    });
+    Object.keys(out).forEach(function (name) {
+      var sent = out[name];
+      var box = cardOf(name);
+      if (!box) { delete out[name]; return; }
+      if (refused[sent.cid]) {
+        refusedAt[name] = { cid: sent.cid, state: stateOf(box) };
+        delete out[name];
+      } else if (staged[sent.cid]) {
+        sent.phase = "waiting";
+      } else if (sent.phase === "waiting" ||
+                 (sent.answered && served[name] && same(sent.state, stateOf(served[name])))) {
+        delete out[name];
+      }
+    });
+  }
+  // **Every box made current**: a kept box that is clean again replaced whole by the frame's
+  // (no merge logic for the common case: the controls review's §3, rule 4), every box's state
+  // and line refreshed, the sections, the sign-in's gray and the drafts bar after. Never while a
+  // pointer is down.
+  function settle() {
+    if (!pressing()) {
+      Array.prototype.forEach.call(boxes(), function (box) {
+        var name = nameOf(box);
+        // Its draft judged first: an act answered just now (refused, not delivered) leaves the
+        // box's edit a draft again, which a box put back would lose.
+        if (kept[name]) { refresh(box); }
+        if (kept[name] && served[name] && !dirty(box)) {
+          var fresh = served[name].cloneNode(true);
+          box.replaceWith(fresh);
+          delete kept[name];
+          restoreBox(fresh);
+        }
+      });
+    }
+    Array.prototype.forEach.call(boxes(), refresh);
+    applyFind();
+    restoreNewColors();
+    applySignIn();
+    showBar();
+  }
+  // **The drafts bar** (the console interface design's goal 2): "N edits not sent: names ·
+  // Discard all · Apply all", in the order the boxes stand. A reward size is sent alone, by its
+  // own box's Apply, never in Apply all (the design's call; XC-527); Apply all is held off, saying
+  // why, for a draft that cannot be sent, a setting changed in two boxes, or more than
+  // `APPLY_ALL_LIMIT` changes.
+  function gathered() {
+    var every = [];
+    var named = [];
+    var alone = [];
+    var changes = [];
+    var why = "";
+    Array.prototype.forEach.call(boxes(), function (box) {
+      var name = nameOf(box);
+      var draft = drafts[name];
+      if (!draft || (out[name] && out[name].phase === "sending")) { return; }
+      every.push(name);
+      if (box.classList.contains("ceiling")) { alone.push(name); return; }
+      named.push(name);
+      if (draft.error && !why) { why = name + " cannot send: " + draft.error; }
+      draft.changes.forEach(function (change) { changes.push(change); });
+    });
+    var seen = {};
+    changes.forEach(function (change) {
+      if (seen[change.name] && !why) { why = change.name + " is changed in two boxes: apply one first"; }
+      seen[change.name] = true;
+    });
+    if (!why && changes.length > APPLY_ALL_LIMIT) {
+      why = "Apply all sends at most " + APPLY_ALL_LIMIT + " changes at once: apply some boxes alone first";
+    }
+    return { every: every, named: named, alone: alone, changes: changes, why: why };
+  }
+  function showBar() {
+    var bar = el("drafts");
+    if (!bar) { return; }
+    var all = gathered();
+    bar.hidden = all.every.length === 0;
+    body.classList.toggle("drafted", all.every.length > 0);
+    if (!all.every.length) { return; }
+    var said = all.every.length + (all.every.length === 1 ? " edit" : " edits") + " not sent: " +
+      all.every.join(", ");
+    if (all.alone.length) {
+      said += " · " + all.alone.join(", ") + (all.alone.length === 1 ?
+        " is sent alone, by its own Apply" : " are sent alone, each by its own Apply");
+    }
+    if (all.why) { said += " · " + all.why; }
+    el("drafts-say").textContent = said;
+    el("drafts-say").title = said;
+    hold(el("drafts-apply"), !all.named.length || Boolean(all.why));
+    hold(el("drafts-discard"), false);
+  }
+  function nextCid() {
+    cidCount += 1;
+    var cid = pageId + "-" + cidCount;
+    mine[cid] = true;
+    return cid;
+  }
+  // **One act** (the console interface design's goal 2): the changes of `names`' boxes sent as one
+  // command under a fresh command id -- a box's one change as its own kind, several (a box's, or
+  // Apply all's) as `apply_many`, judged and staged together or refused whole
+  // (`Session._apply_many`). Each box says *sending…* until a frame answers the id; one the page
+  // could not deliver gets its draft back, saying why.
+  function sendAct(names, changes, together) {
+    var cid = nextCid();
+    var command;
+    if (changes.length === 1 && !together) {
+      command = {};
+      Object.keys(changes[0]).forEach(function (key) { command[key] = changes[0][key]; });
+      command.cid = cid;
+    } else {
+      command = { kind: "apply_many", cid: cid, changes: changes };
+    }
+    acts[cid] = names.slice();
+    names.forEach(function (name) {
+      var box = cardOf(name);
+      out[name] = { cid: cid, state: stateOf(box), snapshot: box.cloneNode(true), phase: "sending",
+                    answered: false };
+      delete notes[name];
+      delete refusedAt[name];
+      refresh(box);
+    });
+    showBar();
+    var answered = false;
+    function failed(said) {
+      names.forEach(function (name) {
+        if (!out[name] || out[name].cid !== cid) { return; }
+        delete out[name];
+        var box = cardOf(name);
+        if (box) { noted(box, NOT_SENT + " · " + said); }
+      });
+      settle();
+    }
+    post(command, function (answer) {
+      answered = true;
+      if (answer.status !== "sent") { failed(answer.said); return; }
+      names.forEach(function (name) {
+        if (out[name] && out[name].cid === cid) { out[name].answered = true; }
+      });
+      judge();
+      settle();
+    }, function () { if (!answered) { failed(el("sent").textContent); } });
+  }
+  // **Apply** (and Enter in a box's field): the box's draft as one act.
+  function applyBox(name) {
+    var box = cardOf(name);
+    if (!box || (out[name] && out[name].phase === "sending")) { return; }
+    refresh(box);
+    var draft = drafts[name];
+    if (!draft || draft.error) { return; }
+    sendAct([name], draft.changes, draft.changes.length > 1);
+  }
+  // **Apply all** (the console interface design's goal 2: "Apply all stages them together, on the
+  // same trial"): every box's draft but a reward size's, one `apply_many`.
+  function applyAll() {
+    var all = gathered();
+    if (!all.named.length || all.why) { showBar(); return; }
+    sendAct(all.named, all.changes, true);
+  }
+  // The selector of a box's field, to focus it again in a box put back.
+  function fieldOf(input) {
+    if (input.hasAttribute("data-param")) {
+      return 'input[data-param="' + CSS.escape(input.getAttribute("data-param")) + '"]';
+    }
+    if (input.hasAttribute("data-number")) {
+      return 'input[data-number="' + CSS.escape(input.getAttribute("data-number")) + '"]';
+    }
+    var group = input.closest("[data-fields]");
+    if (group && input.hasAttribute("data-form")) {
+      return '[data-fields="' + CSS.escape(group.getAttribute("data-fields")) + '"] input[data-form="' +
+        CSS.escape(input.getAttribute("data-form")) + '"]';
+    }
+    return null;
+  }
+  // **Discard** (and Esc): the box back to what it is headed to -- what this page sent and the rig
+  // has not yet applied, else the value in force -- the field it was typed in focused again.
+  function discard(name, field) {
+    var box = cardOf(name);
+    if (!box || (out[name] && out[name].phase === "sending")) { return; }
+    var picked = field ? fieldOf(field) : null;
+    if (out[name]) {
+      var sent = out[name].snapshot.cloneNode(true);
+      box.querySelector(":scope > .editor").replaceWith(sent.querySelector(":scope > .editor"));
+      var range = box.querySelector(".detail > .rng");
+      var back = sent.querySelector(".detail > .rng");
+      if (range && back) { range.replaceWith(back); }
+    } else if (served[name]) {
+      var fresh = served[name].cloneNode(true);
+      box.replaceWith(fresh);
+      delete kept[name];
+      restoreBox(fresh);
+      box = fresh;
+    }
+    delete drafts[name];
+    delete refusedAt[name];
+    delete notes[name];
+    // The box put back comes grayed as served until the sign-in's script lets it go, and a
+    // disabled field takes no focus.
+    applySignIn();
+    if (picked) {
+      var again = box.querySelector(picked);
+      if (again) { again.focus(); }
+    }
+    settle();
+  }
+  function discardAll() {
+    gathered().every.forEach(function (name) { discard(name); });
+  }
+  // **Withdraw** (the console interface design's goal 3; the PI, 2026-11-19, "Yes, a withdraw
+  // button"): the act a box's waiting change was sent in, by its command id, taken back whole --
+  // its button said how many first. A double click is one withdrawal, as a clear's is.
+  function withdraw(cid, detail) {
+    if (!clearAllowed(detail, "withdraw/" + cid) || withdrawing[cid]) { return; }
+    var names = Array.prototype.filter.call(boxes(), function (box) {
+      return box.getAttribute("data-staged-cid") === cid;
+    }).map(nameOf);
+    var seen = document.querySelectorAll(inCards('.wdrs .wdr[data-cid="' + CSS.escape(cid) + '"]')).length;
+    withdrawing[cid] = { names: names, answered: false, seen: seen };
+    names.forEach(function (name) { noted(cardOf(name), "withdrawing…"); });
+    settle();
+    var answered = false;
+    function failed(said) {
+      if (!withdrawing[cid]) { return; }
+      delete withdrawing[cid];
+      names.forEach(function (name) {
+        var box = cardOf(name);
+        if (box) { noted(box, "not withdrawn · " + said); }
+      });
+      settle();
+    }
+    post({ kind: "withdraw", cid: cid }, function (answer) {
+      answered = true;
+      if (answer.status !== "sent") { failed(answer.said); return; }
+      if (withdrawing[cid]) { withdrawing[cid].answered = true; }
+      judge();
+      settle();
+    }, function () { if (!answered) { failed(el("sent").textContent); } });
   }
   function swap(id, html) {
-    if (id === "params" && busy()) { heldParams = html; return; }
+    if (id === "params" || id === "training-params") {
+      patchCards(id, html);
+      applySignIn();
+      return;
+    }
     if (id === "moments" && pressing()) { heldMoments = html; return; }
-    if (id === "training-params" && busy()) { heldTraining = html; return; }
-    if (id === "training-params") { heldTraining = null; }
     // A frame shown is the newest: an older one held meanwhile must never be written back over
     // it by a later release (fix round 3 of the C3 plan's Task 18).
-    if (id === "params") { heldParams = null; }
     if (id === "moments") { heldMoments = null; }
     var node = el(id);
     // The plan picker shows the plan its pre-flight was taken for, so a frame's choice stands.
     var chosen = node && node.tagName === "SELECT" && id !== "plan-sel" ? node.value : null;
     if (node) { node.innerHTML = html; }
     if (chosen !== null) { choose(node, chosen); }
-    if (id === "params" || id === "training-params") { restoreSides(); }
     // Before the hooks: `holdReward` must see a button as the sign-in leaves it.
     applySignIn();
     if (id === "controls") { holdReward(); }
@@ -4542,24 +5398,30 @@ _SCRIPT = """
     if (id === "demo-tag") { demoFrame(); }
     if (id === "dn-demo" || id === "dn-subject") { restoreDemoBox(); }
   }
+  // A press ended: the frames held under it shown, the newest of each; and every box made current.
   function release() {
-    if (heldParams !== null && !busy()) {
-      el("params").innerHTML = heldParams;
-      heldParams = null;
-      restoreSides();
-      applySignIn();
-    }
-    if (heldTraining !== null && !busy()) {
-      el("training-params").innerHTML = heldTraining;
-      heldTraining = null;
-      restoreSides();
-      applySignIn();
-    }
-    if (heldMoments !== null && !pressing()) {
+    if (pressing()) { return; }
+    Object.keys(heldCards).forEach(function (id) {
+      var html = heldCards[id];
+      delete heldCards[id];
+      patchCards(id, html);
+    });
+    if (heldMoments !== null) {
       el("moments").innerHTML = heldMoments;
       heldMoments = null;
-      applySignIn();
     }
+    settle();
+  }
+  // The boxes as the page was served: each as `served`, its refusal tracked, the run noted.
+  function startBoxes() {
+    Array.prototype.forEach.call(boxes(), function (box) {
+      served[nameOf(box)] = box.cloneNode(true);
+      track(box);
+    });
+    var secs = document.querySelector(inCards(".secs"));
+    runKey = secs ? secs.getAttribute("data-run") : null;
+    applySections();
+    settle();
   }
   function choose(select, value) {
     // A frame re-renders a select's options; the option a person chose stays chosen
@@ -5015,7 +5877,6 @@ _SCRIPT = """
   function onFrame(event) {
     var payload = JSON.parse(event.data);
     Object.keys(payload.frags).forEach(function (id) { swap(id, payload.frags[id]); });
-    markRanges();
     live = payload.live;
     baseline = payload.age === null ? null : performance.now() - payload.age * 1000;
     lost = false;
@@ -5115,25 +5976,6 @@ _SCRIPT = """
     }).then(done);
   }
   function decimals(step) { return (String(step).split(".")[1] || "").length; }
-  function send(input) {
-    input.classList.remove("pending");
-    var key = input.getAttribute("data-param");
-    var raw = input.value.trim();
-    var word = input.getAttribute("data-kind") === "word";
-    var value = word ? raw : Number(raw);
-    if (!word && (raw === "" || !isFinite(value))) {
-      tell("not sent: " + key + " needs a number", "crit");
-    } else {
-      post({ kind: "set", name: key, value: value });
-    }
-    release();
-  }
-  function schedule(input) {
-    var key = input.getAttribute("data-param");
-    clearTimeout(timers[key]);
-    input.classList.add("pending");
-    timers[key] = setTimeout(function () { delete timers[key]; send(input); }, debounceMs);
-  }
   function stepInput(input, dir) {
     var step = Number(input.getAttribute("data-step")) || 0.01;
     var lo = input.hasAttribute("data-min") ? Number(input.getAttribute("data-min")) : -Infinity;
@@ -5148,108 +5990,10 @@ _SCRIPT = """
     if (v <= lo) { input.value = input.getAttribute("data-min"); }
     else if (v >= hi) { input.value = input.getAttribute("data-max"); }
     else { input.value = v.toFixed(decimals(step)); }
-    schedule(input);
-  }
-  // A drawn range changed live (engine build C3; the PI, 2026-10-30, Q7b, "Yes, range changes
-  // live"): the numbers of the card's editor a person changed, by name, which the rig lays over
-  // those in force. A number that is not one, or none changed, is not sent, said as a setting's
-  // is; once sent, a second press is held as a clear's is.
-  function sendRange(button, detail) {
-    var key = button.getAttribute("data-name");
-    var numbers = {};
-    var bad = null;
-    var fields = button.closest(".box").querySelectorAll("input[data-number]");
-    Array.prototype.forEach.call(fields, function (input) {
-      var raw = input.value.trim();
-      var value = Number(raw);
-      if (raw === "" || !isFinite(value)) { bad = bad || input.getAttribute("data-number"); }
-      else if (value !== Number(input.defaultValue)) {
-        numbers[input.getAttribute("data-number")] = value;
-      }
-    });
-    if (bad !== null) {
-      tell("not sent: " + key + "'s " + bad + " needs a number", "crit");
-      return;
-    }
-    if (!Object.keys(numbers).length) {
-      tell("not sent: no number of " + key + "'s range was changed", "crit");
-      return;
-    }
-    // A double click's second press, or a second within the hold, is dropped first, as a clear's
-    // is: it reached the refusal below and said "not sent" in red until the rig answered, though
-    // the range was sent (the C3 plan's Task 18, its deferred minor).
-    if (!clearAllowed(detail, "range/" + key)) { return; }
-    // The rig answers a range at its next trial boundary: while one is out, a second press of
-    // the same card would send the same range again (fix round 3).
-    if (rangeOut[key]) {
-      tell("not sent: the range of " + key + " is still being sent; wait for its answer", "crit");
-      return;
-    }
-    // The text of each field as it is sent: a number typed while the press is out is not.
-    var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
-    rangeOut[key] = true;
-    post({ kind: "range", name: key, numbers: numbers }, function (answer) {
-      // Sent -- and only then (fix round 2): the numbers sent no longer hold the cards, and any
-      // frame held meanwhile is shown. A press the rig did not take can be sent again.
-      if (answer.status !== "sent") { return; }
-      Array.prototype.forEach.call(fields, function (input, i) {
-        input.defaultValue = sentText[i];
-      });
-      markRanges();
-      release();
-    }, function () { delete rangeOut[key]; });
-  }
-  // A person's draw of a timing setting (the console settings build; the PI, 2026-11-16): the
-  // drawn side's shape and its fields, each a number, a list's values and weights numbers between
-  // commas, sent as `form`, staged by the rig until the next trial. A field that holds no number
-  // is not sent, said as a range's is; once sent, a second press is held as a range's is.
-  function sendForm(button, detail) {
-    var key = button.getAttribute("data-name");
-    var card = button.closest(".box");
-    // A size's scaled side has no shape to choose: it is a scaling (the design's §5).
-    var select = card.querySelector("select[data-shape]");
-    var shape = select ? select.value : "scaled";
-    var fields = card.querySelectorAll('[data-fields="' + CSS.escape(shape) + '"] input[data-form]');
-    var command = { kind: "form", name: key, shape: shape };
-    var numbers = {};
-    var bad = null;
-    Array.prototype.forEach.call(fields, function (input) {
-      var field = input.getAttribute("data-form");
-      var raw = input.value.trim();
-      if (field === "values" || field === "weights") {
-        var items = raw.split(/[\\s,]+/).filter(Boolean).map(Number);
-        if (!items.length || items.some(function (item) { return !isFinite(item); })) {
-          bad = bad || field;
-        }
-        command[field] = items;
-        return;
-      }
-      var value = Number(raw);
-      if (raw === "" || !isFinite(value)) { bad = bad || field; }
-      numbers[field] = value;
-    });
-    if (bad !== null) {
-      tell("not sent: " + key + "'s " + bad + " needs a number", "crit");
-      return;
-    }
-    if (Object.keys(numbers).length) { command.numbers = numbers; }
-    if (!clearAllowed(detail, "form/" + key)) { return; }
-    if (formOut[key]) {
-      tell("not sent: the draw of " + key + " is still being sent; wait for its answer", "crit");
-      return;
-    }
-    var sentText = Array.prototype.map.call(fields, function (input) { return input.value; });
-    formOut[key] = true;
-    post(command, function (answer) {
-      if (answer.status !== "sent") { return; }
-      Array.prototype.forEach.call(fields, function (input, i) {
-        input.defaultValue = sentText[i];
-      });
-      // Sent: the rig's cards say which side is in force from here.
-      delete sides[key];
-      delete shapes[key];
-      release();
-    }, function () { delete formOut[key]; });
+    // A draft, never a send (the console interface design's call: "−/+ wait for Apply, as typing
+    // does"; Shift steps ten times as far, `dir` then ±10).
+    var box = input.closest(".box");
+    if (box) { refresh(box); showBar(); }
   }
   function closeNote(note) {
     if (markNo === null) { return; }
@@ -5516,12 +6260,37 @@ _SCRIPT = """
     if (resuming && !resuming.disabled) { post({ kind: "resume_session", session_id: resuming.getAttribute("data-resume") }); return; }
     var returning = e.target.closest("[data-return]");
     if (returning && !returning.disabled) { openReturn(returning.getAttribute("data-return")); return; }
+    // A box's Apply, Discard and *withdraw*, and the drafts bar's (the console interface
+    // rework's Task 6).
+    var applying = e.target.closest("[data-apply]");
+    if (applying && !applying.disabled) { applyBox(applying.getAttribute("data-apply")); return; }
+    var discarding = e.target.closest("[data-discard]");
+    if (discarding && !discarding.disabled) { discard(discarding.getAttribute("data-discard")); return; }
+    var taking = e.target.closest("[data-withdraw]");
+    if (taking && !taking.disabled) { withdraw(taking.getAttribute("data-withdraw"), e.detail); return; }
+    if (e.target.closest("#drafts-apply")) { if (!el("drafts-apply").disabled) { applyAll(); } return; }
+    if (e.target.closest("#drafts-discard")) { if (!el("drafts-discard").disabled) { discardAll(); } return; }
     var switched = e.target.closest("[data-switch]");
     if (switched && !switched.disabled) {
-      // A timing card's side, on this page alone: nothing is sent until its value or *apply*.
-      var side = switched.getAttribute("data-switch");
-      sides[switched.getAttribute("data-name")] = side;
-      showSide(switched.closest(".box"), side);
+      // A timing card's side: a draft of its box, sent by its Apply.
+      var swung = switched.closest(".box");
+      showSide(swung, switched.getAttribute("data-switch"));
+      refresh(swung);
+      showBar();
+      return;
+    }
+    // A color's hue swatch: a draft of its box, the swatch pressed, sent by its Apply (the
+    // console interface design's call: "a swatch or a tick is a draft").
+    var hue = e.target.closest(inCards(".box .hue[data-color]"));
+    if (hue && !hue.disabled) {
+      var colored = hue.closest(".box");
+      Array.prototype.forEach.call(colored.querySelectorAll(".hue[data-color]"), function (other) {
+        var on = other === hue;
+        other.classList.toggle("on", on);
+        other.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      refresh(colored);
+      showBar();
       return;
     }
     var button = e.target.closest("[data-cmd]");
@@ -5564,14 +6333,11 @@ _SCRIPT = """
       if (cmd === "hand_back") {
         var named = button.getAttribute("data-name");
         if (!clearAllowed(e.detail, "hand_back/" + named)) { return; }
-        post({ kind: "hand_back", name: named });
+        // At once, a deliberate press (the console interface design's call), under a command id
+        // of its own, so its box says the hand-back waiting is this page's and offers *withdraw*.
+        post({ kind: "hand_back", name: named, cid: nextCid() });
         return;
       }
-      if (cmd === "range") { sendRange(button, e.detail); return; }
-      if (cmd === "form") { sendForm(button, e.detail); return; }
-      // A color setting's hue picked by its set (the console settings build; the design's §6):
-      // the set and the hue its swatch names, staged by the rig until the next trial. A double
-      // click is one pick, as a clear's is.
       // A new color (the console settings build's Task 8): *preview* asks wlx serve and writes
       // nothing; *save as a proposal* sends it to the rig, which writes the set's proposed file. A
       // double click is one save, as a clear's is.
@@ -5582,14 +6348,6 @@ _SCRIPT = """
         if (!defined || !clearAllowed(e.detail, "define_color/" + panel.getAttribute("data-newc"))) { return; }
         defined.kind = "define_color";
         post(defined);
-        return;
-      }
-      if (cmd === "color") {
-        var hueOf = button.getAttribute("data-name");
-        if (!clearAllowed(e.detail, "color/" + hueOf)) { return; }
-        post({ kind: "color", name: hueOf, colorset: button.getAttribute("data-colorset"),
-               color: button.getAttribute("data-color") });
-        delete colorSets[hueOf];
         return;
       }
       // The trainer's panel (the pop-out search build's Task 7): *Move up* or *Move back* confirms
@@ -5632,15 +6390,18 @@ _SCRIPT = """
     var arrow = e.target.closest("[data-dir]");
     if (arrow && !arrow.disabled) {
       var input = arrow.closest(".spin").querySelector("input[data-param]");
-      if (input && !input.disabled) { stepInput(input, Number(arrow.getAttribute("data-dir"))); }
+      if (input && !input.disabled) {
+        stepInput(input, Number(arrow.getAttribute("data-dir")) * (e.shiftKey ? 10 : 1));
+      }
     }
   });
   document.addEventListener("change", function (e) {
     if (!e.target.matches) { return; }
-    if (e.target.matches("input[data-param]")) { schedule(e.target); }
-    else if (e.target.matches("select[data-shape]")) {
-      shapes[e.target.getAttribute("data-shape")] = e.target.value;
-      showShape(e.target.closest(".box"), e.target.value);
+    if (e.target.matches("select[data-shape]")) {
+      var shaped = e.target.closest(".box");
+      showShape(shaped, e.target.value);
+      refresh(shaped);
+      showBar();
     }
     else if (e.target.matches("select[data-colorset]")) {
       colorSets[e.target.getAttribute("data-colorset")] = e.target.value;
@@ -5685,10 +6446,10 @@ _SCRIPT = """
   });
   document.addEventListener("focusout", function () { setTimeout(release, 0); });
   document.addEventListener("input", function (e) {
-    if (e.target && e.target.matches && e.target.matches(inCards("input[data-number]"))) {
-      markRanges();
-      release();
-    }
+    // An edit in a box is a draft of it, judged as it is typed (the controls review's §2).
+    var edited = e.target && e.target.closest && !e.target.closest("[data-newc]") &&
+      e.target.closest(inCards(".box"));
+    if (edited) { refresh(edited); showBar(); }
     // What is typed in a New color panel is kept, so a frame replacing the cards keeps it.
     var typing = e.target && e.target.closest && e.target.closest("[data-newc]");
     if (typing) { newColorShow(typing); newColorRead(typing); }
@@ -5731,6 +6492,39 @@ _SCRIPT = """
     }
     else if (k === "b" && keysLive()) { e.preventDefault(); gaze.b = true; placeDot(); changed(); }
     else if (k === "f" && demo.on) { e.preventDefault(); openFull(); }
+  });
+  // **The keys in a box's field** (the controls review's F7): Enter is Apply; Esc is Discard, and
+  // a second Esc, with no draft, leaves the field; ↑ and ↓ step it, Shift ten steps; and a whole
+  // setting's field takes no decimal point or comma (the console interface design's goal 6).
+  document.addEventListener("keydown", function (e) {
+    var field = e.target;
+    if (!field || !field.matches || !field.matches(inCards(".box input")) || field.closest("[data-newc]")) {
+      return;
+    }
+    var name = nameOf(field.closest(".box"));
+    if (e.key === "Enter") { e.preventDefault(); applyBox(name); }
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      if (drafts[name]) { discard(name, field); } else { field.blur(); }
+    }
+    else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
+      e.preventDefault();
+      stepInput(field, (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
+    }
+    else if (field.hasAttribute("data-whole") && (e.key === "." || e.key === ",") &&
+             !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      noted(field.closest(".box"), WHOLE);
+      refresh(field.closest(".box"));
+    }
+  });
+  // **Closing the page with drafts asks once** (the console interface design's call): the
+  // browser's own question; nothing else keeps a draft past a reload.
+  window.addEventListener("beforeunload", function (e) {
+    if (!Object.keys(drafts).length) { return undefined; }
+    e.preventDefault();
+    e.returnValue = "";
+    return "";
   });
   el("mark-note").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); closeNote(el("mark-note").value.trim()); }
@@ -5838,6 +6632,7 @@ _SCRIPT = """
   }
   showName();
   demoFrame();
+  startBoxes();
   open();
 })();
 """
@@ -5887,6 +6682,10 @@ def page(
     demo's gaze endpoint, without which no page steers here (`data-can-gaze`); a page that may not
     write steers nothing and draws no dot. `GAZE_EVERY_MS` goes to the script as
     `data-gaze-every-ms`.
+    **Drafts (the console interface rework's Task 6)**: the bar the script shows while any box
+    holds an edit not sent, "N edits not sent: ... · Discard all · Apply all", is static, fixed at
+    the foot of the window so its coming and going moves nothing under the pointer; Apply all
+    sends at most `APPLY_ALL_LIMIT` changes as one act (`data-apply-all-limit`).
     """
     p = {key: parts[key] for key in FRAGMENT_IDS}
     demo = bool(p["demo-tag"])
@@ -5947,7 +6746,7 @@ def page(
 <title>xcon console</title>
 <style>{_FONT_FACES}{_CSS}</style>
 </head>
-<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-debounce-ms="{DEBOUNCE_MS}" data-can-gaze="{int(can_gaze)}" data-gaze-every-ms="{GAZE_EVERY_MS}"{attrs}>
+<body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-apply-all-limit="{APPLY_ALL_LIMIT}" data-can-gaze="{int(can_gaze)}" data-gaze-every-ms="{GAZE_EVERY_MS}"{attrs}>
 <div class="wrap">
   <header class="head glass">
     <span class="logo">{_LOGO}<span class="app">xcon</span></span>
@@ -6064,6 +6863,7 @@ def page(
     <div class="end"><button class="btn" id="dn-cancel" type="button">cancel</button><button class="btn primary" id="dn-ok" type="button"{off}>open session</button></div>
   </div>
 </div>
+<div class="drafts glass" id="drafts" role="status" aria-label="edits not sent" hidden><span class="say" id="drafts-say"></span><button class="btn small" id="drafts-discard" type="button">Discard all</button><button class="btn small primary" id="drafts-apply" type="button">Apply all</button></div>
 <div class="scrim" id="gone" role="dialog" aria-modal="true" aria-labelledby="gone-h" hidden>
   <div class="dialog glass">
     <h2 id="gone-h">Disconnected</h2>
