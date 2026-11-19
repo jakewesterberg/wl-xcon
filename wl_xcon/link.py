@@ -281,7 +281,30 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: wire (`Shaping`).
 #: The build's later tasks add their fields to 22 before it is released. A reader of 21 refuses 22 and 22 refuses 21,
 #: by name, for all three shapes.
-SCHEMA = 22
+#:
+#: 23 (the console interface rework, 2026-11-19; its design's "What the rig must send that it does
+#: not", the PI's "Small boxes" and "Apply per box"): **each row says what its box needs**
+#: (`ParamRow.whole`, `step`, `choices` -- at most `CHOICES_LIMIT`, else none -- `start`, `label`,
+#: `help`, `group`, `percent`), **the pool's row its pairings as data** (`ParamRow.members`, each a
+#: `PoolMember`), **and the change in force** (`ParamRow.applied`, an `Applied`: the trial it took
+#: effect at and who made it; `ParamRow.warned`, the warnings it carried); **each verdict names the
+#: page-made command id it answers** (`Staged.cid`, `Refused.cid`), a staged change its warnings
+#: (`Staged.warnings`) and a refusal the value refused (`Refused.value`). And on the wire a box's
+#: command's `cid` (a command, not a frame: no schema of its own), beside its fields, never inside a
+#: value (`_cid`, never `_setting`). The build's later tasks add their fields to 23 before it is
+#: released. A reader of 22 refuses 23 and 23 refuses 22, by name, for all three shapes.
+SCHEMA = 23
+
+#: **The most choices a row carries as words** (`ParamRow.choices`; schema 23): a box shows a
+#: categorical setting's choices as segments, and a frame is re-encoded at every trial boundary, so
+#: a setting declaring more carries none, its box then a field. A display bound, as
+#: `CONDITIONS_SHOWN` is, not a measurement.
+CHOICES_LIMIT = 30
+
+#: **The longest command id a page may make** (`SetParameter.cid` and the other box commands';
+#: schema 23): printable text of 1 to 64 characters, which a verdict echoes on every frame until it
+#: applies, so it is bounded as a word is. An engineering default, not a measurement.
+CID_LIMIT = 64
 
 #: How many refusals a session keeps, per source, and therefore how many one
 #: `Telemetry` frame can carry.
@@ -396,6 +419,15 @@ class Staged:
     #: ("handed back to the run, which gives it no value") -- for every row whose `hands_back`
     #: is true; empty for any other.
     to: str = ""
+    #: **The command id the page made for the change** (schema 23; the console interface design's
+    #: goal 4: every outcome on its box), echoed from its command (`SetParameter.cid` and the other
+    #: box commands'), so a page keys the verdict to the press that asked; `None` for a change sent
+    #: with none, a revert's among them.
+    cid: str | None = None
+    #: **The warnings the change carries** (schema 23), each `code: detail` as the changes feed says
+    #: it: what judging it newly warned of (`taskd.Session._laid_out`), accepted by whoever sent it.
+    #: Empty where it warned of nothing.
+    warnings: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,11 +443,48 @@ class Refused:
     write to a welfare-bounded name had even been attempted. `why` is `str(Exceeded)`,
     already a complete sentence (see `Session.set`'s own messages), not a code a
     console would need the source to interpret.
+
+    **And which press it answers** (schema 23; the console interface design's goal 4): `cid`, the
+    command id the page made, echoed from the command refused (`taskd.Session._answering_for`),
+    `None` for a refusal of a command sent with none, a transport's or a service's; and `value`,
+    the value a `set` asked for, a number or a word, `None` for any other command and for a value
+    that is neither.
     """
 
     name: str
     by: Actor | None
     why: str
+    cid: str | None = None
+    value: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class PoolMember:
+    """**One pairing of a pool, as the pairings grid ticks it** (schema 23; `ParamRow.members`; the
+    console interface design's goal 7, the PI, "4 × 4 grid, add or remove"): `bit`, its number in
+    the pool's value (`task.Pool.number`: 2 ** its place, 1 for the first); `odd` and `among`, the
+    odd one's and the distractors' names -- a look's color-set hue, or a word as written, else its
+    look in the rig's words; `odd_hex` and `among_hex`, each color's swatch on the sRGB standard,
+    `#rrggbb`, approximate as every swatch is, empty where the standard cannot show it or the look
+    shows no color-set light; and `on`, whether the pool's value holds it."""
+
+    bit: int
+    odd: str
+    among: str
+    odd_hex: str
+    among_hex: str
+    on: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Applied:
+    """**The change in force on a setting** (schema 23; `ParamRow.applied`; the console interface
+    design's goal 4, "in force from trial N"): `trial`, the index of the first trial it applied to,
+    as a frame's `trial_index` counts; `by`, who made it, as a person reads an actor (`Box`'s
+    `NAME (box, unverified)`)."""
+
+    trial: int
+    by: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,6 +615,44 @@ class ParamRow:
     #: gave is in force, or where the run was given a value other than the task's (`source`
     #: `"person"`, `"form"`, `"range"` or `"run"`). False for a ceiling and between runs.
     changed: bool = False
+    #: **Whether its box takes whole numbers only** (schema 23; the console interface design's goal
+    #: 6, the PI: "for necessary whole numbers ... there should not be a decimal option"): the
+    #: task's `Param.whole`. False for a ceiling.
+    whole: bool = False
+    #: **How far one press of its -/+ moves it** (schema 23; `task.step_of`): the step it declares,
+    #: else 1 for a whole setting, else its unit's (`task.UNIT_STEPS`), else 0.01; a ceiling's its
+    #: unit's.
+    step: float = 0.01
+    #: **Its choices as words** (schema 23): a categorical setting's choices where every one is a
+    #: word, which a box shows as segments and sends back as it is, at most `CHOICES_LIMIT`; empty
+    #: for a setting of numbers, one whose choices are looks or positions (a color's are its card's,
+    #: `color`), and one declaring more.
+    choices: tuple = ()
+    #: **The task's start for it** (schema 23; `Param.start`): a number or a word, `None` where it
+    #: declares none, or one that is neither (a look, a position).
+    start: object = None
+    #: **Its plain name and its one sentence** (schema 23; the design's goal 5, the PI: "Plain name,
+    #: code name small"): `Param.label` and `Param.help`, empty where the task gives none, the box
+    #: then showing its name alone.
+    label: str = ""
+    help: str = ""
+    #: **The group whose box holds it** (schema 23; `task.Group`, the design's goal 8), by its
+    #: title, `None` for a setting in a box of its own; the group's box sits in the section its
+    #: settings share (`section`; the load refuses a group across two, `bad-group`).
+    group: str | None = None
+    #: **Whether its box shows it ×100 with `%`** (schema 23; `Param.percent`): a fraction alone.
+    percent: bool = False
+    #: **The pool's pairings as data, on the pool's own setting** (schema 23; `task.Pool`; the
+    #: design's goal 7): one `PoolMember` for each pairing, in the pool's declared order, `on`
+    #: where the setting's value holds it; `None` on every other row.
+    members: tuple | None = None
+    #: **The change in force on it** (schema 23): an `Applied` -- the trial it took effect at, and
+    #: who made it -- for a setting a person's change of the run in progress gave, the last to
+    #: apply; `None` where none has, and between runs.
+    applied: Applied | None = None
+    #: **The warnings the change in force carried** (schema 23), as its staged row's (`Staged
+    #: .warnings`), so its box can say *in force, with a warning*; empty where it carried none.
+    warned: tuple = ()
 
     @classmethod
     def of(cls, name: str, unit: str, low: float | None, high: float | None, value: object,
@@ -553,7 +660,11 @@ class ParamRow:
            draw: str | None = None, numbers: dict | None = None, switch: str | None = None,
            shape: dict | None = None, profile: dict | None = None,
            why: dict | None = None, gives: str | None = None,
-           color: dict | None = None, section: str = "", changed: bool = False) -> "ParamRow":
+           color: dict | None = None, section: str = "", changed: bool = False,
+           whole: bool = False, step: float = 0.01, start: object = None, label: str = "",
+           help: str = "", group: str | None = None, percent: bool = False,
+           members: tuple | None = None, applied: Applied | None = None,
+           warned: tuple = ()) -> "ParamRow":
         """One row from `Session.parameters`' shape, `choices` the setting's own: a value that
         is a whole position (`review.position_words`: a `Polar`, or a pair where `choices`
         declare one) as its words in `position` -- a pair's eccentricity the true visual angle
@@ -566,7 +677,11 @@ class ParamRow:
         (`source`, `conditions`, `draw`, `numbers`; schema 19) as given, the conditions cut to the
         first `CONDITIONS_SHOWN` and the rest counted (`more`). **A value that is an appearance
         or a color** in the rig's words (`words`, `review.appearance_words`; XC-420), `value`
-        `None`: msgpack carries no declaration, and no console reads one."""
+        `None`: msgpack carries no declaration, and no console reads one.
+
+        **What its box needs** (schema 23) as given, but `choices`, which become the row's words
+        where every one is a word and they number at most `CHOICES_LIMIT`, else none, and `start`,
+        kept where it is a finite number or a word, else `None`."""
         from wl_xcon.review import appearance_words, position_words
 
         named = tuple(conditions)
@@ -574,16 +689,36 @@ class ParamRow:
         more = len(named) - len(shown)
         words = position_words(value, choices)
         looks = appearance_words(value)
+        box = dict(
+            whole=whole, step=step, start=_scalar(start), label=label, help=help, group=group,
+            percent=percent, members=None if members is None else tuple(members), applied=applied,
+            warned=tuple(warned),
+            choices=(tuple(choices) if 0 < len(choices) <= CHOICES_LIMIT
+                     and all(isinstance(choice, str) for choice in choices) else ()))
         if looks is not None:
             return cls(name, unit, low, high, None, bounded, None, source, shown, draw,
                        numbers, more, switch, shape, profile, why, gives, color, looks,
-                       section, changed)
+                       section, changed, **box)
         if words is None:
             return cls(name, unit, low, high, value, bounded, None, source, shown, draw,
                        numbers, more, switch, shape, profile, why, gives, color, None, section,
-                       changed)
+                       changed, **box)
         return cls(name, unit, low, high, None, bounded, words, source, shown, draw, numbers,
-                   more, switch, shape, profile, why, gives, color, None, section, changed)
+                   more, switch, shape, profile, why, gives, color, None, section, changed,
+                   **box)
+
+
+def _scalar(value: object) -> object:
+    """`value` where a frame carries it as it is -- a finite number that is not a `bool`, or a word
+    -- else `None` (`ParamRow.start`, `Refused.value`; schema 23)."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return value if math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1367,8 +1502,11 @@ class Telemetry:
         """
         link = session.link
         wall_now = session.wall_now()
+        # Each refusal with the command id and the value it answers (schema 23), one for each in
+        # order (`taskd.Session.answers`, which `_refuse` keeps beside `refusals`).
         refusals = (
-            tuple(Refused(name=n, by=b, why=w) for n, b, w in session.refusals)
+            tuple(Refused(name=n, by=b, why=w, cid=c, value=v)
+                  for (n, b, w), (c, v) in zip(session.refusals, session.answers, strict=True))
             + tuple(link.refused)
         )
         kept = refusals[-REFUSAL_HISTORY:]
@@ -1452,8 +1590,8 @@ class Telemetry:
             staged=tuple(
                 Staged(name=n, was=_carried(w, choices.get(n, ())),
                        now=_carried(v, choices.get(n, ())), by=b, bounded=bd, kind=k,
-                       overrides=o, hands_back=h, to=t)
-                for n, w, v, b, bd, k, o, h, t in session.staged
+                       overrides=o, hands_back=h, to=t, cid=c, warnings=tuple(warned))
+                for n, w, v, b, bd, k, o, h, t, c, warned in session.staged
             ),
             # `session.refusals`, already public -- unlike `_staged`, nothing private
             # to reach around -- plus `session.link.refused`, fix round 1's CRITICAL
@@ -1662,7 +1800,8 @@ def _carried(value: object, choices=()) -> object:
 
 
 def _refusals_out(refusals) -> list:
-    return [{"name": r.name, "by": actors.to_map_or_none(r.by), "why": r.why} for r in refusals]
+    return [{"name": r.name, "by": actors.to_map_or_none(r.by), "why": r.why, "cid": r.cid,
+             "value": r.value} for r in refusals]
 
 
 def _preflight_out(preflight: Preflight | None) -> dict | None:
@@ -1855,6 +1994,7 @@ def _drawn_out(drawn: Drawn) -> dict:
 
 #: A `Suggestion`'s fields, in order, as a frame carries them (schema 20).
 _SUGGESTION_FIELDS = ("change", "move", "block", "to", "correct", "of", "at_hardest")
+_MEMBER_FIELDS = tuple(f.name for f in fields(PoolMember))
 _STAIRCASE_FIELDS = tuple(f.name for f in fields(StaircaseRow))
 _BARS_FIELDS = tuple(f.name for f in fields(Bars))
 
@@ -1893,6 +2033,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "overrides": list(s.overrides),
                 "hands_back": s.hands_back,
                 "to": s.to,
+                "cid": s.cid,
+                "warnings": list(s.warnings),
             }
             for s in telemetry.staged
         ],
@@ -1924,6 +2066,20 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
                 "words": p.words,
                 "section": p.section,
                 "changed": p.changed,
+                "whole": p.whole,
+                "step": p.step,
+                "choices": list(p.choices),
+                "start": p.start,
+                "label": p.label,
+                "help": p.help,
+                "group": p.group,
+                "percent": p.percent,
+                "members": (None if p.members is None
+                            else [{name: getattr(m, name) for name in _MEMBER_FIELDS}
+                                  for m in p.members]),
+                "applied": (None if p.applied is None
+                            else {"trial": p.applied.trial, "by": p.applied.by}),
+                "warned": list(p.warned),
             }
             for p in telemetry.params
         ],
@@ -2125,12 +2281,81 @@ def _describe(exc: Exception) -> str:
 
 
 def _refused_in(r: dict) -> Refused:
-    """A refusal row off the wire: its `by` an actor's map, or null for nobody."""
+    """A refusal row off the wire: its `by` an actor's map, or null for nobody; the command id it
+    answers and the value refused (schema 23), each checked (`_cid_of`, `_scalar_of`)."""
     return Refused(
         name=r["name"],
         by=None if r["by"] is None else actors.from_map(r["by"]),
         why=r["why"],
+        cid=_cid_of(r["cid"]),
+        value=_scalar_of(r["value"]),
     )
+
+
+def _cid_of(value: object) -> str | None:
+    """A verdict's command id on the wire (schema 23): `None`, or printable text of 1 to
+    `CID_LIMIT` characters, as a command's is (`_cid`); anything else is a malformed frame
+    (`TypeError`, which `decode` makes a `FrameError`)."""
+    if value is None or _is_cid(value):
+        return value
+    raise TypeError(f"a command id is printable text of 1 to {CID_LIMIT} characters, not "
+                    f"{_quoted(value)}")
+
+
+def _scalar_of(value: object) -> object:
+    """A start or a refused value on the wire (schema 23): `None`, a finite number that is not a
+    `bool`, or a word; anything else is a malformed frame (`TypeError`)."""
+    if value is None or _scalar(value) is not None:
+        return value
+    raise TypeError(f"a value is a finite number or a word, not {_quoted(value)}")
+
+
+def _words_of(value: object) -> tuple:
+    """A list of words on the wire -- a row's choices, a change's warnings (schema 23) -- as a
+    tuple, or a malformed frame (`TypeError`)."""
+    if not isinstance(value, list) or not all(isinstance(word, str) for word in value):
+        raise TypeError(f"a list of words, not {_quoted(value)}")
+    return tuple(value)
+
+
+def _member_in(data: dict) -> PoolMember:
+    """One pairing of a pool's row off the wire (schema 23), each field checked by its kind."""
+    if isinstance(data["bit"], bool) or not isinstance(data["bit"], int) or data["bit"] < 1:
+        raise TypeError(f"a pairing's bit is a whole number from 1, not {data['bit']!r}")
+    return PoolMember(bit=data["bit"], odd=_word_of(data["odd"]), among=_word_of(data["among"]),
+                      odd_hex=_swatch_of(data["odd_hex"]), among_hex=_swatch_of(data["among_hex"]),
+                      on=_flag(data["on"]))
+
+
+_SWATCH = re.compile(r"#[0-9a-f]{6}")
+
+
+def _swatch_of(value: object) -> str:
+    """A pairing's swatch on the wire (schema 23): `#rrggbb` in lower case, or empty for none."""
+    if value == "" or (isinstance(value, str) and _SWATCH.fullmatch(value)):
+        return value
+    raise TypeError(f"a swatch is #rrggbb or empty, not {_quoted(value)}")
+
+
+def _row_in(p: dict) -> ParamRow:
+    """One row off the wire: what schema 22 carried as it is, and what its box needs (schema 23),
+    each checked by its kind."""
+    step = _real(p["step"])
+    if step <= 0:
+        raise TypeError(f"a step is a number above 0, not {step!r}")
+    applied = p["applied"]
+    return ParamRow(**{
+        **p, "conditions": tuple(p["conditions"]), "whole": _flag(p["whole"]), "step": step,
+        "choices": _words_of(p["choices"]), "start": _scalar_of(p["start"]),
+        "label": _word_of(p["label"]), "help": _word_of(p["help"]),
+        "group": None if p["group"] is None else _word_of(p["group"]),
+        "percent": _flag(p["percent"]),
+        "members": (None if p["members"] is None
+                    else tuple(_member_in(member) for member in p["members"])),
+        "applied": (None if applied is None
+                    else Applied(trial=_whole(applied["trial"]), by=_word_of(applied["by"]))),
+        "warned": _words_of(p["warned"]),
+    })
 
 
 def _idle_from(data: dict) -> Idle:
@@ -2310,15 +2535,16 @@ def _telemetry_from(data: dict) -> Telemetry:
         staged=tuple(Staged(**{**s, "by": actors.from_map(s["by"]),
                                  "overrides": tuple(s["overrides"]),
                                  "hands_back": _flag(s["hands_back"]),
-                                 "to": _destination(s["to"])})
+                                 "to": _destination(s["to"]),
+                                 "cid": _cid_of(s["cid"]),
+                                 "warnings": _words_of(s["warnings"])})
                      for s in data["staged"]),
         refusals=tuple(_refused_in(r) for r in data["refusals"]),
         refusals_dropped=data["refusals_dropped"],
         task=data["task"],
         allocation=data["allocation"],
         bounds_config=data["bounds_config"],
-        params=tuple(ParamRow(**{**p, "conditions": tuple(p["conditions"])})
-                     for p in data["params"]),
+        params=tuple(_row_in(p) for p in data["params"]),
         floor_ml=data["floor_ml"],
         out_of_cage_limit_s=data["out_of_cage_limit_s"],
         wall_at=data["wall_at"],
@@ -2419,6 +2645,11 @@ class SetParameter:
     name: str
     value: float | str
     by: Actor
+    #: **The command id the page made for this press** (schema 23; the console interface design's
+    #: goal 4): printable text of 1 to `CID_LIMIT` characters, carried beside the command's fields
+    #: and never inside a value (`_cid`, not `_setting`), which the verdict echoes (`Staged.cid`,
+    #: `Refused.cid`); `None` where the sender made none.
+    cid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2748,6 +2979,8 @@ class HandBack:
 
     name: str
     by: Actor
+    #: The page's command id, as `SetParameter.cid` (schema 23).
+    cid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2767,6 +3000,8 @@ class SetRange:
     name: str
     numbers: dict[str, float]
     by: Actor
+    #: The page's command id, as `SetParameter.cid` (schema 23).
+    cid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2792,6 +3027,8 @@ class SetForm:
     by: Actor
     values: tuple = ()
     weights: tuple = ()
+    #: The page's command id, as `SetParameter.cid` (schema 23).
+    cid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2811,6 +3048,8 @@ class SetColor:
     colorset: str
     color: str
     by: Actor
+    #: The page's command id, as `SetParameter.cid` (schema 23).
+    cid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2983,6 +3222,7 @@ def _encode_command(command: Command) -> bytes:
             "name": command.name,
             "value": command.value,
             "by": actors.to_map(command.by),
+            "cid": command.cid,
         }
     elif isinstance(command, (Stop, Pause, Resume, CancelScheduledStop, ManualReward)):
         payload = {"kind": command.KIND, "by": actors.to_map(command.by)}
@@ -3051,17 +3291,19 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, Shaping):
         payload = {"kind": "shaping", "by": actors.to_map(command.by), "position": command.position}
     elif isinstance(command, HandBack):
-        payload = {"kind": "hand_back", "by": actors.to_map(command.by), "name": command.name}
+        payload = {"kind": "hand_back", "by": actors.to_map(command.by), "name": command.name,
+                   "cid": command.cid}
     elif isinstance(command, SetRange):
         payload = {"kind": "range", "by": actors.to_map(command.by), "name": command.name,
-                   "numbers": dict(command.numbers)}
+                   "numbers": dict(command.numbers), "cid": command.cid}
     elif isinstance(command, SetForm):
         payload = {"kind": "form", "by": actors.to_map(command.by), "name": command.name,
                    "shape": command.shape, "numbers": dict(command.numbers),
-                   "values": list(command.values), "weights": list(command.weights)}
+                   "values": list(command.values), "weights": list(command.weights),
+                   "cid": command.cid}
     elif isinstance(command, SetColor):
         payload = {"kind": "color", "by": actors.to_map(command.by), "name": command.name,
-                   "colorset": command.colorset, "color": command.color}
+                   "colorset": command.colorset, "color": command.color, "cid": command.cid}
     elif isinstance(command, DefineColor):
         payload = {"kind": "define_color", "by": actors.to_map(command.by),
                    "colorset": command.colorset, "new_set": command.new_set, "name": command.name,
@@ -3225,6 +3467,35 @@ def _word(data: dict, key: str, kind: str, by: Actor, *, optional: bool = False)
     return value
 
 
+#: **The kinds a page's box sends that carry its command id** (`_cid`; schema 23; the console
+#: interface design's goal 4): a value, a hand-back, a range, a person's draw and a color's pick.
+CID_KINDS = frozenset({"set", "hand_back", "range", "form", "color"})
+
+
+def _is_cid(value: object) -> bool:
+    """Whether `value` is a command id a page may make: printable text of 1 to `CID_LIMIT`
+    characters."""
+    return (isinstance(value, str) and 0 < len(value) <= CID_LIMIT and value.isprintable())
+
+
+def _cid(data: dict, kind: str, by: Actor) -> str | None:
+    """**A box command's command id** (schema 23; `CID_KINDS`): absent or `None` for none, else
+    printable text of 1 to `CID_LIMIT` characters, refused otherwise, naming the field. **Beside
+    the command's fields, never inside a value**: `_setting`, M8's rule and welfare-listed, is not
+    asked, and no value passes through here."""
+    value = data.get("cid")
+    if value is None:
+        return None
+    if not _is_cid(value):
+        raise CommandRefused(
+            kind,
+            by,
+            f"a {kind!r} command's cid is printable text of 1 to {CID_LIMIT} characters, and "
+            f"{_quoted(value)} is not, so it is refused",
+        )
+    return value
+
+
 def _values(data: dict, kind: str, by: Actor) -> dict:
     """A run's starting values: at most `VALUES_LIMIT` names, each a parameter name, each
     value what a setting may be (`_setting`, M8's rule, called unchanged)."""
@@ -3352,7 +3623,8 @@ def _command_from(data: dict) -> Command:
                 f"({_quoted(name)}), so it is refused",
             )
         by = _actor(data.get("by"), name)
-        return SetParameter(name=name, value=_setting(data.get("value"), name, by), by=by)
+        return SetParameter(name=name, value=_setting(data.get("value"), name, by), by=by,
+                            cid=_cid(data, kind, by))
     simple = {
         command.KIND: command
         for command in (Stop, Pause, Resume, CancelScheduledStop, ManualReward)
@@ -3564,11 +3836,12 @@ def _command_from(data: dict) -> Command:
         return Shaping(position=data["position"], by=by)
     if kind == "hand_back":
         by = _actor(data.get("by"), kind)
-        return HandBack(name=_word(data, "name", kind, by), by=by)
+        return HandBack(name=_word(data, "name", kind, by), by=by, cid=_cid(data, kind, by))
     if kind == "range":
         by = _actor(data.get("by"), kind)
         name = _word(data, "name", kind, by)
-        return SetRange(name=name, numbers=_numbers(data, name, by), by=by)
+        return SetRange(name=name, numbers=_numbers(data, name, by), by=by,
+                        cid=_cid(data, kind, by))
     if kind == "form":
         by = _actor(data.get("by"), kind)
         name = _word(data, "name", kind, by)
@@ -3585,12 +3858,13 @@ def _command_from(data: dict) -> Command:
                    else _numbers(data, name, by, kind=kind))
         return SetForm(name=name, shape=shape, numbers=numbers, by=by,
                        values=_listed(data, "values", name, by),
-                       weights=_listed(data, "weights", name, by))
+                       weights=_listed(data, "weights", name, by), cid=_cid(data, kind, by))
     if kind == "color":
         by = _actor(data.get("by"), kind)
         return SetColor(name=_word(data, "name", kind, by),
                         colorset=_word(data, "colorset", kind, by),
-                        color=_word(data, "color", kind, by), by=by)
+                        color=_word(data, "color", kind, by), by=by,
+                        cid=_cid(data, kind, by))
     if kind == "define_color":
         by = _actor(data.get("by"), kind)
         new_set = data.get("new_set")

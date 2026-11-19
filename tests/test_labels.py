@@ -199,6 +199,36 @@ def test_a_group_names_settings_the_task_has_each_once():
         _task(a, groups=(Group("First", ("ghost",)),))) if finding.code == "bad-group")
 
 
+def test_a_groups_settings_share_one_section():
+    """The controller's ruling on the plan's Task 3: a group's box sits in the section its settings
+    share (`task.section_of`), so a group across two is refused at load (`bad-group`, blocking),
+    naming the sections in its settings' order; a setting named into the section of the others is
+    accepted."""
+    timing, other = Param("hold", unit="s"), Param("ring", unit="deg")
+    moved = Param("ring", unit="deg", section="Timing")
+    assert _found(_task(timing, moved, groups=(Group("G", ("hold", "ring")),)), "bad-group") == []
+    split = _task(timing, other, groups=(Group("G", ("hold", "ring")),))
+    assert _found(split, "bad-group") == [
+        "group 'G' holds settings of the sections 'Timing', 'Other'; its box sits in one "
+        "section, so its settings share one"]
+    assert all(f.blocking for f in check_task(split) if f.code == "bad-group")
+
+
+def test_two_settings_with_one_plain_name_are_refused():
+    """The controller's ruling on the plan's Task 3: two settings declaring one plain name, as a
+    person reads it -- case and runs of spaces aside -- are refused at load (`bad-label`,
+    blocking), naming both, since their boxes would read alike. Different names, and settings with
+    none, pass."""
+    hold = Param("fix_hold", unit="s", label="Fixation hold")
+    assert _found(_task(hold, Param("target_hold", unit="s", label="Target hold"),
+                        Param("a", unit="s"), Param("b", unit="s")), "bad-label") == []
+    twice = _task(hold, Param("target_hold", unit="s", label="fixation  HOLD"))
+    assert _found(twice, "bad-label") == [
+        "settings 'fix_hold', 'target_hold' share the plain name 'Fixation hold'; their boxes "
+        "would read alike, so each takes a name of its own"]
+    assert all(f.blocking for f in check_task(twice) if f.code == "bad-label")
+
+
 def test_a_groups_shape_is_refused_as_it_is_built():
     """A group's title is one printable line of `LABEL_LIMIT` at most and not empty; it names its
     settings as a tuple of names, one at least, each once; a task's groups are a tuple of
@@ -254,7 +284,8 @@ def test_a_groups_sentence_places_each_of_its_settings_once():
 def test_the_reference_tasks_declare_whole_on_their_counts_and_nothing_else():
     """The controller's ruling 4: the engine's fixtures declare `whole=True` on their counts, the
     set sizes, and no plain name, sentence, step, percent or group (wl-xtasks' tasks, curated
-    with the PI, carry those)."""
+    with the PI, carry those). **And on an index** (the controller's ruling on the plan's Task 3:
+    "an index is whole"), the search tasks' `target_index`."""
     import importlib.util
 
     found: dict[str, set[str]] = {}
@@ -269,7 +300,8 @@ def test_the_reference_tasks_declare_whole_on_their_counts_and_nothing_else():
         for param in task.params:
             assert (param.label, param.help, param.step, param.percent) == ("", "", None, False)
     assert found == {"fixation_detection": set(), "adaptive_detection": set(),
-                     "visual_search": {"set_size"}, "visual_search_training": {"set_size"},
+                     "visual_search": {"set_size", "target_index"},
+                     "visual_search_training": {"set_size", "target_index"},
                      "calibration": set()}
     # The counts by unit, so a count added later without `whole` fails here.
     for name in found:
@@ -277,8 +309,8 @@ def test_the_reference_tasks_declare_whole_on_their_counts_and_nothing_else():
         counted = {
             node.args[0].value for node in ast.walk(tree)
             if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Param"
-            and any(k.arg == "unit" and getattr(k.value, "value", None) in ("objects", "answers",
-                                                                            "pairings", "trials")
+            and any(k.arg == "unit" and getattr(k.value, "value", None) in (
+                        "objects", "answers", "pairings", "trials", "index")
                     for k in node.keywords)
         }
         assert counted <= found[name], (name, counted)

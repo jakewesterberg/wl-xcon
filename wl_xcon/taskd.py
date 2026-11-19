@@ -98,7 +98,8 @@ from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, ObjectWindows, Outcome, P, Param,
     Plan, SaccadeTo, Scaled, Show, Staircase,
     Task, Trial, actions_of, at_hardest, color_choices, limit_reason, position_of, set_light,
-    size_at, size_settings, sized_places, staircase_verdict, section_of, CEILINGS,
+    size_at, size_settings, sized_places, staircase_verdict, section_of, step_of, CEILINGS,
+    OTHER_STEP, UNIT_STEPS,
 )
 from wl_xcon.task import (
     BY_CONDITIONS, EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, SHAPING,
@@ -713,6 +714,10 @@ class Pending:
     draw: Distribution | None = None
     act: int | None = None
     form: object = None
+    #: **What it answers** (telemetry schema 23; `Session._answered`): the command id its page made,
+    #: and the warnings judging it gave; `None` and none for one sent with no id, a revert's.
+    cid: str | None = None
+    warnings: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -773,6 +778,44 @@ FROZEN = "frozen"
 
 #: The switch's positions as the changes feed and a refusal say them.
 _SWITCH_SAID = {"on": "on", "frozen": "frozen", "full": "the full task"}
+
+#: **The commands a setting's box sends** (`link.CID_KINDS`; telemetry schema 23), each carrying
+#: the command id its page made, which what it stages or refuses answers (`Session._answering_for`).
+_BOX = (_link.SetParameter, _link.HandBack, _link.SetRange, _link.SetForm, _link.SetColor)
+
+
+def pool_members(pool, value: object) -> tuple:
+    """**A pool's pairings as the pairings grid ticks them** (`link.PoolMember`; telemetry schema 23;
+    the console interface design's goal 7, the PI, "4 × 4 grid, add or remove"), in the pool's
+    declared order (`task.Pool`): each pairing's number in the pool's value (`bit`, 2 ** its place),
+    its two looks' names -- a look's color-set hue (`task.set_light`), a word as written, else the
+    look in the rig's words (`review.appearance_words`) -- and their swatches on the sRGB standard at
+    each set's own luminance (`photometry.srgb_hex`, approximate, as a color card's are), empty
+    where the standard cannot show it or the look shows no color-set light; and whether `value`
+    holds it (`on`), none where `value` names no pool (`task.Pool.unpooled`). Between trials,
+    never in a frame."""
+    from wl_xcon.review import appearance_words
+
+    def named(look: object) -> tuple[str, str]:
+        if isinstance(look, str):
+            return look, ""
+        light = set_light(look)
+        if light is None:
+            return appearance_words(look) or repr(look), ""
+        try:
+            swatch = srgb_hex(colorset_xyz(ColorSetLight(light.colorset, light.color), SRGB))
+        except ValueError:
+            swatch = None
+        return light.color, swatch or ""
+
+    held = 0 if pool.unpooled(value) is not None else int(value)
+    members = []
+    for at, (odd, among) in enumerate(pool.choices):
+        (odd_name, odd_hex), (among_name, among_hex) = named(odd), named(among)
+        members.append(_link.PoolMember(bit=1 << at, odd=odd_name, among=among_name,
+                                        odd_hex=odd_hex, among_hex=among_hex,
+                                        on=bool(held >> at & 1)))
+    return tuple(members)
 
 
 @dataclass
@@ -1368,9 +1411,21 @@ class Session:
     #: **Capped at `link.REFUSAL_HISTORY`, newest kept**, for the same reason
     #: `ZmqLink.refused` is: the peer driving its growth is not the operator.
     refusals: list = field(init=False, default_factory=list)
+    #: **What each refusal answers** (telemetry schema 23; the console interface design's goal 4):
+    #: `(cid, value)` for each of `refusals`, in its order and capped with it (`_refuse`) -- the
+    #: command id the page made for the press refused and the value a `set` asked for, each `None`
+    #: where there is none (`_answering_for`). Kept beside `refusals`, never in it, so every reader
+    #: of `(name, by, why)` reads it as it was.
+    answers: list = field(init=False, default_factory=list)
     #: How many refusals fell off the far end of `refusals`. Rolled into
     #: `link.Telemetry.refusals_dropped`, so a cap can never read as a quiet session.
     refusals_dropped: int = field(init=False, default=0)
+    #: **The box command being judged** (`_answering_for`, `_answered`; schema 23): `(cid, value)`,
+    #: which a refusal made while it is judged answers (`_refuse`), else `None`.
+    _answering: tuple | None = field(init=False, default=None, repr=False)
+    #: **The warnings judging it gave** (`_laid_out`, `_beyond_range`), each `code: detail`, which
+    #: what it stages carries (`Staged.warnings`); `None` outside a box command's judging.
+    _warned_now: list | None = field(init=False, default=None, repr=False)
     blocks_run: list = field(init=False, default_factory=list)
     #: Which of the session's runs is in progress, or was last: 0 for the first. `None`
     #: before any has started (P4d-2b spec §6.3), never 0.
@@ -1405,6 +1460,16 @@ class Session:
     #: theirs (`Pending.act`). Cleared with `_staged`, as they apply (`_apply_staged`) or as a
     #: service session's run ends (`_after_service_run`).
     _acts: dict[int, int] = field(init=False, default_factory=dict, repr=False)
+    #: **What each value staged answers** (telemetry schema 23; `_answered`): the place in
+    #: `_staged` of each value a box command staged, to `(cid, warnings)`, the command id its page
+    #: made and the warnings judging it gave. A hand-back, a range and a draw carry theirs
+    #: (`Pending.cid`, `Pending.warnings`). Cleared with `_acts`.
+    _answers: dict[int, tuple] = field(init=False, default_factory=dict, repr=False)
+    #: **The change in force on each setting** (telemetry schema 23; `link.ParamRow.applied`): each
+    #: setting a change of the run in progress applied to (`_apply_staged`), to `(trial, by,
+    #: warnings)` -- the index of the first trial it applied to, who made it and the warnings it
+    #: carried -- the last to apply. Empty as each run starts.
+    _applied: dict[str, tuple] = field(init=False, default_factory=dict, repr=False)
     #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
     #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
     _act_moments: dict[int, int] = field(init=False, default_factory=dict, repr=False)
@@ -2190,6 +2255,7 @@ class Session:
                 f"be recorded ({type(broken).__name__}: {broken}), so it is refused and the "
                 f"previous value stands"
             ) from broken
+        self._carry(entries)
         at = self.wall_now()
         for entry in new:
             self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
@@ -2388,7 +2454,10 @@ class Session:
         **And the layout at what it leaves** (`_laid_out`; the console settings design's §4), a value
         inside its declared range: one off the field is refused here, and the warnings it newly
         gives are accepted by `by`, who sent it, and said on the feed. A value past a bound is
-        left to `set`, which refuses it (`past-limit`), so it writes no warning here."""
+        left to `set`, which refuses it (`past-limit`), so it writes no warning here.
+
+        **And a whole setting given a fraction** (`Param.whole`; the console interface design's goal
+        6; telemetry schema 23), refused here ahead of its bounds, never in `set`."""
         if name in self.spec.bounds.ceilings:
             return
         declared = self._params().get(name)
@@ -2400,6 +2469,15 @@ class Session:
         elif (isinstance(value, bool) or not isinstance(value, (int, float))
               or not math.isfinite(value)):
             return
+        elif declared.whole and not float(value).is_integer():
+            # **A whole setting given a fraction** (`Param.whole`; the console interface design's
+            # goal 6, the PI: "for necessary whole numbers ... there should not be a decimal
+            # option"; its plan's Review Focus 5: by paste or a hand-made POST), refused here, as
+            # the design's non-goal places it, never in `set`. Ahead of its bounds: 4.5 objects is
+            # no count at all, whatever its range.
+            raise Exceeded(
+                f"{name!r} at {value:g} is refused, and the previous value stands: {name} is a "
+                f"whole number of {declared.unit}, and {value:g} is not one")
         pool = self._task.pool if self._task is not None else None
         if pool is not None and name == pool.setting and pool.unpooled(value) is not None:
             # **A pool naming no pairing** (`task.Pool`; the pop-out search build's Task 5; the
@@ -2501,9 +2579,21 @@ class Session:
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             raise Exceeded(f"the layout's warning could not be recorded "
                            f"({type(broken).__name__}: {broken})") from broken
+        self._carry(entries)
         at = self.wall_now()
         for entry in fresh:
             self._feed("warning", by, at, f"{entry.code}: {entry.detail}")
+
+    def _carry(self, entries: list) -> None:
+        """**The warnings a box command's change will carry** (`Staged.warnings`; telemetry schema
+        23): each accepted entry's `code: detail`, gathered while a box command is judged
+        (`_warned_now`, `_answering_for`), each once; nothing outside one."""
+        if self._warned_now is None:
+            return
+        for entry in entries:
+            said = f"{entry.code}: {entry.detail}"
+            if said not in self._warned_now:
+                self._warned_now.append(said)
 
     def _layouts(self, values: dict, held: set, drawn: dict, formed: dict,
                  shaping: str = "on") -> list:
@@ -2711,9 +2801,11 @@ class Session:
     @property
     def staged(self) -> tuple:
         """Every change accepted and not yet applied, in the order offered (`_offered_acts`):
-        `(name, was, now, by, bounded, kind, overrides, hands_back, to)`, the exact shape
-        `link.Telemetry.of` reads
-        to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6).
+        `(name, was, now, by, bounded, kind, overrides, hands_back, to, cid, warnings)`, the exact
+        shape `link.Telemetry.of` reads
+        to build its `Staged` rows (telemetry schema 19; engine build C3's spec §6). **`cid` and
+        `warnings`** (schema 23): the command id the page made for the press that staged it, and
+        the warnings judging it gave (`_answered`), `None` and none for a change sent without one.
 
         - **A value staged** (`_staged`, as `set` stages it): its `was` and `now`; `kind` `set`, or
           `revert` where a revert staged it (`_acts`).
@@ -2757,7 +2849,16 @@ class Session:
         ranges = {key: draw for key, (draw, _) in self._ranges.items()}
         forms = dict(self._forms)
         rows = []
+        # What each row answers (telemetry schema 23), one for each, in order: a value staged's
+        # by its place in `_staged` (`_answers`), an offer's its own (`Pending.cid`).
+        answered: list = []
+        place = 0
         for offer, act in self._offered_acts():
+            if not isinstance(offer, Pending):
+                answered.append(self._answers.get(place, (None, ())))
+                place += 1
+            else:
+                answered.append((offer.cid, offer.warnings))
             if not isinstance(offer, Pending):
                 name, was, now, by, bounded = offer
                 forms.pop(name, None)
@@ -2793,7 +2894,7 @@ class Session:
                 variation.words(declared if offer.draw is None else offer.draw, unit),
                 offer.by, False, kind, () if act is not None else self._reaches(offer.key),
                 False, ""))
-        return tuple(rows)
+        return tuple(row + answer for row, answer in zip(rows, answered, strict=True))
 
     @property
     def recent_outcomes(self) -> tuple:
@@ -2817,7 +2918,11 @@ class Session:
         """Every settable value a console shows, as `(name, unit, low, high, value, bounded,
         choices, source, conditions, draw, numbers, switch, shape, profile, why, gives, color)` --
         `color` a color setting's card (`_color_card`; telemetry schema 22), then `section` (`task.section_of`; a ceiling's is `CEILINGS`) and `changed` (differs from the task's start) -- the shape `link.Telemetry.of`
-        builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it").
+        builds its `ParamRow`s from (P4d-2b spec §3: "the parameter row is generated from it"),
+        **then what its box needs** (telemetry schema 23): `whole`, `step` (`task.step_of`; a
+        ceiling's its unit's), `start`, `label`, `help`, `group` (its group's title, `None`),
+        `percent`, `members` (the pool's setting's pairings, `pool_members`, else `None`), and
+        `applied` and `warned`, the change in force on it (`_in_force`).
         `choices` is the setting's own, empty for a ceiling: they say whether a pair it holds is a
         position (schema 18, XC-401's fix round, M2; `review.declares_position`).
 
@@ -2859,8 +2964,15 @@ class Session:
             in_force = variation.in_force(self._task, self._scheduler.block)
             turned = variation.directions(self._task)
             sizes = size_settings(self._task)
+        # Each setting's group, by title (`task.Group`; telemetry schema 23), and the task's pool,
+        # whose setting's row lists its pairings (`pool_members`).
+        params = self._params()
+        task = self._task
+        boxes = {name: group.name for group in (task.groups if task is not None else ())
+                 for name in group.settings}
+        pool = task.pool if task is not None else None
         declared = []
-        for p in self._params().values():
+        for p in params.values():
             source, conditions, draw, numbers, switch, shape = None, (), None, None, None, None
             profile, shown, gives = None, None, None
             if running:
@@ -2891,16 +3003,34 @@ class Session:
             # person holds it or gave its form, a range a person gave is in force, or the run was
             # given its value (`_source`), over the task's own.
             changed = source in ("person", "form", "range", "run")
-            declared.append((p.name, p.unit, p.low, p.high, self._card_value(p.name, source), False,
+            value = self._card_value(p.name, source)
+            declared.append((p.name, p.unit, p.low, p.high, value, False,
                              p.choices, source, conditions, draw, numbers, switch, shape, profile,
-                             why, gives, self._color_card(p, source), section_of(p), changed))
+                             why, gives, self._color_card(p, source), section_of(p), changed,
+                             p.whole, step_of(p), p.start, p.label, p.help, boxes.get(p.name),
+                             p.percent,
+                             pool_members(pool, value) if pool is not None
+                             and p.name == pool.setting else None,
+                             *self._in_force(p.name, running)))
         ceilings = tuple(
             (name, ceiling.unit, 0.0, ceiling.maximum, ceiling.value, True, (), None, (), None,
-             None, None, None, None, None, None, None, CEILINGS, False)
+             None, None, None, None, None, None, None, CEILINGS, False,
+             False, UNIT_STEPS.get(ceiling.unit, OTHER_STEP), None, "", "", None, False, None,
+             *self._in_force(name, running))
             for name, ceiling in self.spec.bounds.ceilings.items()
             if name != OUT_OF_CAGE
         )
         return tuple(declared) + ceilings
+
+    def _in_force(self, name: str, running: bool) -> tuple:
+        """**The change in force on `name`, for its row** (`link.ParamRow.applied` and `warned`;
+        telemetry schema 23): an `Applied` -- the trial the last change of the run in progress to
+        apply to it took effect at, and who made it, as a person reads an actor -- and the warnings
+        it carried; `None` and none where no change has applied to it, and between runs."""
+        if not running or name not in self._applied:
+            return None, ()
+        trial, by, warned = self._applied[name]
+        return _link.Applied(trial=trial, by=str(by)), tuple(warned)
 
     def _card_value(self, name: str, source: str | None) -> object:
         """**The value a card shows**: the run's (`spec.values`), but **where the training switch
@@ -5130,11 +5260,44 @@ class Session:
         )
 
     def _refuse(self, name: str, by: Actor | None, why: str) -> None:
-        """One refusal onto the capped list -- see `refusals`."""
+        """One refusal onto the capped list -- see `refusals` -- with what it answers beside it
+        (`answers`): the box command being judged (`_answering`), else none."""
         self.refusals.append((name, by, why))
+        self.answers.append(self._answering or (None, None))
         if len(self.refusals) > _link.REFUSAL_HISTORY:
             self.refusals_dropped += len(self.refusals) - _link.REFUSAL_HISTORY
             del self.refusals[: -_link.REFUSAL_HISTORY]
+            del self.answers[: -_link.REFUSAL_HISTORY]
+
+    def _answering_for(self, command) -> tuple[int, int]:
+        """**A box command's judging begins** (telemetry schema 23; the console interface design's
+        goal 4: every outcome on the box that asked): what it answers is held (`_answering`) --
+        its command id (`cid`), and a `set`'s value as a frame carries one (`link._scalar`, a word
+        cut to `link.TEXT_LIMIT`) -- so a refusal made while it is judged names them (`_refuse`),
+        and the warnings judging it gives are gathered (`_warned_now`). The places `_staged` and
+        `_pending` stand at, which `_answered` reads. **Off the welfare list, and beside its
+        lines**: `_command` calls it ahead of its listed `try` and after its listed first
+        statement, so neither listed part, nor `set`, changes."""
+        value = (_link._scalar(command.value) if isinstance(command, _link.SetParameter)
+                 else None)
+        if isinstance(value, str):
+            value = _link.cut(value, _link.TEXT_LIMIT)
+        self._answering = (command.cid, value)
+        self._warned_now = []
+        return len(self._staged), len(self._pending)
+
+    def _answered(self, at: tuple[int, int]) -> None:
+        """**A box command's judging ends** (`_answering_for`): each value it staged, and each
+        hand-back, range or draw it offered, carries its command id and the warnings judging it
+        gave (`_answers`, `Pending.cid`); then nothing is being judged. Never raises."""
+        staged, pending = at
+        cid = self._answering[0] if self._answering is not None else None
+        warnings = tuple(self._warned_now or ())
+        for place in range(staged, len(self._staged)):
+            self._answers[place] = (cid, warnings)
+        self._pending[pending:] = [dataclasses.replace(offer, cid=cid, warnings=warnings)
+                                   for offer in self._pending[pending:]]
+        self._answering, self._warned_now = None, None
 
     def _ceiling_refused(self, name: str, asked, by: Actor | None, why: str, index: int) -> None:
         """**A hand-back or a range that named a ceiling, refused, into the session record too**
@@ -5203,6 +5366,8 @@ class Session:
             self._mark_note(command, index)
             return
         if self.phase != "running":
+            # A box's command refused here answers its press too (`_answering_for`; schema 23).
+            boxed = self._answering_for(command) if isinstance(command, _BOX) else None
             self._refuse(
                 command.name if isinstance(command, _link.SetParameter) else command.KIND,
                 command.by,
@@ -5222,6 +5387,8 @@ class Session:
                 "cage, which is marked at wlx run's terminal; a command sent now is not "
                 "applied",
             )
+            if boxed is not None:
+                self._answered(boxed)
             return
         if isinstance(command, _link.Stop):
             self.stopped_because = f"stopped by {command.by}"
@@ -5264,20 +5431,30 @@ class Session:
         if isinstance(command, _link.Decline):
             self._decline(command, index)
             return
+        # **A box's command is judged answering its press** (`_answering_for`, `_answered`;
+        # telemetry schema 23): what it stages or refuses names the command id its page made.
         if isinstance(command, _link.HandBack):
+            boxed = self._answering_for(command)
             self._hand_back(command, index)
+            self._answered(boxed)
             return
         if isinstance(command, _link.SetRange):
+            boxed = self._answering_for(command)
             self._range(command, index)
+            self._answered(boxed)
             return
         if isinstance(command, _link.Shaping):
             self._shaping(command, index)
             return
         if isinstance(command, _link.SetForm):
+            boxed = self._answering_for(command)
             self._form(command, index)
+            self._answered(boxed)
             return
         if isinstance(command, _link.SetColor):
+            boxed = self._answering_for(command)
             self._color(command, index)
+            self._answered(boxed)
             return
         if isinstance(command, _link.Revert):
             self._revert(command, index)
@@ -5293,6 +5470,9 @@ class Session:
                 f"is refused",
             )
             return
+        # Ahead of the listed `try`, and its end after it: what `set` stages, or the listed line
+        # refuses, answers the press (`_answering_for`; telemetry schema 23), the line unchanged.
+        boxed = self._answering_for(command)
         try:
             self._impossible(command.name, command.value, by=command.by)
             self.set(command.name, command.value, by=command.by)
@@ -5330,6 +5510,7 @@ class Session:
                     session_seconds=self.now(),
                 )
             self._refuse(command.name, command.by, why)
+        self._answered(boxed)
 
     def _params(self) -> dict[str, Param]:
         """The declarations of the run's task -- the union of its trial structures' (engine spec
@@ -5439,6 +5620,8 @@ class Session:
 
         repooling = None if pool is None else max(
             (place for place, (offer, _) in enumerate(offered) if moves_pool(offer)), default=None)
+        # Each value's place in `_staged`, for what it answers (`_answers`; telemetry schema 23).
+        staged_at = 0
         for place, (offer, act) in enumerate(offered):
             closes = act is None or place + 1 == len(offered) or offered[place + 1][1] != act
             moment = None if act is None else self._act_moments[act]
@@ -5473,11 +5656,16 @@ class Session:
             if isinstance(offer, Pending):
                 applied = self._apply_pending(offer, code, trial_number, index,
                                               repools=place == repooling)
+                # In force from this trial, by whom, with the warnings it carried (schema 23).
+                self._applied[offer.name] = (index, offer.by, offer.warnings)
                 if closes:
                     self._keep_moment(self._pending_said(applied) if moment is None
                                       else f"reverted to {_back_to(moment)}")
                 continue
             name, was, now, by, bounded = offer
+            # In force from this trial, by whom, with the warnings it carried (schema 23).
+            self._applied[name] = (index, by, self._answers.get(staged_at, (None, ()))[1])
+            staged_at += 1
             kind = "set" if moment is None else "revert"
             if moment is not None:
                 # A revert's row says what the setting held just before it, which all offered
@@ -5537,6 +5725,7 @@ class Session:
         self._staged.clear()
         self._pending.clear()
         self._acts.clear()
+        self._answers.clear()
         self._act_moments.clear()
         # The values in force moved: the layout at them is made again when a change next asks.
         self._laid = None
@@ -6746,6 +6935,7 @@ class Session:
         self._staged.clear()
         self._pending.clear()
         self._acts.clear()
+        self._answers.clear()
         self._act_moments.clear()
         self.paused_at = None
         self.phase = "between_runs"
@@ -6936,8 +7126,9 @@ class Session:
         self._given = frozenset(given)
         self._eased_now = ()
         self._ranges = {}
-        # No person's draw (the console settings build).
+        # No person's draw (the console settings build), and no change in force (schema 23).
         self._forms, self._form_ids = {}, {}
+        self._applied = {}
         # No trial's draws kept for a repeat, and every prepared list at its first place (engine
         # build C3).
         self._kept = {}

@@ -51,6 +51,7 @@ from wl_xcon.link import (
     ManualReward,
     Mark,
     NextBlock,
+    ParamRow,
     Pause,
     Preflight,
     PreflightItem,
@@ -2265,7 +2266,7 @@ def test_a_live_write_to_a_welfare_bounded_value_goes_through_its_ceiling(tmp_pa
         "the value moved as the command was offered rather than at the boundary"
     )
     assert session.staged[-1] == (
-        "reward_correct", 0.15, 0.30, Box("console"), True, "set", (), False, "")
+        "reward_correct", 0.15, 0.30, Box("console"), True, "set", (), False, "", None, ())
 
     with pytest.raises(Exceeded, match="reward_correct"):
         session.set("reward_correct", 0.90, by=Box("console"))
@@ -3757,10 +3758,15 @@ def test_the_parameters_a_console_shows_are_the_declarations_then_the_ceilings(
         # Its section and whether it differs from the task's start (schema 22; the plan's Task 9):
         # a setting in seconds naming none is Timing, and the task's start is no change.
         "Timing", False,
+        # What its box needs (schema 23; the console interface plan's Task 3): not whole, its
+        # unit's step, its start, no plain name or sentence, no group, no percent, no pairings,
+        # and no change in force before a run.
+        False, 0.05, fix_hold.start, "", "", None, False, None, None, (),
     )
     assert by_name["reward_correct"] == (
         "reward_correct", "mL", 0.0, 0.40, 0.15, True, (), None, (), None, None, None, None, None,
-        None, None, None, "Ceilings", False)
+        None, None, None, "Ceilings", False,
+        False, 0.01, None, "", "", None, False, None, None, ())
     # Each setting's choices, seventh (schema 18, XC-401's fix round, M2): a pair is shown as a
     # position only for a setting whose choices declare one.
     looks = next(p for p in declared if p.name == "target_appearance")
@@ -8515,3 +8521,147 @@ def test_a_move_sent_while_paused_is_applied_at_once(tmp_path):
     assert kinds[:3] == ["pause", "next_block", "resume"]
     assert _trial_rows(session)[0]["block"] == "b"
     assert session.blocks_run == ["a", "b", "c"]
+
+
+# --- Schema 23: verdicts keyed to the page's command id, and the change in force --------------
+
+
+def _searched(tmp_path, script: dict, trials: int = 8, **values) -> tuple[Session, "_Drained"]:
+    """`visual_search` run on simulators for `trials` trials, nobody looking (each trial a missed
+    acquisition), `script[n]` drained at the `n`th boundary (`_Drained`), its values
+    `_sessions.SEARCH_VALUES` under `values`, its looks the first of each choice."""
+    from wl_xcon.run import Scripted
+
+    task = _load_task(Path("tasks/visual_search.py"))
+    looks = {p.name: p.choices[0] for p in task.params
+             if p.name in ("target_appearance", "distractor_appearance")}
+    link = _Drained(script)
+    session = _session(_spec(tmp_path, trials=trials, task="tasks/visual_search.py",
+                             values={**_sessions.SEARCH_VALUES, **looks, **values}), link=link)
+    session.world = lambda trial, values, index: Scripted({})
+    session.run()
+    return session, link
+
+
+def _frames(link) -> list:
+    """The running frames `link` was published, in order."""
+    return [frame for frame in link.published if isinstance(frame, Telemetry)]
+
+
+def _staged_rows(link, name: str) -> list:
+    """Each staged row of `name` on the frames `link` was published, each once, in order."""
+    found: list = []
+    for frame in _frames(link):
+        found += [row for row in frame.staged if row.name == name and row not in found]
+    return found
+
+
+def test_a_verdict_names_the_command_it_answers(tmp_path):
+    """Schema 23 (the console interface design's goal 4: every outcome on the box that asked): a
+    change staged names the command id its page made (`Staged.cid`), a hand-back's too; a refusal
+    names it and carries the value refused (`Refused.cid`, `Refused.value`); a change sent with no
+    id names none. Over the wire as made."""
+    from wl_xcon.link import HandBack, decode, encode
+
+    jake = Box("jake")
+    _, link = _searched(tmp_path, {
+        2: [SetParameter(name="set_size", value=6.0, by=jake, cid="box-1")],
+        3: [SetParameter(name="set_size", value=13.0, by=jake, cid="box-2")],
+        4: [HandBack(name="set_size", by=jake, cid="box-3")],
+        5: [SetParameter(name="fix_hold", value=0.35, by=jake)],
+    })
+
+    assert [(row.kind, row.now, row.cid) for row in _staged_rows(link, "set_size")] == [
+        ("set", 6.0, "box-1"), ("hand_back", 6, "box-3")]
+    assert [(row.now, row.cid) for row in _staged_rows(link, "fix_hold")] == [(0.35, None)]
+    (refused,) = [row for row in _frames(link)[-1].refusals if row.name == "set_size"]
+    assert (refused.cid, refused.value, refused.by) == ("box-2", 13.0, jake)
+    assert "past-limit: 'set_size' at 13 objects is above its 12" in refused.why
+    for frame in _frames(link):
+        assert decode(encode(frame)) == frame
+
+
+def test_a_staged_change_carries_its_warnings(tmp_path):
+    """Schema 23: a raised set size that crowds the ring's windows is staged with its warning
+    (`Staged.warnings`), the same `code: detail` the changes feed says and `warnings.jsonl`
+    accepts; a change that warns of nothing is staged with none."""
+    jake = Box("jake")
+    session, link = _searched(tmp_path, {
+        2: [SetParameter(name="set_size", value=12.0, by=jake, cid="box-1")],
+        4: [SetParameter(name="fix_hold", value=0.35, by=jake, cid="box-2")],
+    }, object_window=1.6, array_eccentricity=6.0, set_size=4)
+
+    (crowding,) = _staged_rows(link, "set_size")
+    (warning,) = crowding.warnings
+    assert warning.startswith("crowded-array: array 'search' can put 12 objects ('set_size') on "
+                              "a 6° ring ('array_eccentricity')"), warning
+    (accepted,) = [row for row in _warned(session) if row["code"] == "crowded-array"]
+    assert warning == f"crowded-array: {accepted['detail']}"
+    assert warning in [said for kind, _, _, said in session.controls if kind == "warning"]
+    (plain,) = _staged_rows(link, "fix_hold")
+    assert (plain.cid, plain.warnings) == ("box-2", ())
+
+
+def test_a_row_says_the_trial_its_value_took_effect(tmp_path):
+    """Schema 23 (the design's goal 4, "in force from trial N"): once a staged change applies, its
+    setting's row says the trial it took effect at and who made it (`ParamRow.applied`), the trial
+    the changes feed says it is from, and the warnings it carried (`ParamRow.warned`); before it
+    applies, none. A ceiling's row too."""
+    from wl_xcon.link import Applied
+
+    jake = Box("jake")
+    session, link = _searched(tmp_path, {
+        2: [SetParameter(name="set_size", value=12.0, by=jake, cid="box-1"),
+            SetParameter(name="reward_correct", value=0.2, by=jake)],
+    }, object_window=1.6, array_eccentricity=6.0, set_size=4)
+
+    frames = _frames(link)
+    rows = [{row.name: row for row in frame.params} for frame in frames]
+    staged_at = next(at for at, frame in enumerate(frames) if frame.staged)
+    assert rows[staged_at]["set_size"].applied is None
+    (fed,) = [said for kind, _, _, said in session.controls
+              if kind == "set" and said.startswith("set_size")]
+    trial = int(re.search(r"from trial (\d+)", fed).group(1))
+    applied = rows[staged_at + 1]["set_size"]
+    assert applied.applied == Applied(trial=trial, by="jake (box, unverified)")
+    assert applied.value == 12 and frames[staged_at + 1].trial_index == trial
+    (warning,) = frames[staged_at].staged[0].warnings
+    assert applied.warned == (warning,)
+    assert rows[staged_at + 1]["reward_correct"].applied == Applied(trial, "jake (box, unverified)")
+    assert rows[staged_at + 1]["reward_correct"].warned == ()
+    assert rows[staged_at + 1]["fix_hold"].applied is None
+
+
+def test_a_whole_setting_refuses_a_fraction_with_a_sentence(tmp_path):
+    """Review Focus 5 (the design's goal 6, the PI: "for necessary whole numbers ... there should
+    not be a decimal option"): `set_size` given 4.5 -- a paste, a hand-made POST -- is refused by
+    the rig with a sentence, its command id and the value refused named, nothing staged; so is
+    `target_index` at 0.5. A whole number sent as a float, 6.0, is staged; a fraction of a setting
+    that is not whole, `fix_hold` at 0.35, too. Made where `_impossible` judges a change, never in
+    `Session.set`, which stages 4.5 asked directly."""
+    jake = Box("jake")
+    session, link = _searched(tmp_path, {
+        2: [SetParameter(name="set_size", value=4.5, by=jake, cid="box-1")],
+        3: [SetParameter(name="target_index", value=0.5, by=jake, cid="box-2")],
+        4: [SetParameter(name="set_size", value=6.0, by=jake, cid="box-3"),
+            SetParameter(name="fix_hold", value=0.35, by=jake, cid="box-4")],
+    })
+
+    refusals = {row.cid: row for row in _frames(link)[-1].refusals}
+    assert refusals["box-1"].why == (
+        "'set_size' at 4.5 is refused, and the previous value stands: set_size is a whole number "
+        "of objects, and 4.5 is not one")
+    assert (refusals["box-1"].name, refusals["box-1"].value) == ("set_size", 4.5)
+    assert refusals["box-2"].why.endswith("target_index is a whole number of index, and 0.5 is "
+                                          "not one")
+    assert [row.now for row in _staged_rows(link, "set_size")] == [6.0]
+    assert [row.cid for row in _staged_rows(link, "fix_hold")] == ["box-4"]
+    assert not _staged_rows(link, "target_index")
+    assert {r["name"] for r in _parameter_changes(session)} >= {"set_size", "fix_hold"}
+    assert 4.5 not in [r["now"] for r in _parameter_changes(session) if r["name"] == "set_size"]
+
+    direct = _session(_spec(tmp_path / "direct", trials=3, task="tasks/visual_search.py",
+                            values=dict(_sessions.SEARCH_VALUES)))
+    direct.open()
+    direct.set("set_size", 4.5, by=jake)
+    assert [row[2] for row in direct.staged] == [4.5]

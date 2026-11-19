@@ -376,11 +376,11 @@ def test_a_reader_of_18_refuses_a_later_frame_and_a_later_reader_refuses_18_by_n
     value."""
     sent = frame()
 
-    assert SCHEMA == sent.schema == 22
-    with pytest.raises(SchemaMismatch, match="carried schema 18 and this console reads schema 22"):
+    assert SCHEMA == sent.schema == 23
+    with pytest.raises(SchemaMismatch, match="carried schema 18 and this console reads schema 23"):
         decode(encode(replace(sent, schema=18)))
     monkeypatch.setattr(wire, "SCHEMA", 18)
-    with pytest.raises(SchemaMismatch, match="carried schema 22 and this console reads schema 18"):
+    with pytest.raises(SchemaMismatch, match="carried schema 23 and this console reads schema 18"):
         decode(encode(sent))
 
 

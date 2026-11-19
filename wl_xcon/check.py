@@ -116,6 +116,7 @@ from wl_xcon.task import (
     is_point,
     limit_reason,
     rule_at,
+    section_of,
     shared_color_choices,
     size_at,
     sized_places,
@@ -243,6 +244,7 @@ def check_task(
         + _unexplained_limits(task)
         + _whole_faults(task)
         + _group_faults(task)
+        + _label_faults(task)
         + _ambiguous_color_choices(task)
         + _meaning_faults(task)
         + _reaction_time_faults(task)
@@ -582,6 +584,7 @@ def _group_faults(task: Task) -> list[Finding]:
     from wl_xcon.declarations import BOUNDED, rewarded_through
 
     declared = {param.name for param in task.params}
+    by_name = {param.name: param for param in task.params}
     ceilings = set(BOUNDED) | rewarded_through(task)
     findings: list[Finding] = []
     titles: set[str] = set()
@@ -605,7 +608,36 @@ def _group_faults(task: Task) -> list[Finding]:
                     f"{group.name!r}; a setting sits in one box")))
             else:
                 boxed[name] = group.name
+        # **One section** (the controller's ruling on the console interface plan's Task 3): a
+        # group's box sits in the section its settings share, so they share one.
+        sections = list(dict.fromkeys(section_of(by_name[name]) for name in group.settings
+                                      if name in by_name and name not in ceilings))
+        if len(sections) > 1:
+            findings.append(Finding("bad-group", (
+                f"group {group.name!r} holds settings of the sections "
+                f"{', '.join(repr(section) for section in sections)}; its box sits in one "
+                f"section, so its settings share one")))
     return findings
+
+
+#: **Two settings sharing one plain name** (`Param.label`; the console interface design's goal 5;
+#: the controller's ruling on its plan's Task 3): their boxes would read alike, so the load refuses
+#: it, an authoring rule.
+BAD_LABEL = "bad-label"
+
+
+def _label_faults(task: Task) -> list[Finding]:
+    """`BAD_LABEL`, blocking, for each plain name two or more settings declare, compared as a
+    person reads it -- case and runs of spaces aside -- naming the settings."""
+    named: dict[str, list[Param]] = {}
+    for param in task.params:
+        if param.label.strip():
+            named.setdefault(" ".join(param.label.split()).casefold(), []).append(param)
+    return [Finding(BAD_LABEL, (
+                f"settings {', '.join(repr(param.name) for param in params)} share the plain name "
+                f"{params[0].label!r}; their boxes would read alike, so each takes a name of its "
+                f"own"))
+            for params in named.values() if len(params) > 1]
 
 
 #: **Two of a setting's choices showing one set's one hue** (the console settings design's §6): a

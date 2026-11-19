@@ -950,6 +950,11 @@ def parse_command(data: object, actor: Member | None = None):
             )
         by = actor
         allowed = {"kind"}
+    if kind in _link.CID_KINDS:
+        # **A box's command id rides beside the command** (schema 23; the console interface
+        # design's goal 4): the page's own name for the press, which the verdict echoes, decoded
+        # by the wire's rule (`link._cid`), never as a value.
+        allowed |= {"cid"}
     extra = set(data) - allowed - _SHAPES[kind]
     if extra:
         raise BadCommand(f"a {kind} command takes no {', '.join(sorted(extra))}")
@@ -964,9 +969,10 @@ def parse_command(data: object, actor: Member | None = None):
             raise BadCommand("a setting names its parameter")
         try:
             value = _link._setting(data.get("value"), name, by)
+            cid = _link._cid(data, kind, by)
         except _link.CommandRefused as refused:
             raise BadCommand(refused.why) from refused
-        return _link.SetParameter(name=name, value=value, by=by)
+        return _link.SetParameter(name=name, value=value, by=by, cid=cid)
     if kind == "schedule":
         given = [key for key in _SCHEDULES if key in data]
         if len(given) != 1:

@@ -113,7 +113,7 @@ search = Trial(
         Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY, whole=True),
         # No highest: an index past the array is refused where it is set (`check.laid_out`),
         # against the set size it is set with, and the load holds it at its start, 0.
-        Param("target_index", unit="index", low=0, start=0),
+        Param("target_index", unit="index", low=0, start=0, whole=True),
         #: Randomised between trials so the animal cannot learn positions.
         Param("array_rotation", unit="deg", start=0.0),
         # Feature as a value. Red-among-green and square-among-discs are the same
