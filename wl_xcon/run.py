@@ -25,6 +25,7 @@ from wl_xcon.task import (
     Hide,
     Hold,
     Mark,
+    On,
     Onscreen,
     Outcome,
     P,
@@ -354,6 +355,16 @@ def _resolve(value: float | P, values: dict[str, float]) -> float:
     return value
 
 
+def _zero(seconds: "float | P", values: dict[str, float]) -> bool:
+    """Whether a wait of `seconds` lasts no frame (TSK-78): 0 or less at `values`, between trials
+    (`_Loop.passes`). A setting with no value, or with a value that is no number, is no zero."""
+    if isinstance(seconds, P):
+        if seconds.name not in values:
+            return False
+        seconds = values[seconds.name]
+    return isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds <= 0
+
+
 def _unbound(name: str) -> NoReturn:
     """`_resolve`'s refusal, its message built as it is raised, never on a frame that resolves."""
     raise KeyError(
@@ -564,6 +575,20 @@ class _Loop:
         self.no_values: dict[str, float] = {}
         bound = values or self.no_values
         self.by_name = {state.name: state for state in trial.states}
+        #: **Each state's pass** (TSK-78; the pop-out revision's §3 item 5, the PI's "on one frame"):
+        #: its first plain `After` (no `since`) whose seconds resolve to 0 or less at this trial's
+        #: values, else `None`. An edge entering a state with one takes it on the same frame
+        #: (`_take`), so a zero `go_delay` puts the array and the go on one frame. Built here,
+        #: between trials, so a frame that takes a pass reads it by key and builds nothing. A wait
+        #: naming a setting with no value is no pass: the frame that judges it refuses, as
+        #: `_resolve` always has.
+        self.passes: "dict[str, On | None]" = {
+            state.name: next((
+                edge for edge in state.go
+                if isinstance(edge.guard, After) and edge.guard.since is None
+                and _zero(edge.guard.seconds, bound)), None)
+            for state in trial.states
+        }
         self.current = self.by_name[trial.start]
         self.entered_at = 0
         self.visited = [self.current.name]
@@ -829,10 +854,17 @@ class _Loop:
         self.was_inside, self.inside_now = inside_now, was_inside
         return False
 
-    def _take(self, edge, frame: int) -> bool:
+    def _take(self, edge, frame: int, passing: bool = False) -> bool:
         """The edge `edge`, taken on `frame`: its scored responses, its actions, and the state it
         enters or the outcome it ends the trial with (`True`). **The trial's record of it is built
-        here** (`Scored`, and `_apply`'s), on a frame that takes an edge only."""
+        here** (`Scored`, and `_apply`'s), on a frame that takes an edge only.
+
+        **A state whose wait is zero lasts no frame** (TSK-78; the pop-out revision's §3 item 5):
+        entering one, its pass (`passes`) is taken here, on the same `frame`, its actions applied
+        at the same `frame + 1` after the entering edge's and the state's `enter`, no other edge of
+        it judged; it is still visited, and the world is told the next state's first frame. **At
+        most one pass a frame** (`passing`, the pass itself): the state a pass enters is judged from
+        the next frame, so a cycle of zero waits ends on the longest trial, never looping in one."""
         do = edge.do
         index = 0
         while index < len(do):
@@ -884,6 +916,10 @@ class _Loop:
             started_at[clocks[index]] = None
             index += 1
         self.visited.append(current.name)
+        if not passing:
+            through = self.passes[current.name]
+            if through is not None:
+                return self._take(through, frame, True)
         return False
 
     def result(self, outcome: "Outcome | None", last: int) -> Result:

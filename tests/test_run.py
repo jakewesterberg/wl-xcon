@@ -14,6 +14,7 @@ from wl_xcon.run import (
 )
 from wl_xcon.task import (
     After,
+    Disc,
     Entered,
     Mark,
     Exited,
@@ -25,9 +26,12 @@ from wl_xcon.task import (
     Reward,
     SaccadeTo,
     Score,
+    Show,
     State,
+    Stimulus,
     Tolerances,
     Trial,
+    Update,
     Window,
 )
 
@@ -603,3 +607,252 @@ def test_the_world_is_told_the_first_frame_of_every_state_the_trial_enters():
 
     assert result.outcome is None and result.frames == 12
     assert log == [("a", 1), ("b", 4), ("b2", 6), ("b2", 8), ("b2", 10), ("b2", 12)]
+
+
+# --- TSK-78: a zero wait lasts no frame (the pop-out revision's §3 item 5) -----------------------
+#
+# The PI's "on one frame": with `go_delay` 0 the array and the go are drawn together. An edge that
+# enters a state whose plain `After` resolves to 0 or less takes that `After`'s edge on the same
+# frame, its actions applied at the same `frame + 1`; the state lasted no frame, so no other edge of
+# it is judged. At most one such pass a frame: the state a pass enters is judged from the next.
+
+
+def _go_delay_trial(delay_go: "list[On] | None" = None) -> Trial:
+    """A dot on from the start; after 30 ms the array is shown on entering `delay`, and the dot
+    changes on leaving it after `go_delay`; the go state ends the trial 50 ms on, or on the eye
+    leaving the fixation window, the answer."""
+    dot = Stimulus("dot", at=(0.0, 0.0), looks=Disc(size=0.3))
+    array = Stimulus("array", at=(8.0, 0.0), looks=Disc(size=1.0))
+    go = Update("dot", opacity=0.5)
+    return Trial(
+        start="hold",
+        params=[Param("go_delay", unit="s", low=0.0, high=1.0)],
+        windows=[Window("fix", at=(0.0, 0.0), radius=2.0)],
+        states=[
+            State("hold", enter=[Show(dot)], go=[On(After(0.03), "delay")]),
+            State("delay", enter=[Show(array)],
+                  go=delay_go or [On(After(P("go_delay")), "go", do=[go])]),
+            State("go", go=[On(Exited("fix"), Outcome.CORRECT),
+                            On(After(0.05), Outcome.NO_RESPONSE)]),
+        ],
+    )
+
+
+def test_a_zero_wait_is_passed_on_the_frame_its_state_is_entered():
+    """`go_delay` 0: the array shown on entering `delay` and the dot's change on leaving it are
+    one frame's, and `delay` is still among the states the trial visited. Until TSK-78 the loop
+    took one edge a frame, so a zero state lasted one frame and the change trailed the array."""
+    result = run_trial(_go_delay_trial(), Quiet(), frame_period=0.01, values={"go_delay": 0.0})
+
+    placed = {(entry.stimulus.name, entry.kind): entry.frame for entry in result.placed}
+    assert placed[("array", "show")] == placed[("dot", "update")] == 4
+    assert result.visited == ("hold", "delay", "go")
+    # The go state was entered on frame 3 with `delay`, so its 50 ms run out on frame 8.
+    assert (result.outcome, result.frames) == (Outcome.NO_RESPONSE, 8)
+
+
+def test_a_wait_above_zero_counts_from_the_next_frame_as_before():
+    """`go_delay` 0.05 at 240 Hz: `delay` is entered on frame 8 (30 ms) and left on frame 20, 12
+    frames on, as every wait above zero is counted, the dot changing on frame 21."""
+    log: list = []
+    result = run_trial(_go_delay_trial(), _Told(log), frame_period=1 / 240,
+                       values={"go_delay": 0.05})
+
+    placed = {(entry.stimulus.name, entry.kind): entry.frame for entry in result.placed}
+    assert log[:3] == [("hold", 1), ("delay", 9), ("go", 21)]
+    assert (placed[("array", "show")], placed[("dot", "update")]) == (9, 21)
+
+
+def test_a_zero_wait_listed_after_a_gaze_edge_still_passes():
+    """The pass is the state's first plain `After` that resolves to 0, wherever it is listed: an
+    `Exited` before it is not judged, the state having lasted no frame. The eye leaves the fixation
+    window on the frame after the array: in the go state, the answer, not an early break."""
+    trial = _go_delay_trial([On(Exited("fix"), Outcome.EARLY_RESPONSE),
+                             On(After(P("go_delay")), "go", do=[Update("dot", opacity=0.5)])])
+    world = Scripted({}, inside={frame: "fix" for frame in range(1, 4)})
+
+    result = run_trial(trial, world, frame_period=0.01, values={"go_delay": 0.0})
+
+    assert (result.outcome, result.frames) == (Outcome.CORRECT, 4)
+    assert result.visited == ("hold", "delay", "go")
+
+
+def test_two_zero_waits_in_a_row_take_one_frame_between_them():
+    """At most one pass a frame: the first zero state is passed on the frame it is entered, and
+    the second, entered by the pass, is judged from the next frame, where its zero wait fires."""
+    trial = Trial(
+        start="a",
+        params=[Param("second", unit="s", low=0.0, high=1.0)],
+        states=[
+            State("a", go=[On(After(0.03), "z1")]),
+            State("z1", enter=[Show(Stimulus("first", at=(0.0, 0.0)))],
+                  go=[On(After(0.0), "z2")]),
+            State("z2", go=[On(After(P("second")), "after")]),
+            State("after", enter=[Show(Stimulus("then", at=(1.0, 0.0)))],
+                  go=[On(After(0.05), Outcome.CORRECT)]),
+        ],
+    )
+    log: list = []
+
+    result = run_trial(trial, _Told(log), frame_period=0.01, values={"second": 0.0})
+
+    assert log == [("a", 1), ("z1", 4), ("z2", 4), ("after", 5)]
+    assert [(entry.stimulus.name, entry.frame) for entry in result.placed] == [
+        ("first", 4), ("then", 5)]
+    assert result.visited == ("a", "z1", "z2", "after")
+
+
+def test_a_cycle_of_zero_waits_ends_on_the_longest_trial():
+    """Two zero states that enter each other: one pass a frame, so each frame takes one edge and
+    one pass, and the trial reaches its longest with no outcome, a hang, never looping in a frame."""
+    trial = Trial(
+        start="a",
+        states=[
+            State("a", go=[On(After(0.01), "z1")]),
+            State("z1", go=[On(After(0.0), "z2")]),
+            State("z2", go=[On(After(0.0), "z1")]),
+        ],
+    )
+
+    result = run_trial(trial, Quiet(), frame_period=0.01, max_frames=20)
+
+    assert (result.outcome, result.frames) == (None, 20)
+    assert result.visited == ("a",) + ("z1", "z2") * 20
+
+
+def test_a_zero_timeout_ends_the_trial_on_the_frame_of_its_error():
+    """An error's timeout state at 0 s ends the trial on the frame the error was taken, its
+    outcome's actions strobed with the error's. It ended one frame later until TSK-78."""
+    trial = Trial(
+        start="await",
+        params=[Param("timeout", unit="s", low=0.0, high=5.0)],
+        windows=[Window("fix", at=(0.0, 0.0), radius=2.0)],
+        states=[
+            State("await", go=[On(Exited("fix"), "timeout", do=[Mark(4110)]),
+                               On(After(1.0), Outcome.CORRECT)]),
+            State("timeout", go=[On(After(P("timeout")), Outcome.FIXATION_BREAK,
+                                    do=[Mark(4111)])]),
+        ],
+    )
+    effects = Recorded()
+    world = Scripted({}, inside={frame: "fix" for frame in range(1, 6)})
+
+    result = run_trial(trial, world, frame_period=0.01, values={"timeout": 0.0},
+                       effects=effects)
+
+    assert (result.outcome, result.frames) == (Outcome.FIXATION_BREAK, 6)
+    assert result.visited == ("await", "timeout")
+    assert effects.log == [("mark", 4110), ("mark", 4111)]
+
+
+#: What a frame that takes an edge builds (`tests/test_gaze.py`'s `_A_TRANSITION`, XC-414): the
+#: trial's record of the transition and the effects it hands the port; nothing else, pass or none.
+_A_TRANSITION = {
+    ("Shown.__new__", "tuple"), ("Placed.__new__", "tuple"), ("Changed.__new__", "tuple"),
+    ("_apply", "tuple"), ("_apply", "dict"), ("_apply", "arguments"),
+    ("Recorded.mark", "tuple"), ("Recorded.reward", "tuple"),
+}
+
+
+def test_a_frame_that_passes_a_zero_wait_allocates_nothing(monkeypatch):
+    """CLAUDE.md: "Inside trial loops: no allocation". Measured as `tests/test_gaze.py` measures a
+    frame (`built_on`, `_Loop.frame` wrapped on the class): the frame that takes an edge into a zero
+    state and passes it builds the two transitions' records and nothing else, the pass read from
+    the table `_Loop` built between trials."""
+    from _builds import built_on
+    from wl_xcon import run
+
+    records = {record.__new__.__code__: f"{record.__name__}.__new__"
+               for record in (run.Shown, run.Placed, run.Changed, run.Confirmed)}
+    trial = Trial(
+        start="a",
+        params=[Param("go_delay", unit="s", low=0.0, high=1.0)],
+        states=[
+            State("a", go=[On(After(0.03), "delay", do=[Mark(4100)])]),
+            State("delay", enter=[Show(Stimulus("array", at=(8.0, 0.0)))],
+                  go=[On(After(P("go_delay")), "go", do=[Mark(4101)])]),
+            State("go", go=[On(After(0.05), Outcome.CORRECT)]),
+        ],
+    )
+    frame_of = run._Loop.frame
+    passed: dict = {}
+
+    def measured_frame(loop, frame: int) -> bool:
+        ended, states = [], len(loop.visited)
+        built = built_on(lambda: ended.append(frame_of(loop, frame)), named=records)
+        if len(loop.visited) == states + 2:
+            passed[frame] = set(built)
+        return ended[0]
+
+    monkeypatch.setattr(run._Loop, "frame", measured_frame)
+    effects = Recorded()
+    result = run_trial(trial, Quiet(), frame_period=0.01, values={"go_delay": 0.0},
+                       effects=effects)
+
+    assert result.visited == ("a", "delay", "go")
+    assert list(passed) == [3], "no frame took an edge into `delay` and passed it"
+    assert sorted(passed[3] - _A_TRANSITION) == []
+    assert effects.log == [("mark", 4100), ("mark", 4101)]
+
+
+#: **Each reference task's outcomes at its starts, as the engine counted them before TSK-78**, at
+#: the branch's base (`91b22f7f`, 2026-11-19): the hazard `Subject` below at two seeds, 600 trials
+#: each at 240 Hz, every setting at its start and each with none at the values the tests above
+#: and `tests/test_reference_tasks.py` time them with. No reference task waits 0 s at its starts,
+#: so a zero wait's pass must leave every count where it was.
+_AT_BASE = {
+    "fixation_detection": {
+        3: {"correct": 341, "fixation_break": 88, "no_fixation": 93, "no_response": 31,
+            "target_break": 47},
+        11: {"correct": 347, "fixation_break": 86, "no_fixation": 93, "no_response": 30,
+             "target_break": 44}},
+    "adaptive_detection": {
+        3: {"correct": 341, "fixation_break": 88, "no_fixation": 93, "no_response": 31,
+            "target_break": 47},
+        11: {"correct": 347, "fixation_break": 86, "no_fixation": 93, "no_response": 30,
+             "target_break": 44}},
+    "visual_search": {
+        3: {"correct": 174, "fixation_break": 88, "no_fixation": 100, "no_response": 7,
+            "target_break": 28, "wrong_target": 203},
+        11: {"correct": 171, "fixation_break": 78, "no_fixation": 111, "no_response": 13,
+             "target_break": 25, "wrong_target": 202}},
+    "visual_search_training": {
+        3: {"correct": 174, "fixation_break": 88, "no_fixation": 100, "no_response": 7,
+            "target_break": 28, "wrong_target": 203},
+        11: {"correct": 171, "fixation_break": 78, "no_fixation": 111, "no_response": 13,
+             "target_break": 25, "wrong_target": 202}},
+    "calibration": {
+        3: {"correct": 396, "fixation_break": 96, "no_fixation": 108},
+        11: {"correct": 421, "fixation_break": 86, "no_fixation": 93}},
+}
+
+#: A value for each setting a reference task gives no start, the timings `tests/test_reference_tasks.py`
+#: runs them at and windows of the sizes the tasks start theirs at.
+_UNSTARTED = {"fix_acquisition": 4.0, "fix_hold": 0.3, "response_deadline": 0.6,
+              "target_hold": 0.2, "fix_window": 2.0, "target_window": 3.0, "target_x": 10.0,
+              "target_y": 0.0, "cal_window": 2.0, "cal_hold": 0.3}
+
+
+@pytest.mark.parametrize("name", sorted(_AT_BASE))
+def test_every_reference_tasks_outcomes_are_unchanged_at_their_starts(name):
+    from pathlib import Path
+
+    from wl_xcon.cli import _load_task
+    from wl_xcon.simulate import Subject, simulate
+
+    task = _load_task(Path(__file__).resolve().parents[1] / "tasks" / f"{name}.py")
+    declared = {param.name for param in task.params}
+    values = {**{setting: value for setting, value in _UNSTARTED.items() if setting in declared},
+              **{param.name: param.start for param in task.params if param.start is not None}}
+
+    counted = {}
+    for seed in (3, 11):
+        census = simulate(
+            task,
+            Subject(seed=seed, engagement=0.85, lapse=0.15,
+                    hazards={Entered: 4.0, Exited: 0.5, SaccadeTo: 5.0}),
+            trials=600, frame_period=1 / 240, values=values, effects=Recorded())
+        assert census.hangs == 0
+        counted[seed] = {outcome.value: n for outcome, n in census.outcomes.items()}
+
+    assert counted == _AT_BASE[name]

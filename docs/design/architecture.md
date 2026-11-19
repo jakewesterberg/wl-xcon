@@ -526,6 +526,13 @@ the day they are written.
 outcome codes. `taskd` executes it; the task never owns the frame loop. Statically
 checkable, exhaustively simulatable, renderable as a diagram.
 
+**A state whose wait is zero lasts no frame, since the pop-out revision (2026-11-19; TSK-78).** The
+loop takes one edge a frame, its actions drawn on the next, and a state's waits count from the
+frame after it is entered; but an edge entering a state whose plain `After` resolves to 0 or less
+takes that `After`'s edge on the same frame (`run._Loop.passes`, built between trials), so with
+`go_delay` 0 the array and the go are drawn on one frame. At most one such pass a frame, so a
+cycle of zero waits ends on the longest trial, never looping inside a frame.
+
 **Between trials: ordinary Python.** Condition selection, blocks, staircases, adaptive
 updates.
 
