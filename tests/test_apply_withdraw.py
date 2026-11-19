@@ -61,14 +61,14 @@ class _Drained(Simulated):
 
 
 def _searched(tmp_path, script: dict, *, task: str = SEARCH, trials: int = 6,
-              **values) -> tuple[Session, _Drained]:
+              link_type: type = _Drained, **values) -> tuple[Session, _Drained]:
     """`task` (`visual_search` by default) run on simulators for `trials` trials, nobody looking,
     `script[n]` drained at the `n`th boundary, its values `_sessions.SEARCH_VALUES` under
     `values`, its looks the first of each choice."""
     loaded = _load_task(Path(task))
     looks = {p.name: p.choices[0] for p in loaded.params
              if p.name in ("target_appearance", "distractor_appearance")}
-    link = _Drained(script)
+    link = link_type(script)
     spec = SessionSpec(
         task=task, allocation="tasks/allocation.py", root=tmp_path,
         session_id="2027-01-14_01", subject="A", trials=trials, frame_period=1 / 240, seed=1,
@@ -228,6 +228,21 @@ def test_a_reward_size_is_never_applied_with_others(tmp_path):
     assert (recorded["name"], recorded["asked"]) == ("reward_correct", 0.2)
 
 
+def test_a_reward_size_refused_behind_another_change_is_still_recorded(tmp_path):
+    """The whole-build review's M2: a reward size in a refused apply is written to the session
+    record as a ceiling's refusal whatever its place in the act -- here behind a whole count sent a
+    fraction, which refuses the apply first -- and its value stays as it was."""
+    session, link = _searched(tmp_path, {
+        2: [_apply(_set("set_size", 2.5), _set("reward_correct", 0.2), cid="all-9")]})
+
+    size, reward = _refused(link, "all-9")
+    assert reward.why.startswith("'reward_correct' is refused with 'set_size'"), reward.why
+    assert not _staged(link) and session.spec.bounds.value("reward_correct") == 0.15
+    (recorded,) = _rows(session, "refusals.jsonl")
+    assert (recorded["name"], recorded["asked"], recorded["why"]) == (
+        "reward_correct", 0.2, reward.why)
+
+
 def test_an_applys_warnings_are_carried_by_the_settings_they_name(tmp_path):
     """The controller's ruling on Task 3's concern: a raised set size that crowds the ring's
     windows warns of `set_size`, so its row carries the warning and `fix_hold`'s, applied with
@@ -296,13 +311,67 @@ def test_withdraw_takes_back_the_whole_act(tmp_path):
     assert {line["params"]["fix_hold"] for line in _lines(session)} == {0.3}
 
 
+def test_a_withdraw_pressed_while_its_change_waits_takes_it_back_in_a_running_session(tmp_path):
+    """The whole-build review's C1, the path a page takes: the change drained at one boundary is on
+    that boundary's frame, waiting, with its *withdraw*; the press reaches the rig in the next
+    drain, before that boundary applies what waits (`Session.run`: a drain's withdrawals are read
+    ahead of `_apply_staged`), so it is taken back -- the `withdrawn` row, no `set` row, every trial
+    at the old value -- and the frame says the act was withdrawn (`Telemetry.withdrawals`)."""
+    session, link = _searched(tmp_path, {
+        2: [SetParameter(name="fix_hold", value=0.35, by=KIM, cid="box-1")],
+        3: [Withdraw(cid="box-1", by=JAKE)]})
+
+    assert [row.cid for row in _staged(link)] == ["box-1"], "the frame showed it waiting first"
+    (row,) = _changes(session)
+    assert row["kind"] == "withdrawn", f"the change applied before its withdrawal was read: {row}"
+    assert (row["name"], row["cid"], row["withdrawn"]) == (
+        "fix_hold", "box-1", {"kind": "set", "now": 0.35})
+    assert {line["params"]["fix_hold"] for line in _lines(session)} == {0.3}
+    assert not session.refusals and not _fed(session, "set")
+    assert _frames(link)[-1].withdrawals == ("box-1",)
+
+
+def test_a_change_drained_beside_a_withdraw_still_waits_a_boundary(tmp_path):
+    """S9a §8's one-boundary window, kept by C1's fix: a change drained in the pass that reads a
+    withdrawal ahead of the boundary is staged after it applies, so it waits a whole trial on the
+    frame (`Telemetry.staged`) and takes effect only at the next; and a mark arriving between the
+    trials with its note in that drain is stamped first, the note joined to it."""
+    from wl_xcon.link import Mark
+
+    class _Marked(_Drained):
+        def drain(self) -> list:
+            if self.drains + 1 == 3:
+                self.marks.append(5)
+            return super().drain()
+
+    session, link = _searched(tmp_path, {
+        2: [SetParameter(name="fix_hold", value=0.35, by=JAKE, cid="box-1")],
+        3: [Mark(mark=5, note="restless", by=JAKE, pressed_at=None, received_at=None),
+            Withdraw(cid="box-1", by=JAKE),
+            SetParameter(name="target_hold", value=0.25, by=JAKE, cid="box-2")]},
+        link_type=_Marked)
+
+    waited = [frame for frame in _frames(link) if any(r.cid == "box-2" for r in frame.staged)]
+    assert waited, "the change drained beside the withdrawal was on a frame, waiting"
+    (applied,) = [row for row in _changes(session) if row["kind"] == "set"]
+    assert (applied["name"], applied["now"]) == ("target_hold", 0.25)
+    assert [row["kind"] for row in _changes(session)] == ["withdrawn", "set"]
+    trials = [line["params"]["target_hold"] for line in _lines(session)]
+    assert trials[:2] == [trials[0]] * 2 and 0.25 in trials and trials[0] != 0.25, trials
+    stamp, note = [row for row in _rows(session, "controls.jsonl")
+                   if row["kind"] in ("mark", "note")]
+    assert (stamp["kind"], note["kind"], note["number"]) == ("mark", "note", stamp["number"])
+
+
 def test_withdraw_after_the_boundary_is_refused_as_in_force(tmp_path):
     """The plan's Review Focus 3: a withdraw that arrives once its change has applied finds it in
     force and is refused, saying "already in force from trial N" -- the trial the feed says the
-    change is from -- and writes no row; one naming an id nothing carries is refused too."""
+    change is from -- and writes no row; one naming an id nothing carries is refused too. The
+    change drained at boundary 2 waits through trial 2's frame and applies at boundary 3, so a
+    withdrawal read at boundary 4 is late."""
     session, link = _searched(tmp_path, {
         2: [SetParameter(name="fix_hold", value=0.35, by=JAKE, cid="box-1")],
-        3: [Withdraw(cid="box-1", by=JAKE), Withdraw(cid="box-404", by=JAKE)]})
+        4: [Withdraw(cid="box-1", by=JAKE), Withdraw(cid="box-404", by=JAKE)]})
 
     (fed,) = _fed(session, "set")
     trial = int(re.search(r"from trial (\d+)", fed).group(1))

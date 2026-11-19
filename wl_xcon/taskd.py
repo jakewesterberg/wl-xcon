@@ -785,6 +785,25 @@ _SWITCH_SAID = {"on": "on", "frozen": "frozen", "full": "the full task"}
 _BOX = (_link.SetParameter, _link.HandBack, _link.SetRange, _link.SetForm, _link.SetColor,
         _link.ApplyMany, _link.Withdraw)
 
+def _ahead(drained: list) -> tuple[list, list]:
+    """**A boundary's drain, its withdrawals first** (`Session.run`; the console interface rework's
+    whole-build review, C1): `(early, rest)`, each in arrival order -- `early` every `Withdraw`, read
+    before the boundary applies what waits, so a press made from the frame that showed a change
+    waiting reaches it in time; `rest` every other command, and a `Withdraw` naming a command id an
+    earlier command of this same drain carries, which waits for that act to be read. Decides
+    nothing else; between trials."""
+    early, rest, seen = [], [], set()
+    for command in drained:
+        if isinstance(command, _link.Withdraw) and command.cid not in seen:
+            early.append(command)
+            continue
+        rest.append(command)
+        cid = getattr(command, "cid", None)
+        if cid is not None:
+            seen.add(cid)
+    return early, rest
+
+
 #: **How many acts' command ids a run keeps once they apply** (`Session._in_force_cids`), so a
 #: withdrawal arriving after its act applied is answered "already in force from trial N": the most
 #: recent, the oldest let go first. A withdrawal is pressed in the seconds before a trial starts, and
@@ -1498,6 +1517,11 @@ class Session:
     #: the index of its first trial, as `_applied`'s, the newest `IN_FORCE_KEPT`. Empty as each run
     #: starts.
     _in_force_cids: dict[str, int] = field(init=False, default_factory=dict, repr=False)
+    #: **The command ids of the acts a withdrawal took back** (`withdrawals`; `_withdrawn`; the
+    #: console interface rework's whole-build review, I1), oldest first, the newest
+    #: `link.REFUSAL_HISTORY` -- the depth a refusal of a withdrawal is kept to, so the page reads
+    #: either answer as long. Empty as each run starts.
+    _withdrawn_cids: list[str] = field(init=False, default_factory=list, repr=False)
     #: Each revert offered and not yet applied, by its act, to the change id it goes back to (its
     #: rows' `moment`; 0 for the run's start). Cleared with `_acts`.
     _act_moments: dict[int, int] = field(init=False, default_factory=dict, repr=False)
@@ -4050,6 +4074,14 @@ class Session:
                 and self._played.full is not None)
 
     @property
+    def withdrawals(self) -> tuple:
+        """**The acts of the run in progress a withdrawal took back, by command id** (`link.Telemetry
+        .withdrawals`; the console interface rework's whole-build review, I1), oldest first, the
+        newest `link.REFUSAL_HISTORY`: the rig's word that each was withdrawn, which the page waits
+        for before it says so. Empty between runs. Read between trials."""
+        return tuple(self._withdrawn_cids)
+
+    @property
     def groups(self) -> tuple:
         """**The task's groups, for a console** (`task.Group`; `link.GroupRow`; telemetry schema
         23; the console interface rework's Task 7): each as `(name, settings, sentence, section)`
@@ -5544,7 +5576,8 @@ class Session:
         refusal for each change, in the order sent, each naming the apply's command id and a value
         its value: the change at `culprit` with `why`, its own reason, the others "refused with" it;
         with no culprit, each with `why`, the reason the whole is refused. A reward size's refusal
-        goes into the session record too (`_ceiling_refused`). Never raises."""
+        goes into the session record too (`_ceiling_refused`), whatever its place in the act. Never
+        raises."""
         held = self._answering
         cid = None if held is None else held[0]
         count = len(changes)
@@ -5562,8 +5595,10 @@ class Session:
                      else None)
             self._answering = (cid, _link.cut(value, _link.TEXT_LIMIT)
                                if isinstance(value, str) else value)
-            if place == culprit and name in self.spec.bounds.ceilings:
-                # As asked, as `_command`'s setting path, `_range` and `_form` write it.
+            if name in self.spec.bounds.ceilings:
+                # As asked, as `_command`'s setting path, `_range` and `_form` write it -- the
+                # culprit or not (the whole-build review's M2: one refused behind another change
+                # is an attempt on a dose too).
                 asked = (change.value if isinstance(change, _link.SetParameter) else
                          dict(change.numbers) if isinstance(change, (_link.SetRange, _link.SetForm))
                          else None)
@@ -5674,6 +5709,9 @@ class Session:
         at = self.wall_now()
         playing = self._playing()
         trial_number = self._levels.trials + 1
+        if cid not in self._withdrawn_cids:
+            self._withdrawn_cids.append(cid)
+            del self._withdrawn_cids[:-_link.REFUSAL_HISTORY]
         for offer in taken:
             if isinstance(offer, Pending):
                 name, kind, sent_by = offer.name, offer.kind, offer.by
@@ -7540,7 +7578,7 @@ class Session:
         self._ranges = {}
         # No person's draw (the console settings build), and no change in force (schema 23).
         self._forms, self._form_ids = {}, {}
-        self._applied, self._in_force_cids = {}, {}
+        self._applied, self._in_force_cids, self._withdrawn_cids = {}, {}, []
         # No trial's draws kept for a repeat, and every prepared list at its first place (engine
         # build C3).
         self._kept = {}
@@ -7761,24 +7799,38 @@ class Session:
                            f"{scheduler.block.name} → {to}: {scheduler.because(reason)}")
 
             while True:
+                # **What arrived during the trial, drained once, its withdrawals read first**
+                # (the console interface rework's whole-build review, C1): a change staged at the
+                # last boundary was on that boundary's frame, waiting, with its *withdraw*, and the
+                # press made from it is in this drain. Read after `_apply_staged()`, as every other
+                # command is, it would always find the change already in force. So each `Withdraw`
+                # goes to `_command` ahead of the apply -- but one that names an act sent earlier in
+                # this same drain, which is not staged until that act is read, waits for it in
+                # arrival order (`_ahead`).
+                drained = self.link.drain()
+                early, rest = _ahead(drained)
+                for command in early:
+                    self._command(command, index)
                 self._apply_staged(index)
                 # **A change to the task's pool, seen as it applies** (`_repooled`; the pop-out
                 # search build's Task 5): the bars start afresh and the prompt standing is
                 # answered, before this boundary's frame.
                 self._repooled()
                 # Between trials the frame's mark check runs once here, before the
-                # drain, so a mark's stamp is written ahead of a note that arrived
-                # with it (P4d-2b spec §5.1).
+                # drain's other commands, so a mark's stamp is written ahead of a note
+                # that arrived with it (P4d-2b spec §5.1).
                 self._check_marks(index)
-                # Drain *after* `_apply_staged()`, not before: staging and applying
-                # in the same pass would collapse S9a §8's one-boundary visibility
-                # window to nothing. A change drained here is staged but not yet
-                # applied -- `_apply_staged()` above already ran this pass, so it
-                # will not land until the *next* one -- and `publish()` below reports
-                # it queued. Reorder this and `Telemetry.staged` reads empty forever:
-                # nothing else populates it, so the only sign of a queued change
-                # before it silently lands would be gone.
-                for command in self.link.drain():
+                # Every other command is handed on *after* `_apply_staged()`, not before:
+                # staging and applying in the same pass would collapse S9a §8's
+                # one-boundary visibility window to nothing. A change read here is staged
+                # but not yet applied -- `_apply_staged()` above already ran this pass, so
+                # it will not land until the *next* one -- and `publish()` below reports it
+                # queued. Reorder this and `Telemetry.staged` reads empty forever: nothing
+                # else populates it, so the only sign of a queued change before it silently
+                # lands would be gone. A withdrawal takes nothing in force back, so reading
+                # it first narrows nothing. One drain a pass, as before: what arrives after
+                # it is the next boundary's.
+                for command in rest:
                     self._command(command, index)
                 # Publish *before* the stop check: a console watching a session that
                 # stops learns that it stopped and why, rather than seeing the stream

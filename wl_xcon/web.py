@@ -1976,27 +1976,43 @@ def _unit_of(row) -> str:
 #: A number as the rig writes one in a sentence (`f"{value:g}"`), not inside a name or a longer
 #: number, and the word ` fraction` after it where the sentence gives its unit (`_in_percent`).
 _SAID_NUMBER = re.compile(r"(?<![\w.])(-?\d+(?:\.\d+)?(?:e[-+]?\d+)?)(?!\w|\.\d)( fraction\b)?")
+#: What ties a number to a setting in the rig's sentence, read just before it (`_in_percent`): the
+#: setting's quoted name, `'move_up_bar' at ` or `'move_up_bar' `, as `Session.set` and the checks
+#: write a value ("'move_up_bar' at 1.2 is refused").
+_NAMED_BEFORE = re.compile(r"'([^']+)'(?: at| is| of| =)? $")
+#: And what ties one to the setting the sentence is about: "its 1", "its lowest, 0.2, ", and the
+#: standard limit's "a fraction is at most 1" (`task.FRACTION_TOP`).
+_ITS_BEFORE = re.compile(r"(?:\bits(?: \w+,)? |\ba fraction is at most )$")
 
 
-def _in_percent(row, said: str, *values: object) -> str:
+def _percents(frame) -> frozenset:
+    """The settings a frame shows as percents (`ParamRow.percent`), by name: a sentence's number
+    given as one of theirs is converted in any box (`_in_percent`)."""
+    return frozenset(row.name for row in frame.params if row.percent) if frame else frozenset()
+
+
+def _in_percent(row, said: str, peers: frozenset = frozenset()) -> str:
     """**The rig's sentence about a percent setting, in percent** (the console interface design's
-    call: "the rig's sentences are converted on the page"): each number in it that is the
-    setting's own -- its value, its lowest or highest, or one of `values` (the value a refusal
-    refused) -- or that the sentence gives in its unit (`1.2 fraction`), as `_hundred` shows it
-    with `%`, its ` fraction` dropped: "'move_up_bar' at 120% is above its 100%". A sentence of any
-    other setting is as the rig wrote it. Plain words in, plain words out, escaped where used."""
-    if not row.percent:
+    call: "the rig's sentences are converted on the page"), each number **where the sentence ties
+    it to a percent setting** (the whole-build review, I7): after a percent setting's quoted name
+    -- the row's own, or a peer's among `peers` (`_percents`), "'move_up_bar' at 0.8" -- and, in a
+    sentence about the row's own percent setting, after "its" or "a fraction is at most", or given
+    in its unit ("1.2 fraction", its ` fraction` dropped), as `_hundred` shows it with `%`:
+    "'move_up_bar' at 120% is above its 100%". Any other number stands as written -- "block 1",
+    "the last 1 answers" -- whatever the setting's limits or value. A sentence naming no percent
+    setting is as the rig wrote it. Plain words in, plain words out, escaped where used."""
+    named = set(peers) | ({row.name} if row.percent else set())
+    if not named:
         return said
-    own = set()
-    for value in (row.value, row.low, row.high, *values):
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
-            own.add(float(value))
 
     def shown(found: re.Match) -> str:
-        number = float(found.group(1))
-        if found.group(2) is None and number not in own:
+        before = said[:found.start()]
+        quoted = _NAMED_BEFORE.search(before)
+        tied = (quoted is not None and quoted.group(1) in named) or (row.percent and (
+            found.group(2) is not None or _ITS_BEFORE.search(before) is not None))
+        if not tied:
             return found.group(0)
-        return f"{_hundred(number):g}%"
+        return f"{_hundred(float(found.group(1))):g}%"
 
     return _SAID_NUMBER.sub(shown, said)
 
@@ -2648,7 +2664,7 @@ def _limits(row) -> str:
     return said
 
 
-def _status(row, change, refusal) -> tuple[str, str]:
+def _status(row, change, refusal, peers: frozenset = frozenset()) -> tuple[str, str]:
     """**A box's one status line** (the console interface design's goal 4) as the rig's frame
     says it, and the state it marks the box with: a change waiting for the next trial and who
     sent it (`staged`); else the last refusal of it, the value refused and its gist (`refused`);
@@ -2657,10 +2673,10 @@ def _status(row, change, refusal) -> tuple[str, str]:
     short (`_limits`) -- a color's that its swatches are approximate. The page's own states (*not
     sent*, *sending…*, *cannot send*) are its script's (the plan's Task 6)."""
     if change is not None:
-        return "staged", f"waiting for the next trial · {_who(change.by)}"
+        return "staged", f"{WAITING} · {_who(change.by)}"
     if refusal is not None:
         value = "" if refusal.value is None else f" {_e(_refused_value(row, refusal.value))}"
-        return "refused", f"refused{value} · {_e(_gist(_in_percent(row, refusal.why, refusal.value)))}"
+        return "refused", f"refused{value} · {_e(_gist(_in_percent(row, refusal.why, peers)))}"
     if row.applied is not None:
         if row.warned:
             return "warned", f"in force, with a warning · from trial {_e(row.applied.trial)}"
@@ -2710,6 +2726,38 @@ def _withdraw(change, together: tuple, view: View) -> str:
             f'data-withdraw="{_e(change.cid)}" tabindex="0"{_gate(view)}>{_e(said)}</button></span>')
 
 
+#: **A waiting change's status line, short, and its whole** (the console interface rework's
+#: whole-build review, I4): beside *withdraw* a box of 190 px has about 100 px for its line, so it
+#: says "waiting · who" and its title the whole, "waiting for the next trial · who".
+WAITING, WAITING_WHOLE = "waiting", "waiting for the next trial"
+
+
+def _awaited(value: str, change, row, lead: str | None = None) -> str:
+    """**A head's value in force and what waits for the next trial after an arrow** (`_box`,
+    `_group_box`): a number's unit said once, after what waits -- "0.30 → 0.50 s", "4 → 12 objects"
+    -- so the arrow and the new value fit a narrow box (the whole-build review, I4); any other value
+    -- a draw, a person's hold, words, a pool's pairs -- as it is, then the arrow. `value` alone where
+    nothing waits."""
+    if change is None:
+        return value
+    becomes = f'→ {"" if lead is None else _e(lead) + " "}{_becomes(change, row)}'
+    unit = _e(_unit_of(row))
+    tail = f' <span class="unit">{unit}</span></span>'
+    if lead is None and value.startswith('<span class="pv">') and value.endswith(tail):
+        return (f'{value[:-len(tail)]}</span> <span class="to">{becomes}</span>'
+                f' <span class="unit">{unit}</span>')
+    return f'{value} <span class="to">{becomes}</span>'
+
+
+def _whole_say(state: str, said: str) -> str:
+    """A status line's whole, for its `title`: a waiting one's "waiting for the next trial · who"
+    (`WAITING_WHOLE`), any other as it is. Plain text."""
+    plain = _plain(said)
+    if state == "staged" and plain.startswith(WAITING + " · "):
+        return WAITING_WHOLE + plain[len(WAITING):]
+    return plain
+
+
 def _box(row, frame, view: View, value: str, editor: str, change, refusal,
          together: tuple = ()) -> str:
     """**One setting's box** (the console interface design's goal 1; the PI, 2026-11-19, "Small
@@ -2751,11 +2799,9 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
     lead = None if change is None else _STAGED_KINDS.get(change.kind)
     if change is not None and change.kind == "form" and row.switch == "scaled":
         lead = "scaled"
-    waits = ("" if change is None else
-             f' <span class="to">→ {"" if lead is None else _e(lead) + " "}'
-             f"{_becomes(change, row)}</span>")
-    now = f"{value}{waits}"
-    state, said = _status(row, change, refusal)
+    now = _awaited(value, change, row, lead)
+    peers = _percents(frame)
+    state, said = _status(row, change, refusal, peers)
     mark = (
         ""
         if change is None
@@ -2772,11 +2818,11 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
         # console settings design's §5).
         more.append(f'<span class="src gives">gives {_e(row.gives)}</span>')
     more.append(mark)
-    more.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned))}</span>'
+    more.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned, peers))}</span>'
                 for warned in row.warned)
     if refusal is not None:
         more.append(f'<span class="rfs">last refused: '
-                    f'{_e(_in_percent(row, refusal.why, refusal.value))}</span>')
+                    f'{_e(_in_percent(row, refusal.why, peers))}</span>')
     if row.switch == "drawn":
         more.append(_profile(row))
     if isinstance(row.color, dict) and row.color.get("sets"):
@@ -2800,15 +2846,16 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
         marks.append(" data-echo")
     rest = ""
     if state == "refused":
-        rest_state, rest_said = _status(row, change, None)
+        rest_state, rest_said = _status(row, change, None, peers)
         rest = f' data-rest="{_e(_plain(rest_said))}" data-rest-state="{rest_state}"'
     return (
         f'<div class="{classes}" data-card="{name}"{"".join(marks)}>'
         f'<div class="head">{names}{flag}<span class="now" title="{_e(_plain(now))}">{now}</span>'
         f"</div>"
         f'<div class="editor">{editor}</div>'
-        f'<div class="status"><span class="say" title="{_e(_plain(said))}"{rest}>{said}</span>'
-        f'<span class="acts">{_withdraw(None if row.bounded else change, together, view)}'
+        f'<div class="status"><span class="say" title="{_e(_whole_say(state, said))}"{rest}>'
+        f'{said}</span><span class="acts">'
+        f'{_withdraw(None if row.bounded else change, together, view)}'
         f'<button type="button" class="btn small" data-discard="{name}" tabindex="0"{off}>'
         f'Discard</button><button type="button" class="btn small primary" '
         f'data-apply="{name}" tabindex="0"{off}>Apply</button></span></div>'
@@ -2895,6 +2942,11 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     declined = "".join(f'<span class="wdr" data-cid="{_e(refusal.cid)}">{_e(_gist(refusal.why))}'
                        f"</span>" for refusal in frame.refusals
                        if refusal.name == "withdraw" and refusal.cid)
+    # **And a withdrawal the rig did** (`Telemetry.withdrawals`; the whole-build review's I1): the
+    # act's id, the rig's word that it was taken back, which alone lets the script say "withdrawn"
+    # -- a change waiting no more may have applied.
+    declined += "".join(f'<span class="wdn" data-cid="{_e(cid)}"></span>'
+                        for cid in frame.withdrawals)
     run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
     return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run,
                       _new_colors(colored, view))
@@ -3024,15 +3076,14 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
     Apply"); `_params` leaves any a frame names out."""
     title, off = _e(group.name), _gate(view)
     by_name = {row.name: row for row in rows}
+    peers = _percents(frame)
     codes = ", ".join(row.name for row in rows)
     names = (f'<span class="names"><span class="lbl" title="{title}">{title}</span>'
              f'<span class="code" title="{_e(codes)}">{_e(codes)}</span></span>')
     entries = {row.name: _entry(row, view, unit=not group.sentence) for row in rows}
     shown = []
     for row in rows:
-        change = staged.get(row.name)
-        waits = "" if change is None else f' <span class="to">→ {_becomes(change, row)}</span>'
-        shown.append(f"{entries[row.name][0]}{waits}")
+        shown.append(_awaited(entries[row.name][0], staged.get(row.name), row))
     now = " · ".join(shown)
     if group.sentence:
         pieces = []
@@ -3057,12 +3108,12 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
 
     def line(refused) -> tuple[str, str]:
         if change is not None:
-            return "staged", f"waiting for the next trial · {_who(change.by)}"
+            return "staged", f"{WAITING} · {_who(change.by)}"
         if refused is not None:
             row = by_name[refused.name]
             value = ("" if refused.value is None
                      else f" {_e(_refused_value(row, refused.value))}")
-            gist = _gist(_in_percent(row, refused.why, refused.value))
+            gist = _gist(_in_percent(row, refused.why, peers))
             return "refused", f"refused {_e(row.label or row.name)}{value} · {_e(gist)}"
         if last is not None:
             if last.warned:
@@ -3084,11 +3135,11 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
         if waiting is not None:
             bits.append(f'<span class="stg">staged → {_becomes(waiting, row)} by '
                         f"{_who(waiting.by)}</span>")
-        bits.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned))}</span>'
+        bits.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned, peers))}</span>'
                     for warned in row.warned)
         if refusal is not None and refusal.name == row.name:
             bits.append(f'<span class="rfs">last refused: '
-                        f'{_e(_in_percent(row, refusal.why, refusal.value))}</span>')
+                        f'{_e(_in_percent(row, refusal.why, peers))}</span>')
         more.append(f'<div class="gmore" data-member="{_e(row.name)}">{"".join(bits)}</div>')
     marks = []
     if change is not None and change.cid:
@@ -3114,8 +3165,8 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
         f'<div class="{classes}" data-card="{title}"{"".join(marks)}>'
         f'<div class="head">{names}<span class="now" title="{_e(_plain(now))}">{now}</span></div>'
         f'<div class="editor">{editor}</div>'
-        f'<div class="status"><span class="say" title="{_e(_plain(said))}"{rest}>{said}</span>'
-        f'<span class="acts">{_withdraw(change, together, view)}'
+        f'<div class="status"><span class="say" title="{_e(_whole_say(state, said))}"{rest}>'
+        f'{said}</span><span class="acts">{_withdraw(change, together, view)}'
         f'<button type="button" class="btn small" data-discard="{title}" tabindex="0"{off}>'
         f'Discard</button><button type="button" class="btn small primary" '
         f'data-apply="{title}" tabindex="0"{off}>Apply</button></span></div>'
@@ -3962,6 +4013,13 @@ body.session-shut .session { display: none !important; }
 .box > .head > .now { grid-column: 3; text-align: right; }
 .box[data-echo]:not(.draft):not(.staged):not(.sending) > .head > .now { display: none; }
 .box[data-echo]:not(.draft):not(.staged):not(.sending) > .head { grid-template-columns: minmax(0, 1fr) auto 0; }
+/* A waiting box's head gives what waits the room it needs (the whole-build review's I4): the code
+   name under a plain name goes (it is in the title and in *more*), a code name alone gives way to
+   "0.30 → 0.50 s", cut first; the head keeps its rows, so the box keeps its height. */
+.box.staged > .head { grid-template-columns: minmax(2.5em, 1fr) auto max-content; }
+.box.staged > .head .lbl ~ .code { display: none; }
+/* Who sent it, by name on the line: "(box, unverified)" and "(wl.works)" ride in its title. */
+.box.staged > .status .say .nm { display: none; }
 .box > .more:not([open]) { margin-top: -2px; }
 .box .code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .box .code.only { font-size: 12.5px; color: var(--ink); font-weight: 500; }
@@ -4718,9 +4776,6 @@ _SCRIPT = """
     return CARDS.map(function (root) { return root + " " + selector; }).join(", ");
   }
   var pressedAt = null;
-  // The root a pointer went down in (`#params`, `#training-params` or `#moments`): only its
-  // frames wait for the press to end.
-  var pressedIn = null;
   var PRESS_MS = 10000;
   // **A frame held while a pointer is down in its root** (fix round 2 of the C3 plan's Task 18: a
   // frame landing between the mouse going down and up replaced the button under it, in WebKit
@@ -4771,7 +4826,22 @@ _SCRIPT = """
   var ALONE = "sent alone · cannot be withdrawn";
   var TOGETHER = "refused · with the changes applied together";
   var WITHDRAWN = "withdrawn · it never applied";
+  // Short beside *withdraw*, its whole in the line's title (the whole-build review's I4; `web
+  // .WAITING`): `WHOLE_OF` gives a line's title where it is not the line itself.
+  var WAITING_YOU = "waiting · you";
+  var WHOLE_OF = {};
+  WHOLE_OF[WAITING_YOU] = "waiting for the next trial · you";
   var WHOLE = "whole numbers only";
+  var WITHDRAWING = "withdrawing…";
+  var NO_WORD = "not confirmed by the rig · check the value in force";
+  // **How many frames an act answered *sent* waits for the rig's word** (the whole-build review's
+  // I2) -- housekeeping, not a measurement: the rig answers a command on the first frame after the
+  // drain that reads it, the frame this page's answer races or the next, and a refusal or a
+  // withdrawal stays on every frame after; a third frame without it is a word lost (a frame
+  // missed while the change came and went, a refusal no box is named for). Counted by frames, so
+  // a paused rig's, which come every housekeeping pass, count alike. `framesSeen` counts them.
+  var ANSWER_FRAMES = 3;
+  var framesSeen = 0;
   // A color card's set a person chose to see the hues of (the design's §6), by setting, kept
   // across the frames that replace the cards until a hue of it is picked.
   var colorSets = {};
@@ -5256,6 +5326,7 @@ _SCRIPT = """
       if (named[change.name]) { wrong("a value over " + change.name + "'s draw and its range go one at a time"); }
       named[change.name] = true;
     });
+    if (changes.length && fractions[name]) { wrong(WHOLE); }
     if (!changes.length && !error) { return null; }
     return { changes: changes, error: error };
   }
@@ -5287,10 +5358,18 @@ _SCRIPT = """
   // whole, as applied together; *not sent* for a draft, saying a reward size is sent alone and
   // never withdrawn, and who changed the box under it (the plan's Review Focus 4); *waiting for
   // the next trial · you* for a change this page sent. `null`: the rig's own line.
+  function withdrawalOf(name) {
+    return Object.keys(withdrawing).some(function (cid) {
+      return withdrawing[cid].names.indexOf(name) !== -1;
+    });
+  }
   function lineOf(box, draft) {
     var name = nameOf(box);
     var sent = out[name];
     if (sent && sent.phase === "sending") { return SENDING; }
+    // A withdrawal out is said until the rig answers it, whatever the frames meanwhile show: a
+    // change waiting no more may have applied (the whole-build review's I1).
+    if (withdrawalOf(name)) { return WITHDRAWING; }
     if (draft && draft.error) { return CANNOT + draft.error; }
     var note = notes[name];
     if (note && note.news === newsOf(box) && same(note.state, stateOf(box))) { return note.said; }
@@ -5314,9 +5393,7 @@ _SCRIPT = """
       }
       return said;
     }
-    if (box.classList.contains("staged") && waiting && mine[waiting]) {
-      return "waiting for the next trial · you";
-    }
+    if (box.classList.contains("staged") && waiting && mine[waiting]) { return WAITING_YOU; }
     return null;
   }
   // **A box brought up to date with the page's own state**: its draft judged, its marks
@@ -5360,13 +5437,13 @@ _SCRIPT = """
     if (said === TOGETHER) { box.classList.add("refused"); }
     if (said !== null && say) {
       say.textContent = said;
-      say.title = said;
+      say.title = WHOLE_OF[said] || said;
     }
     box.classList.toggle("draft", Boolean(draft) && !sending);
     box.classList.toggle("sending", sending);
     box.classList.toggle("cannot", Boolean(draft && draft.error) && !sending);
     hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
-    hold(box.querySelector("[data-discard]"), !draft || sending);
+    hold(box.querySelector("[data-discard]"), sending ? !out[name].answered : !draft);
     mirrorOne(name);
   }
   // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
@@ -5615,12 +5692,16 @@ _SCRIPT = """
   // the last refusals, so not every box of a large act may carry its own); one a box's waiting
   // change carries is waiting; one waiting no more, or answered *sent* with the boxes now holding
   // what it sent, has applied or been replaced. A withdrawal the rig refused (`.wdr`, by the act's
-  // id) is said on its boxes; one answered *sent* whose act waits no more has taken it back, and
-  // its boxes go back to the value in force.
+  // id) is said on its boxes; one the rig says it did (`.wdn`, `Telemetry.withdrawals`) has taken
+  // the act back, and its boxes go back to the value in force -- never one only waiting no more,
+  // which a change that applied is too (the whole-build review's I1). **An act or a withdrawal
+  // answered *sent* that `ANSWER_FRAMES` frames pass without the rig's word** says so on its
+  // boxes, and they are let go: a box never stays *sending…* or *withdrawing…* (its I2).
   function judge() {
     var staged = {};
     var refused = {};
     var declined = {};
+    var done = {};
     Array.prototype.forEach.call(boxes(), function (box) {
       var cid = box.getAttribute("data-staged-cid");
       if (cid) { staged[cid] = true; }
@@ -5631,6 +5712,9 @@ _SCRIPT = """
       var cid = row.getAttribute("data-cid");
       declined[cid] = { count: (declined[cid] ? declined[cid].count : 0) + 1, said: row.textContent };
     });
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".wdrs .wdn")), function (row) {
+      done[row.getAttribute("data-cid")] = true;
+    });
     Object.keys(withdrawing).forEach(function (cid) {
       var asked = withdrawing[cid];
       var no = declined[cid];
@@ -5640,19 +5724,29 @@ _SCRIPT = """
           if (box) { noted(box, "not withdrawn · " + no.said); }
         });
         delete withdrawing[cid];
-      } else if (asked.answered && !staged[cid]) {
+      } else if (!done[cid]) {
+        if (asked.answered && framesSeen - asked.at >= ANSWER_FRAMES) {
+          delete withdrawing[cid];
+          asked.names.forEach(function (name) {
+            var sent = out[name];
+            var box = cardOf(name);
+            if (sent && sent.cid === cid) {
+              delete out[name];
+              if (box && same(stateOf(box), sent.state) && served[name]) { putBack(box); }
+            }
+            if (served[name]) {
+              notes[name] = { said: "withdraw " + NO_WORD, news: newsOf(served[name]),
+                              state: stateOf(served[name]) };
+            }
+          });
+        }
+      } else {
         asked.names.forEach(function (name) {
           var sent = out[name];
           var box = cardOf(name);
           if (sent && sent.cid === cid) {
             delete out[name];
-            if (box && same(stateOf(box), sent.state) && served[name]) {
-              var back = served[name].cloneNode(true);
-              box.replaceWith(back);
-              delete kept[name];
-              restoreBox(back);
-              box = back;
-            }
+            if (box && same(stateOf(box), sent.state) && served[name]) { putBack(box); }
           }
           if (served[name]) {
             notes[name] = { said: WITHDRAWN, news: newsOf(served[name]), state: stateOf(served[name]) };
@@ -5678,8 +5772,21 @@ _SCRIPT = """
       } else if (sent.phase === "waiting" ||
                  (sent.answered && served[name] && same(sent.state, stateOf(served[name])))) {
         delete out[name];
+      } else if (sent.answered && framesSeen - sent.at >= ANSWER_FRAMES) {
+        // Neither waiting, refused nor in force as sent: the edit is a draft again, said so.
+        delete out[name];
+        noted(box, NO_WORD);
       }
     });
+  }
+  // A box put back to the frame's, whole.
+  function putBack(box) {
+    var name = nameOf(box);
+    var back = served[name].cloneNode(true);
+    box.replaceWith(back);
+    delete kept[name];
+    restoreBox(back);
+    return back;
   }
   // **Every box made current**: a kept box that is clean again replaced whole by the frame's
   // (no merge logic for the common case: the controls review's §3, rule 4), every box's state
@@ -5803,7 +5910,10 @@ _SCRIPT = """
       answered = true;
       if (answer.status !== "sent") { failed(answer.said); return; }
       names.forEach(function (name) {
-        if (out[name] && out[name].cid === cid) { out[name].answered = true; }
+        if (out[name] && out[name].cid === cid) {
+          out[name].answered = true;
+          out[name].at = framesSeen;
+        }
       });
       judge();
       settle();
@@ -5847,10 +5957,28 @@ _SCRIPT = """
   }
   // **Discard** (and Esc): the box back to what it is headed to -- what this page sent and the rig
   // has not yet applied, else the value in force -- the field it was typed in focused again.
+  // **An act answered *sent* and not yet answered by a frame** is let go by Discard and Esc too (the
+  // whole-build review's I2: a box always has a way back): the box back to the value in force,
+  // saying the rig has not confirmed it -- a frame that then shows it waiting or in force says so.
   function discard(name, field) {
     var box = cardOf(name);
-    if (!box || (out[name] && out[name].phase === "sending")) { return; }
+    var sent = out[name];
+    if (!box || (sent && sent.phase === "sending" && !sent.answered)) { return; }
     var picked = field ? fieldOf(field) : null;
+    if (sent && sent.phase === "sending") {
+      delete out[name];
+      if (served[name]) { box = putBack(box); }
+      delete drafts[name];
+      delete refusedAt[name];
+      noted(box, NO_WORD);
+      applySignIn();
+      if (picked) {
+        var again = box.querySelector(picked);
+        if (again) { again.focus(); }
+      }
+      settle();
+      return;
+    }
     if (out[name]) {
       var sent = out[name].snapshot.cloneNode(true);
       box.querySelector(":scope > .editor").replaceWith(sent.querySelector(":scope > .editor"));
@@ -5888,8 +6016,8 @@ _SCRIPT = """
       return box.getAttribute("data-staged-cid") === cid;
     }).map(nameOf);
     var seen = document.querySelectorAll(inCards('.wdrs .wdr[data-cid="' + CSS.escape(cid) + '"]')).length;
-    withdrawing[cid] = { names: names, answered: false, seen: seen };
-    names.forEach(function (name) { noted(cardOf(name), "withdrawing…"); });
+    withdrawing[cid] = { names: names, answered: false, seen: seen, at: framesSeen };
+    names.forEach(function (name) { noted(cardOf(name), WITHDRAWING); });
     settle();
     var answered = false;
     function failed(said) {
@@ -5904,7 +6032,10 @@ _SCRIPT = """
     post({ kind: "withdraw", cid: cid }, function (answer) {
       answered = true;
       if (answer.status !== "sent") { failed(answer.said); return; }
-      if (withdrawing[cid]) { withdrawing[cid].answered = true; }
+      if (withdrawing[cid]) {
+        withdrawing[cid].answered = true;
+        withdrawing[cid].at = framesSeen;
+      }
       judge();
       settle();
     }, function () { if (!answered) { failed(el("sent").textContent); } });
@@ -6107,10 +6238,14 @@ _SCRIPT = """
       if (e.target.closest("summary")) { return; }
       var button = e.target.closest("button");
       var twin = button && copy.contains(button) ? twinOf(copy, button) : null;
-      if (twin) {
-        twin.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey,
-                                                     detail: e.detail }));
-      }
+      // Only a button's press is passed here, the copy brought up after it. A click on anything
+      // else -- a tick above all, which the browser toggles before this runs and before its
+      // `input` -- is left to the `input` and `change` handlers below: mirrored now, the copy's
+      // tick was set back to its box's old state before its `input` passed it on (the
+      // whole-build review's I3).
+      if (!twin) { return; }
+      twin.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey,
+                                                   detail: e.detail }));
       mirrorOne(copy.getAttribute("data-pin"), true);
       mirrorPins();
     }, true);
@@ -6681,7 +6816,15 @@ _SCRIPT = """
   }
   function onFrame(event) {
     var payload = JSON.parse(event.data);
+    framesSeen += 1;
     Object.keys(payload.frags).forEach(function (id) { swap(id, payload.frags[id]); });
+    // A frame whose boxes are as the last drew them sends none (`wlx serve` sends what changed), and
+    // is still one of the frames an act waits on for the rig's word (`ANSWER_FRAMES`).
+    if (!("params" in payload.frags) && !("training-params" in payload.frags) && !pressing() &&
+        (Object.keys(out).length || Object.keys(withdrawing).length)) {
+      judge();
+      settle();
+    }
     live = payload.live;
     baseline = payload.age === null ? null : performance.now() - payload.age * 1000;
     lost = false;
@@ -6777,10 +6920,17 @@ _SCRIPT = """
       }
       else if (answer.reason === "signed_out" || answer.reason === "other_rig" ||
                answer.reason === "not_accepted" || answer.reason === "no_token") { forget(); }
-      if (then) { then(answer); }
-    }).catch(function () {
+      return answer;
+    }, function () {
       tell(command.kind === "reward" ? REWARD_LOST : "not delivered: this page could not reach wlx serve", "crit");
-    }).then(done);
+      return null;
+    }).then(function (answer) {
+      // The answer's handler outside the catch (the whole-build review's M4): a fault in it is the
+      // page's, thrown to the console, never said as a command not delivered. `done` runs either way.
+      try {
+        if (answer && then) { then(answer); }
+      } finally { done(); }
+    }, function (fault) { done(); throw fault; });
   }
   function decimals(step) { return (String(step).split(".")[1] || "").length; }
   function stepInput(input, dir) {
@@ -7307,25 +7457,51 @@ _SCRIPT = """
   // setting's field takes no decimal point or comma (the console interface design's goal 6).
   // `field` is the box's own field the keys act on; `typed`, the one typed in -- the same, or its
   // pinned copy's (`pinKeys`), which keeps the focus.
+  // **A refused point's fraction** (the whole-build review's I5), by setting: after a `.` or `,`
+  // refused in a whole field, each digit after it is refused too -- "12.5" stays "12", never
+  // "125" -- and the box's draft cannot be sent while it stands (`draftOf`), saying *whole numbers
+  // only*. Any other key in the field, or the field left, ends it.
+  var fractions = {};
   function fieldKeys(e, field, typed) {
     var box = field.closest(".box");
     var name = nameOf(box);
+    var plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    if (fractions[name]) {
+      if (plain && e.key.length === 1 && e.key >= "0" && e.key <= "9") {
+        e.preventDefault();
+        noted(box, WHOLE);
+        refresh(box);
+        return;
+      }
+      if (e.key !== "Enter" && e.key !== "Shift" && e.key !== "." && e.key !== ",") {
+        delete fractions[name];
+        refresh(box);
+      }
+    }
     if (e.key === "Enter") { e.preventDefault(); applyBox(name); }
     else if (e.key === "Escape") {
       e.preventDefault();
-      if (drafts[name]) { discard(name, typed === field ? field : null); } else { typed.blur(); }
+      var waited = out[name] && out[name].phase === "sending" && out[name].answered;
+      if (drafts[name] || waited) { discard(name, typed === field ? field : null); } else { typed.blur(); }
     }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
       e.preventDefault();
       stepInput(field, (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
     }
-    else if (field.hasAttribute("data-whole") && (e.key === "." || e.key === ",") &&
-             !e.metaKey && !e.ctrlKey) {
+    else if (field.hasAttribute("data-whole") && (e.key === "." || e.key === ",") && plain) {
       e.preventDefault();
+      fractions[name] = true;
       noted(box, WHOLE);
       refresh(box);
     }
   }
+  document.addEventListener("focusout", function (e) {
+    var box = e.target && e.target.closest ? e.target.closest(".box") : null;
+    if (box && fractions[nameOf(box)]) {
+      delete fractions[nameOf(box)];
+      refresh(box);
+    }
+  });
   document.addEventListener("keydown", function (e) {
     var field = e.target;
     if (!field || !field.matches || !field.matches(inCards(".box input")) || field.closest("[data-newc]")) {

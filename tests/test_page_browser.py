@@ -4052,7 +4052,7 @@ def test_a_draft_equal_to_the_value_in_force_is_no_draft(rig):
 
 def test_the_box_walks_through_its_states(rig):
     """The design's goal 4, every outcome in one reserved line: *not sent* → *sending…* →
-    *waiting for the next trial · you* (the rig's staged row naming the page's command id, the head
+    *waiting · you* (the rig's staged row naming the page's command id, the head
     saying what waits, *withdraw* offered) → *in force from trial N*; then *refused <value> ·
     <reason>*, the draft kept for correction with Apply live; and *in force, with a warning*."""
     from wl_xcon.actor import Box
@@ -4069,8 +4069,8 @@ def test_the_box_walks_through_its_states(rig):
     assert _say(page, "fix_hold") == "sending…"
     cid = rig.dispatch.seen[-1].cid
     _offer(rig, 41, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=cid),))
-    _says(rig, page, "fix_hold", "waiting for the next trial · you")
-    assert _head(page, "fix_hold") == "0.30 s → 0.50"
+    _says(rig, page, "fix_hold", "waiting · you")
+    assert _head(page, "fix_hold") == "0.30 → 0.50 s"
     assert page.is_visible(f'{_b("fix_hold")} [data-withdraw="{cid}"]')
     assert "staged" in _classes(page, "fix_hold") and "draft" not in _classes(page, "fix_hold")
     _offer(rig, 42, params=_task6_rows(0.5, fix_hold={"applied": Applied(42, str(jake))}))
@@ -4127,7 +4127,7 @@ def test_a_later_accepted_change_clears_the_refusal(rig):
     cid = rig.dispatch.seen[-1].cid
     _offer(rig, 42, params=_task6_rows(), refusals=refused,
            staged=(Staged("fix_hold", 0.3, 0.4, jake, False, cid=cid),))
-    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    _says(rig, page, "fix_hold", "waiting · you")
     _offer(rig, 43, params=_task6_rows(0.4, fix_hold={"applied": Applied(43, str(jake))}),
            refusals=refused)
 
@@ -4162,8 +4162,8 @@ def test_apply_all_sends_one_command_and_both_take_effect_on_one_trial(rig):
     _offer(rig, 41, params=_task6_rows(), staged=(
         Staged("fix_hold", 0.3, 0.5, jake, False, cid=sent.cid),
         Staged("response_deadline", 0.6, 0.8, jake, False, cid=sent.cid)))
-    _says(rig, page, "response_deadline", "waiting for the next trial · you")
-    assert _say(page, "fix_hold") == "waiting for the next trial · you"
+    _says(rig, page, "response_deadline", "waiting · you")
+    assert _say(page, "fix_hold") == "waiting · you"
     applied = Applied(41, str(jake))
     _offer(rig, 42, params=_task6_rows(0.5, 0.8, fix_hold={"applied": applied},
                                        response_deadline={"applied": applied}))
@@ -4199,7 +4199,7 @@ def test_a_reward_box_is_left_out_of_apply_all_and_says_so(rig):
     assert (type(alone), alone.name, alone.value) == (SetParameter, "reward_correct", 0.2)
     _offer(rig, 41, params=_task6_rows(), staged=(
         Staged("reward_correct", 0.15, 0.2, Box("Jake Westerberg"), True, cid=alone.cid),))
-    _says(rig, page, "reward_correct", "waiting for the next trial · you")
+    _says(rig, page, "reward_correct", "waiting · you")
     assert page.locator(f'{_b("reward_correct")} [data-withdraw]').count() == 0
 
 
@@ -4223,7 +4223,7 @@ def test_withdraw_on_one_box_says_it_takes_back_the_whole_act(rig):
               Staged("response_deadline", 0.6, 0.8, jake, False, cid=cid),
               Staged("set_size", 4, 6, jake, False, cid=cid))
     _offer(rig, 41, params=_task6_rows(), staged=staged)
-    _says(rig, page, "set_size", "waiting for the next trial · you")
+    _says(rig, page, "set_size", "waiting · you")
 
     for name in ("fix_hold", "response_deadline", "set_size"):
         button = f'{_b(name)} [data-withdraw="{cid}"]'
@@ -4233,7 +4233,7 @@ def test_withdraw_on_one_box_says_it_takes_back_the_whole_act(rig):
     page.click(f'{_b("set_size")} [data-withdraw="{cid}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert _say(page, "fix_hold") == "withdrawing…"
-    _offer(rig, 42, params=_task6_rows())
+    _offer(rig, 42, params=_task6_rows(), withdrawals=(cid,))
     for name, value in (("fix_hold", "0.30"), ("response_deadline", "0.60"), ("set_size", "4")):
         _says(rig, page, name, "withdrawn · it never applied")
         assert page.input_value(f'{_b(name)} input[data-param="{name}"]') == value, name
@@ -4247,7 +4247,7 @@ def test_withdraw_on_one_box_says_it_takes_back_the_whole_act(rig):
     rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
     late = rig.dispatch.seen[-1].cid
     _offer(rig, 43, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=late),))
-    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    _says(rig, page, "fix_hold", "waiting · you")
     assert page.text_content(f'{_b("fix_hold")} [data-withdraw]') == "withdraw"
     page.click(f'{_b("fix_hold")} [data-withdraw="{late}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 4)
@@ -4277,19 +4277,145 @@ def test_a_withdrawal_answered_after_the_next_frame_still_puts_the_box_back(rig)
     cid = rig.dispatch.seen[-1].cid
     _offer(rig, 41, params=_task6_rows(),
            staged=(Staged("fix_hold", 0.3, 0.5, Box("Jake Westerberg"), False, cid=cid),))
-    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    _says(rig, page, "fix_hold", "waiting · you")
     page.evaluate("document.activeElement.blur()")
 
     rig.dispatch.delay = 1.0
     page.click(f'{_b("fix_hold")} [data-withdraw="{cid}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
-    _offer(rig, 42, params=_task6_rows())
+    _offer(rig, 42, params=_task6_rows(), withdrawals=(cid,))
     _arrived(page, 42)
     assert _say(page, "fix_hold") != "not sent" and _bar(page) is None
 
     _says(rig, page, "fix_hold", "withdrawn · it never applied")
     assert page.input_value(field) == "0.30" and _bar(page) is None
     assert [type(seen) for seen in rig.dispatch.seen][-1] is Withdraw
+
+
+def test_a_withdrawal_is_said_done_only_on_the_rigs_word(rig):
+    """The whole-build review's I1, its probe: a withdrawal answered *sent* whose act waits no more
+    has not been shown withdrawn -- a frame in which the change is in force instead (the boundary
+    applied it before the press arrived) leaves the box saying *withdrawing…*, never "withdrawn ·
+    it never applied"; the rig's refusal that follows is said. And a withdrawal the rig did is
+    said withdrawn only on the frame that lists its act (`Telemetry.withdrawals`)."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, Refused, Staged
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=cid),))
+    _says(rig, page, "fix_hold", "waiting · you")
+    page.evaluate("document.activeElement.blur()")
+    page.click(f'{_b("fix_hold")} [data-withdraw="{cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+
+    in_force = _task6_rows(0.5, fix_hold={"applied": Applied(42, str(jake))})
+    _offer(rig, 42, params=in_force)
+    _arrived(page, 42)
+    assert _say(page, "fix_hold") == "withdrawing…"
+    assert float(page.input_value(field)) == 0.5
+    why = (f"the change sent as '{cid}' is not withdrawn: it is already in force from trial 42, "
+           "so nothing of it waits to be taken back; change the setting again to move it")
+    _offer(rig, 43, params=in_force, refusals=(Refused("withdraw", jake, why, cid=cid),))
+    _says(rig, page, "fix_hold", "not withdrawn · it is already in force from trial 42", start=True)
+
+    page.fill(field, "0.6")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    again = rig.dispatch.seen[-1].cid
+    _offer(rig, 44, params=in_force, refusals=(Refused("withdraw", jake, why, cid=cid),),
+           staged=(Staged("fix_hold", 0.5, 0.6, jake, False, cid=again),))
+    _says(rig, page, "fix_hold", "waiting · you")
+    page.evaluate("document.activeElement.blur()")
+    page.click(f'{_b("fix_hold")} [data-withdraw="{again}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 4)
+    _offer(rig, 45, params=in_force, refusals=(Refused("withdraw", jake, why, cid=cid),))
+    _arrived(page, 45)
+    assert _say(page, "fix_hold") == "withdrawing…"
+    _offer(rig, 46, params=in_force, refusals=(Refused("withdraw", jake, why, cid=cid),),
+           withdrawals=(again,))
+    _says(rig, page, "fix_hold", "withdrawn · it never applied")
+    assert page.input_value(field) == "0.50"
+
+
+def test_an_act_the_rig_never_answers_lets_its_box_go(rig):
+    """The whole-build review's I2, its probe: an Apply answered *sent* that no frame then answers
+    -- here another person's 0.35 comes into force and nothing names the act -- never leaves its
+    box *sending…* with Apply, Discard and Esc dead. Esc lets it go at once, the box back to the
+    value in force, saying the rig has not confirmed it; and left alone, `ANSWER_FRAMES` frames
+    later the box says so itself, the edit a draft again, Apply and Discard live, until its news
+    changes."""
+    from wl_xcon.link import Applied
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    other = _task6_rows(0.35, fix_hold={"applied": Applied(41, "Kim")})
+    unconfirmed = "not confirmed by the rig · check the value in force"
+
+    page.fill(field, "0.5")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+    _offer(rig, 41, params=other)
+    _arrived(page, 41)
+    assert _say(page, "fix_hold") == "sending…"
+    assert not page.is_disabled(f'{_b("fix_hold")} [data-discard]'), "Discard lets it go"
+    page.focus(field)
+    page.press(field, "Escape")
+    _says(rig, page, "fix_hold", unconfirmed)
+    assert page.input_value(field) == "0.35" and _bar(page) is None
+
+    page.fill(field, "0.5")
+    page.evaluate("document.getElementById('sent').textContent = ''")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+    page.evaluate("document.activeElement.blur()")
+    for trial in (42, 43):
+        _offer(rig, trial, params=other)
+        _arrived(page, trial)
+        assert _say(page, "fix_hold") == "sending…", trial
+    _offer(rig, 44, params=other)
+    _says(rig, page, "fix_hold", unconfirmed)
+    assert page.input_value(field) == "0.5" and "draft" in _classes(page, "fix_hold")
+    assert not page.is_disabled(f'{_b("fix_hold")} [data-apply]')
+    assert not page.is_disabled(f'{_b("fix_hold")} [data-discard]')
+    _offer(rig, 45, params=_task6_rows(0.4, fix_hold={"applied": Applied(45, "Kim")}))
+    _says(rig, page, "fix_hold", "not sent · Kim changed this from trial 45")
+
+
+def test_a_fault_in_the_answers_handler_is_never_said_not_delivered(rig):
+    """The whole-build review's M4: `deliver`'s "not delivered" is for a command that did not reach
+    `wlx serve`, never for one whose answer came and whose handler then raised -- here a page fault
+    made while the rig took a second to answer. The answer's own words stay."""
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    rig.dispatch.delay = 1.0
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    # The fault: `CSS.escape`, which the page's answer handler calls (`cardOf`), raises until the
+    # page puts it back itself, 2.5 s on -- Playwright's own calls use it too, so none is made
+    # meanwhile; what `#sent` says is gathered by the page as it changes.
+    page.evaluate("""() => {
+        const sent = document.getElementById('sent');
+        window.__said = [];
+        new MutationObserver(() => window.__said.push(sent.textContent.trim())).observe(
+            sent, {childList: true, characterData: true, subtree: true});
+        const escape = CSS.escape;
+        CSS.escape = () => { throw new Error('a fault in the answer handler'); };
+        setTimeout(() => { CSS.escape = escape; }, 2500);
+    }""")
+    time.sleep(3.0)  # housekeeping: the answer comes at 1 s, the page's fault ends at 2.5 s
+    said = page.evaluate("window.__said")
+    assert said and said[-1] == "sent: test", said
+    assert not any(line.startswith("not delivered") for line in said), said
 
 
 def test_a_change_under_a_draft_leaves_the_draft_and_says_who(rig):
@@ -4309,7 +4435,7 @@ def test_a_change_under_a_draft_leaves_the_draft_and_says_who(rig):
 
     _says(rig, page, "fix_hold", "not sent · Ana (box, unverified) is changing this to 0.60")
     assert page.input_value(field) == "0.8"
-    assert _head(page, "fix_hold") == "0.30 s → 0.60"
+    assert _head(page, "fix_hold") == "0.30 → 0.60 s"
     page.evaluate("document.activeElement.blur()")
     _offer(rig, 42, params=_task6_rows(0.6, fix_hold={"applied": Applied(42, "Ana (box, unverified)")}))
     _arrived(page, 42)
@@ -4358,7 +4484,7 @@ _PRESSED = {
     "swatch": (_b("distractor_appearance") + ' .hue[data-color="red"]', "distractor_appearance",
                "Disc, darker"),
     "apply": (_b("fix_hold") + " [data-apply]", "fix_hold", "0.35 s"),
-    "withdraw": (_b("fix_hold") + " [data-withdraw]", "fix_hold", "0.35 s → 0.50"),
+    "withdraw": (_b("fix_hold") + " [data-withdraw]", "fix_hold", "0.35 → 0.50 s"),
     "hand back": (_b("gap") + ' [data-cmd="hand_back"]', "gap", "0.65 s"),
 }
 
@@ -4387,7 +4513,7 @@ def test_a_press_during_frames_acts_once(rig, control):
         rig.wait_for(lambda: rig.dispatch.seen)
         staged = (Staged("fix_hold", 0.3, 0.5, jake, False, cid=rig.dispatch.seen[-1].cid),)
         _offer(rig, 40, params=_matrix_rows(40), staged=staged)
-        _says(rig, page, "fix_hold", "waiting for the next trial · you")
+        _says(rig, page, "fix_hold", "waiting · you")
         page.evaluate("document.activeElement.blur()")
     before = len(rig.dispatch.seen)
     target, name, news = _PRESSED[control]
@@ -4511,8 +4637,22 @@ def test_a_whole_box_refuses_a_point_at_the_keyboard_and_on_paste(rig):
     page.type(field, "4.")
     assert page.input_value(field) == "4"
     assert _say(page, "set_size") == "whole numbers only"
+    # The whole-build review's I5: the fraction's digits after a refused point are refused too, so
+    # "12.5" never reads "125", and what was typed cannot be sent while it stands.
     page.type(field, "5")
-    assert page.input_value(field) == "45" and _say(page, "set_size") == "not sent"
+    assert page.input_value(field) == "4" and _say(page, "set_size") == "whole numbers only"
+    page.fill(field, "")
+    page.type(field, "12.5")
+    assert page.input_value(field) == "12"
+    assert _say(page, "set_size") == "cannot send · whole numbers only"
+    assert page.is_disabled(f'{_b("set_size")} [data-apply]')
+    page.press(field, "Enter")
+    time.sleep(0.3)  # housekeeping: room for a wrong send to arrive
+    assert rig.dispatch.seen == []
+    page.press(field, "Backspace")
+    assert page.input_value(field) == "1" and _say(page, "set_size") == "not sent"
+    page.type(field, "5")
+    assert page.input_value(field) == "15", "a digit after any other edit is typed"
 
     page.fill(field, "")
     page.focus(field)
@@ -4635,7 +4775,7 @@ def test_pairings_are_a_grid_of_twelve_ticks(rig):
 
     _offer(rig, 41, params=_task6_rows() + (_pool_row(),),
            staged=(Staged("pairings", 66.0, 2114.0, jake, False, cid=sent.cid),))
-    _says(rig, page, "pairings", "waiting for the next trial · you")
+    _says(rig, page, "pairings", "waiting · you")
     assert _head(page, "pairings") == "2 of 12 pairs → 3 of 12 pairs"
     _offer(rig, 42, params=_task6_rows() + (_pool_row(2114, applied=Applied(42, str(jake))),))
     _says(rig, page, "pairings", "in force from trial 42")
@@ -4712,14 +4852,14 @@ def test_a_group_box_applies_its_settings_together(rig):
     staged = (Staged("move_up_bar", 0.8, 0.9, jake, False, cid=sent.cid),
               Staged("move_up_window", 50.0, 51.0, jake, False, cid=sent.cid))
     _offer(rig, 41, params=_group_rows(), groups=_move_up(), staged=staged)
-    _says(rig, page, "Move up", "waiting for the next trial · you")
+    _says(rig, page, "Move up", "waiting · you")
     assert page.text_content(f"{box} [data-withdraw]") == "withdraw all 2"
-    assert _head(page, "Move up") == "80 % → 90 · 50 answers → 51"
+    assert _head(page, "Move up") == "80 → 90 % · 50 → 51 answers"
     page.click(f'{box} [data-withdraw="{sent.cid}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
 
-    _offer(rig, 42, params=_group_rows(), groups=_move_up())
+    _offer(rig, 42, params=_group_rows(), groups=_move_up(), withdrawals=(sent.cid,))
     _says(rig, page, "Move up", "withdrawn · it never applied")
     page.fill(f'{box} input[data-param="move_up_window"]', "60")
     page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
@@ -4731,7 +4871,7 @@ def test_a_group_box_applies_its_settings_together(rig):
         ("move_up_window", 60.0)]
     _offer(rig, 43, params=_group_rows(), groups=_move_up(), staged=(
         Staged("move_up_window", 50.0, 60.0, jake, False, cid=alone.cid),))
-    _says(rig, page, "Move up", "waiting for the next trial · you")
+    _says(rig, page, "Move up", "waiting · you")
     assert _bar(page) == "1 edit not sent: fix_hold"
 
 
@@ -4939,6 +5079,64 @@ def test_a_section_and_its_tab_count_the_edits_not_sent(rig):
     assert rig.dispatch.seen == []
 
 
+#: Each text of a box that is cut short where it is drawn (`scrollWidth` past `clientWidth`): what
+#: a person reads is what fits, so a test that reads `textContent` cannot tell (the whole-build
+#: review's I4).
+_CUT = """(selector) => Array.from(document.querySelectorAll(selector)).filter(
+    (node) => node.scrollWidth > node.clientWidth + 0.5).map(
+    (node) => [node.closest('.box').getAttribute('data-card'), node.className, node.textContent,
+               node.scrollWidth, node.clientWidth])"""
+
+
+def test_a_waiting_box_shows_what_waits_and_for_whom_at_three_widths(rig):
+    """The whole-build review's I4: a box waiting for the next trial -- this page's change and
+    another console's, beside *withdraw* -- shows the value in force and what waits in its head
+    ("0.30 → 0.50 s") and who sent it on its status line, nothing of either cut short, at 1024, 1280
+    and 1440 wide; and its height is its height at rest, its field where it was. Run in WebKit too,
+    for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Staged
+
+    jake, kim = Box("Jake Westerberg"), Box("Kim")
+    rows = _task6_rows(fix_hold={"label": "Fixation hold, before the array is shown"})
+    _offer(rig, 40, params=rows)
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.wait_for_selector(_b("fix_hold"), state="visible")
+    names = ("fix_hold", "response_deadline", "set_size")
+
+    def measured():
+        return [(round(_rect(page, _b(name))["height"], 1),
+                 round(_rect(page, f'{_b(name)} input[data-param="{name}"]')["top"], 1))
+                for name in names]
+
+    rests = {}
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        rests[width] = measured()
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.click(f'{_b("fix_hold")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    mine = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=rows, staged=(
+        Staged("fix_hold", 0.3, 0.5, jake, False, cid=mine),
+        Staged("response_deadline", 0.6, 0.85, kim, False, cid="other-1"),
+        Staged("set_size", 4, 12, kim, False, cid="other-2")))
+    _says(rig, page, "fix_hold", "waiting · you")
+    _says(rig, page, "response_deadline", "waiting · Kim", start=True)
+    assert page.get_attribute(f'{_b("fix_hold")} > .status > .say', "title") == (
+        "waiting for the next trial · you")
+    assert _head(page, "fix_hold") == "0.30 → 0.50 s"
+    assert _head(page, "response_deadline") == "0.60 → 0.85 s"
+    assert _head(page, "set_size") == "4 → 12 objects"
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        cut = page.evaluate(_CUT, "#params .box.staged > .head .now, #params .box.staged > .status > .say")
+        assert cut == [], (width, cut)
+        assert measured() == rests[width], (width, "waiting")
+
+
 def test_a_box_keeps_its_height_as_its_status_changes(rig):
     """The design's anti-goal ("a box whose height jumps as its status changes, moving Apply under
     the pointer") under the ledger's density ruling for Task 8: the head says the value in force
@@ -4979,8 +5177,8 @@ def test_a_box_keeps_its_height_as_its_status_changes(rig):
     _offer(rig, 41, params=rows,
            staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=first),
                    Staged("response_deadline", 0.6, 0.8, jake, False, cid=second)))
-    _says(rig, page, "fix_hold", "waiting for the next trial · you")
-    assert _head(page, "fix_hold") == "0.30 s → 0.50"
+    _says(rig, page, "fix_hold", "waiting · you")
+    assert _head(page, "fix_hold") == "0.30 → 0.50 s"
     assert measured() == rest, "waiting"
     applied = _task6_rows(0.5, 0.8, fix_hold={"label": "Fixation hold, before the array is shown"})
     _offer(rig, 42, params=applied, refusals=(
@@ -5052,12 +5250,12 @@ def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
                                                          cid=sent.cid),))
     _arrived(page, 41)
     rig.wait_for(lambda: page.text_content(f"{copy} > .status > .say").strip() ==
-                 "waiting for the next trial · you")
+                 "waiting · you")
     page.click(f'{copy} [data-withdraw="{sent.cid}"]')
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
 
-    _offer(rig, 42, params=_task6_rows())
+    _offer(rig, 42, params=_task6_rows(), withdrawals=(sent.cid,))
     page.reload()
     page.wait_for_selector(SIGNED_IN, timeout=WAIT_S * 1000)
     page.wait_for_selector(copy, state="visible")
@@ -5068,6 +5266,45 @@ def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
     page.reload()
     page.wait_for_selector("#params .box", state="attached")
     assert page.locator("#pinned .box").count() == 0
+
+
+def _pin(page, name: str) -> None:
+    page.click(f'{_b(name)} > details.more > summary')
+    page.click(f'{_b(name)} [data-pin-toggle]')
+    page.click(f'{_b(name)} > details.more > summary')
+
+
+def test_a_pinned_copys_tick_segment_and_swatch_work_as_its_box(rig):
+    """The whole-build review's I3 (the design's goal 9: a pinned copy works the same way): a tick
+    in a pinned pairings grid ticks it -- the copy and its box both, a draft on the box, its Apply
+    sending the pool's number with it -- as a segment of a pinned switch and a pinned swatch do.
+    Run in WebKit too, for Safari."""
+    from wl_xcon.link import SetParameter
+
+    page = _task6_page(rig, params=_matrix_rows(40))
+    for name in ("pairings", "wait", "distractor_appearance"):
+        _pin(page, name)
+    page.click('label[for="t-runtime"]')
+    tick = f'{_pinned("pairings")} input.tick[aria-label="green among red"]'
+    page.wait_for_selector(tick, state="visible")
+
+    page.click(tick)
+    assert page.is_checked(tick), "the copy's tick stays ticked"
+    assert page.is_checked(_tick("green among red")), "its box is ticked"
+    assert page.text_content(f'{_pinned("pairings")} > .status > .say').strip() == "not sent"
+    page.click(f'{_pinned("wait")} [data-switch="drawn"]')
+    assert page.is_visible(f'{_pinned("wait")} [data-side="drawn"]')
+    page.click(f'{_pinned("distractor_appearance")} .hue[data-color="red"]')
+    assert page.get_attribute(f'{_pinned("distractor_appearance")} .hue[data-color="red"]',
+                              "aria-pressed") == "true"
+    assert _bar(page).startswith("3 edits not sent: wait, distractor_appearance, pairings")
+    page.click(tick)
+    assert not page.is_checked(tick) and not page.is_checked(_tick("green among red"))
+    page.click(tick)
+    page.click(f'{_pinned("pairings")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.value) == (SetParameter, "pairings", 66 + 2048)
 
 
 def test_a_pin_with_its_store_blocked_lasts_the_page_and_nothing_breaks(rig):

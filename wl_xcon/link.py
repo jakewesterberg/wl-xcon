@@ -1494,6 +1494,12 @@ class Telemetry:
     #: group's settings as one box with one Apply. `()` by default, a task with none, and before a
     #: task is loaded.
     groups: tuple = ()
+    #: **The acts a withdrawal took back** (schema 23; the console interface rework's whole-build
+    #: review, I1; `taskd.Session.withdrawals`): the command id of each, oldest first, at most
+    #: `REFUSAL_HISTORY`, as a refused withdrawal's `Refused` is kept, for the run in progress. The
+    #: rig's word that a withdrawal was done: the page says "withdrawn" on this alone, never on a
+    #: change waiting no more, which a change applied does too. `()` by default, and between runs.
+    withdrawals: tuple = ()
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1742,6 +1748,8 @@ class Telemetry:
             # The console interface rework's Task 7 (schema 23): the task's groups, read as a plain
             # attribute, as the session's other fields are.
             groups=tuple(GroupRow(*row) for row in session.groups),
+            # The whole-build review's I1 (schema 23): the acts withdrawn, by command id.
+            withdrawals=tuple(session.withdrawals),
         )
 
 
@@ -2209,6 +2217,8 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         "groups": [{"name": group.name, "settings": list(group.settings),
                     "sentence": group.sentence, "section": group.section}
                    for group in telemetry.groups],
+        # The acts withdrawn, by command id (schema 23; the whole-build review's I1).
+        "withdrawals": list(telemetry.withdrawals),
     }
 
 
@@ -2331,6 +2341,15 @@ def _cid_of(value: object) -> str | None:
         return value
     raise TypeError(f"a command id is printable text of 1 to {CID_LIMIT} characters, not "
                     f"{_quoted(value)}")
+
+
+def _cids_of(value: object) -> tuple:
+    """A list of command ids on the wire (`Telemetry.withdrawals`; schema 23) as a tuple, each
+    checked as a verdict's is (`_cid_of`), none `None`; anything else is a malformed frame
+    (`TypeError`)."""
+    if not isinstance(value, list) or not all(_is_cid(cid) for cid in value):
+        raise TypeError(f"a list of command ids, not {_quoted(value)}")
+    return tuple(value)
 
 
 def _scalar_of(value: object) -> object:
@@ -2686,6 +2705,7 @@ def _telemetry_from(data: dict) -> Telemetry:
         shaping=_word_of(data["shaping"]),
         full_task=_flag(data["full_task"]),
         groups=_groups_in(data["groups"]),
+        withdrawals=_cids_of(data["withdrawals"]),
     )
 
 

@@ -1685,7 +1685,10 @@ def test_the_script_sends_one_reward_per_click_and_holds_the_button_until_its_an
     assert 'if (id === "controls") { holdReward(); }' in _SCRIPT
     assert "if (rewarding && button && !button.disabled) {" in _SCRIPT
     assert """el("controls").querySelector('[data-cmd="reward"][data-held]')""" in _SCRIPT
-    assert "}).then(done);" in _SCRIPT
+    # `done` runs on the answer and on the failure alike, outside the answer's handler (the
+    # console interface rework's whole-build review, M4).
+    assert "} finally { done(); }" in _SCRIPT
+    assert "}, function (fault) { done(); throw fault; });" in _SCRIPT
     assert _SCRIPT.count('fetch("/commands"') == 1
     assert (
         "unknown: this page lost wlx serve's answer, so whether the reward was given is "
@@ -4815,8 +4818,9 @@ def test_a_whole_box_shows_no_decimals_and_steps_by_one():
     whole = _said(box)
     assert not re.search(r"\d\.\d", whole), whole
     # The head: the value in force, then what waits for the next trial.
-    assert _said(box.zone("head").find("now")[0]) == "4 objects → 6"
-    assert _said(box.zone("head").find("pv")[0]) == "4 objects"
+    assert _said(box.zone("head").find("now")[0]) == "4 → 6 objects"
+    # The unit is said once, after what waits (the whole-build review's I4).
+    assert _said(box.zone("head").find("pv")[0]) == "4"
     (field,) = [n for n in box.zone("editor").walk() if n.tag == "input"]
     assert (field.attrs["value"], field.attrs["data-step"], field.attrs["inputmode"]) == (
         "4", "1", "numeric")
@@ -5152,6 +5156,32 @@ def test_a_percent_box_says_the_rigs_numbers_in_percent():
     said = _cards(fragments(frame(params=(plain,), refusals=(replace(refused[0], name="hit"),)),
                             view())["params"])["hit"]
     assert "refused 1.20 · past-limit: &#x27;move_up_bar&#x27; at 1.2 fraction is above its 1" in said
+
+
+def test_a_percent_is_said_in_percent_only_where_the_sentence_ties_the_number_to_it():
+    """The whole-build review's I7: a number in the rig's sentence is converted only where the
+    sentence ties it to a percent setting -- after its quoted name ("'move_up_bar' at 1.2"), after
+    "its", given in its unit ("1.2 fraction"), or the standard limit's "a fraction is at most 1" --
+    so "block 1" and "the last 1 answers" stay as written, whatever the setting's limits; and a
+    peer bar's number is converted where the sentence gives it as that bar's, in either bar's box."""
+    from wl_xcon.link import Refused
+
+    up = ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, 0.8, False, step=0.05, percent=True,
+                     why={"low": "below 0 cannot be", "high": "a fraction is at most 1"})
+    back = ParamRow.of("move_back_bar", "fraction", 0.0, 1.0, 0.5, False, step=0.05, percent=True)
+    late = ("'move_up_bar' at 1.2 is refused: past-limit: 'move_up_bar' at 1.2 fraction is above "
+            "its 1: a fraction is at most 1 (block 1), judged over the last 1 answers")
+    order = "'move_back_bar' at 0.9 must be below 'move_up_bar' at 0.8, so it is refused"
+    refused = (Refused("move_up_bar", Box("jake"), late, cid="p-1", value=1.2),
+               Refused("move_back_bar", Box("jake"), order, cid="p-2", value=0.9))
+    cards = _cards(fragments(frame(params=(up, back), refusals=refused), view())["params"])
+
+    assert ("last refused: &#x27;move_up_bar&#x27; at 120% is refused: past-limit: "
+            "&#x27;move_up_bar&#x27; at 120% is above its 100%: a fraction is at most 100% "
+            "(block 1), judged over the last 1 answers") in cards["move_up_bar"]
+    assert ("last refused: &#x27;move_back_bar&#x27; at 90% must be below &#x27;move_up_bar&#x27; "
+            "at 80%, so it is refused") in cards["move_back_bar"]
+    assert "100% answers" not in cards["move_up_bar"] and "block 100%" not in cards["move_up_bar"]
 
 
 def test_one_new_color_panel_per_colors_section():

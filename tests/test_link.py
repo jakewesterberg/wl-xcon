@@ -252,6 +252,8 @@ def _session_with(
         full_task=False,
         # `Session.groups` (schema 23, the console interface rework's Task 7): a task with none.
         groups=(),
+        # `Session.withdrawals` (schema 23, the whole-build review's I1): nothing withdrawn.
+        withdrawals=(),
     )
 
 
@@ -4291,6 +4293,28 @@ def test_a_frame_lists_the_tasks_groups(tmp_path):
         (group(lambda g: g.update(name="")), "a group's name is a word"),
         (group(lambda g: g.update(section=None)), "a name or a reason is a string"),
         (lambda data: data.pop("groups"), "KeyError: 'groups'"),
+    ]
+    for change, said in bad:
+        with pytest.raises(FrameError, match=said):
+            decode(_repacked(framed, change))
+
+
+def test_a_frame_lists_the_acts_withdrawn_by_command_id():
+    """Schema 23 (the console interface rework's whole-build review, I1: "say 'withdrawn' only on
+    the rig's word"): a frame carries the command id of each act a withdrawal took back, read off
+    the session (`Session.withdrawals`), crossing the wire whole; none by default; a list that is
+    not one of command ids is a malformed frame, never read."""
+    stand_in = _session_with(delivered_ml=1.0, already_today=None)
+    stand_in.withdrawals = ("pg-1", "pg-7")
+    framed = Telemetry.of(stand_in, Tally(), _scheduler(), index=0)
+    assert framed.withdrawals == ("pg-1", "pg-7")
+    assert decode(encode(framed)) == framed
+    assert _telemetry().withdrawals == () and decode(encode(_telemetry())).withdrawals == ()
+    bad = [
+        (lambda data: data.update(withdrawals="pg-1"), "a list of command ids"),
+        (lambda data: data.update(withdrawals=[None]), "a list of command ids"),
+        (lambda data: data.update(withdrawals=["x" * 65]), "a list of command ids"),
+        (lambda data: data.pop("withdrawals"), "KeyError: 'withdrawals'"),
     ]
     for change, said in bad:
         with pytest.raises(FrameError, match=said):
