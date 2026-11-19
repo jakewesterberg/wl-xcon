@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-527.**
+**Next free ID: XC-529.**
 
 ## Brainstorms queued for the PI
 
@@ -242,6 +242,8 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-524** Give the saturation gamut warning a code of its own: it reuses the luminance warning's code and set subject (`check.py`), and `Session._laid_out` counts a warning new only by code and subject, so while either is in force the other is not warned live (no natural case found). — 2026-11-18, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), its scoped re-review (N2) — waits on: nothing
 - **XC-525** Keep the CAM16 bisection out of a demo frame: `photometry.colorset_xy`'s docstring says a demo frame reads a cached value, but a saturation drawn at a fresh value runs the bisection inside that frame (bounded, demo only). Warm the cache between trials or correct the docstring. — 2026-11-18, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), its scoped re-review (N3) — waits on: nothing
 - **XC-526** Measure the demo's drawing at the pop-out's most discs by hand, 36 (`tools/measure_demo_drawing.py`): its 2026-11-14 results drew Crowd's hardest, 12, then the setting's top; since the PI raised the top to 36 (2026-11-19) a demo's heaviest screen is three times the discs and its drawing time unmeasured. Run on a quiet machine and commit the results under `docs/measurements/`. — 2026-11-19, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), the PI's review of the wl-xtasks branch — waits on: nothing
+- **XC-527** Let a reward size join Apply all and be withdrawn while it waits: left out of the interface rework, since both new commands sit outside `_command`'s listed lines and a reward size there needs the listed refusal recording repeated and a staged reward taken back, a welfare-listed change for the PI's review. Bring it to him as numbered welfare items if wanted. — 2026-11-19, [console interface design](superpowers/specs/2026-11-19-console-interface-design.md) — waits on: the PI's welfare review
+- **XC-528** Offer the animal's last session's ending values at a run's set-up (the workflow reviewer's idea): show how the task's starts differ from where the last session ended, and let the trainer take them one by one or all; needs a command to read them. Not in the interface rework. — 2026-11-19, [console interface design](superpowers/specs/2026-11-19-console-interface-design.md) — waits on: the PI
 
 ## Debt
 
