@@ -296,6 +296,10 @@ APPLY_ALL_LIMIT = 50
 SESSION_SAID = ("the session's details: who, which run and block, the animal's fluid and time out, "
                 "the next run's task and plan, a scheduled stop")
 FIND_SAID = "find a setting or section"
+#: **What the find box says where nothing matches** (the summary and editor plan's Review Focus 4:
+#: "Find with no match / Enter on no match dims everything and opens nothing, saying 'no setting
+#: matches'").
+NO_MATCH = "no setting matches"
 PINNED_SAID = "boxes you pinned from the settings tabs; each works as there, one draft between them"
 DEMO_FOLD_SAID = "keys and demo limits"
 #: The trials the plain run is offered with: `wlx run --trials`'s default (`cli`), the flat run
@@ -2951,15 +2955,15 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
                         for cid in frame.withdrawals)
     return (_summary(frame, view, training)
             + f'<div class="legend">{_e(SUMMARY_LEGEND)}</div>'
-            + f'<div class="editor"><div class="placeholder">{_e(EDITOR_EMPTY)}</div>'
+            + f'<div class="editing"><div class="placeholder">{_e(EDITOR_EMPTY)}</div>'
             + "".join(shown) + "</div>"
             + f'<div class="wdrs" hidden>{declined}</div>')
 
 
-#: **What each mark on a summary line means** (the summary and editor design's goal 3), said once
-#: under the summary.
-SUMMARY_LEGEND = ("● not sent · ◷ waiting for the next trial · ◆ drawn each trial · ! refused · "
-                  "⚠ with a warning")
+#: **What each mark on a summary line means** (the summary and editor design's goal 3; the page's own
+#: marks, … and ?, since that build's Task 2), said once under the summary.
+SUMMARY_LEGEND = ("● not sent · … sending · ? not confirmed by the rig · ◷ waiting for the next trial · "
+                  "◆ drawn each trial · ! refused or cannot send · ⚠ with a warning")
 
 #: **What the editor says with no setting opened** (the summary and editor design's goal 5).
 EDITOR_EMPTY = "click a setting above to change it"
@@ -3022,17 +3026,30 @@ def _in_order(items: list) -> list:
             + [(top, node) for top, node in tree.items() if top == CEILINGS])
 
 
+#: **A unit a summary line says short** (the ledger's ruling for the summary and editor build's
+#: Task 2: "pick the columns and the summary's short units ('°', 'cd/m²') so that every line
+#: still fits"): degrees as the sign, against the number ("2.0°"), and cd/m² with its square. The
+#: box, its editor and *more* keep the setting's own unit.
+_SHORT_UNITS = {"deg": "°", "cd/m2": "cd/m²"}
+
+
+def _line_unit(row) -> str:
+    """**What a summary line writes after a number of a setting** (`_number_said`, `_drawn_said`,
+    and `data-unit` for the page's draft text, `_line`): a percent's `%` and a degree's `°`
+    against it, a whole number's nothing ("4", the mock-up the PI chose: "Number of discs 4"),
+    any other unit after a space, short where `_SHORT_UNITS` has it."""
+    if row.percent:
+        return "%"
+    if row.whole or not row.unit:
+        return ""
+    unit = _SHORT_UNITS.get(row.unit, row.unit)
+    return unit if unit == "°" else f" {unit}"
+
+
 def _number_said(row, value: object) -> str:
     """**A number as a summary line says it** (`_summary_value`): at its box's decimals
-    (`_figure`) with its unit, a percent's ×100 with `%` against it, a whole number's with none
-    ("4", the mock-up the PI chose: "Number of discs 4")."""
-    shown = _figure(row, value)
-    if row.whole:
-        return shown
-    if row.percent:
-        return f"{shown}%"
-    unit = _unit_of(row)
-    return f"{shown} {unit}" if unit else shown
+    (`_figure`), a percent's ×100, with what the line writes after it (`_line_unit`)."""
+    return f"{_figure(row, value)}{_line_unit(row)}"
 
 
 #: **The numbers of a draw a summary line says as its range** (`ParamRow.shape`'s, by shape):
@@ -3071,8 +3088,7 @@ def _drawn_said(row) -> str | None:
         return None
     if row.percent:
         return f"{_significant(_hundred(ends[0]))}–{_significant(_hundred(ends[1]))}%"
-    said = f"{_significant(float(ends[0]))}–{_significant(float(ends[1]))}"
-    return f"{said} {row.unit}" if row.unit else said
+    return f"{_significant(float(ends[0]))}–{_significant(float(ends[1]))}{_line_unit(row)}"
 
 
 def _summary_value(row) -> str:
@@ -3138,7 +3154,7 @@ def _waits(row, change, now: str) -> str:
 
 
 def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, said: str,
-          drawn: bool, changed: bool, bounded: bool, words: str) -> str:
+          drawn: bool, changed: bool, bounded: bool, words: str, unit: str | None = None) -> str:
     """**One summary line** (the summary and editor design's goal 1), a button that opens its
     setting in the editor (`data-open`, its box's `data-card`): its marks (`span.mk`), its plain
     name (`span.ln`) and its value in force (`span.lv`, the in force alone in `data-now`), with
@@ -3147,7 +3163,14 @@ def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, s
     the box's status line ranks them (`_status`), then ◆ a value drawn each trial (`drawn`); and
     the classes `changed` (it differs from the task's start) and `ceiling`. Its `title` says
     every state in words: the whole name, the value, the status line whole, how it is drawn,
-    changed, a ceiling."""
+    changed, a ceiling.
+
+    **What the page reads to add what it alone knows** (the summary and editor build's Task 2,
+    `markLine` in the script): `data-now`, the value in force alone, for "in force → draft";
+    `data-said`, the status said in the title, where there is one, which the page's own words
+    replace or join; and `data-unit`, on a number's line, what the line writes after a number
+    (`_line_unit`: "%", "°", " s", nothing for a whole number), so a draft is said as the value in
+    force is, its typed text read from the box's own field."""
     mark, kind = {"staged": ("◷", "waiting"), "refused": ("!", "refused"),
                   "warned": ("⚠", "warned")}.get(state, ("", ""))
     classes = " ".join(word for word in ("line", kind, "drawn" if drawn else "",
@@ -3155,15 +3178,19 @@ def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, s
                                          "ceiling" if bounded else "") if word)
     named = label if label == codes else f"{label} ({codes})"
     told = [named, shown]
-    if state:
-        told.append(_whole_say(state, said))
+    status = _whole_say(state, said) if state else ""
+    if status:
+        told.append(status)
     if drawn:
         told.append(words)
     if changed:
         told.append("changed from the task's start")
     if bounded:
         told.append("a welfare ceiling: sent alone, by its own Apply")
-    return (f'<button type="button" class="{classes}" data-open="{_e(name)}" '
+    extra = f' data-said="{_e(status)}"' if status else ""
+    if unit is not None:
+        extra += f' data-unit="{_e(unit)}"'
+    return (f'<button type="button" class="{classes}" data-open="{_e(name)}"{extra} '
             f'title="{_e(" · ".join(told))}"><span class="mk">{mark}{"◆" if drawn else ""}</span>'
             f'<span class="ln">{_e(label)}</span><span class="lv" data-now="{_e(now)}">'
             f"{_e(shown)}</span></button>")
@@ -3189,9 +3216,12 @@ def _summary(frame, view: View, training: bool) -> str:
             now = _summary_value(row)
             drawn = _drawn(row)
             words = _plain(_PER_TRIAL[row.source][0]) if drawn else ""
+            number = (row.members is None and row.color is None and row.position is None
+                      and not isinstance(row.value, str))
             lines.append((section, 1 if row.changed else 0, _line(
                 row.name, row.label or row.name, row.name, now, _waits(row, change, now),
-                state, said, drawn, row.changed, row.bounded, words), 1))
+                state, said, drawn, row.changed, row.bounded, words,
+                _line_unit(row) if number else None), 1))
             continue
         state, said = _group_state(members, frame, staged)
         values = [_summary_value(member) for member in members]
@@ -4273,7 +4303,10 @@ body.session-shut .session { display: none !important; }
 .kv.wrap > .btn { flex-shrink: 1; max-width: 100%; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; }
-.summary { columns: 4 13.5em; column-gap: 20px; min-width: 0; }
+/* Columns as wide as a line of the longest plain name a task may declare (`task.LABEL_LIMIT`, 40
+   characters) with its marks and a value beside it, so no name is cut (the ledger's ruling for
+   the summary and editor build's Task 2): two at 1280 beside the demo screen, three at 1440. */
+.summary { columns: auto 330px; column-gap: 20px; min-width: 0; }
 .ssec { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; margin: 0 0 6px; min-width: 0; }
 .ssec .ssec { margin: 3px 0 0; }
 .ssec > h4 { margin: 0 0 1px; height: 17px; line-height: 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4293,9 +4326,13 @@ body.session-shut .session { display: none !important; }
 .line.ceiling > .ln { color: var(--warn); font-weight: 600; }
 .line.newcolor > .ln { color: var(--accent); }
 .summary .line.nofind { display: flex !important; opacity: 0.35; }
+.summary .line.found { box-shadow: inset 3px 0 0 var(--accent); background: var(--surface-2); }
+.line.draft > .lv, .line.sending > .lv { color: var(--accent); font-style: italic; }
+.line.unconfirmed > .mk { color: var(--warn); }
+.top > .nomatch { font-size: 12.5px; font-weight: 600; color: var(--crit); }
 .params > .legend { font-size: 11px; color: var(--muted); }
-.params > .editor { border-top: 2px solid var(--ink); padding-top: 8px; min-width: 0; }
-.params > .editor > .placeholder { color: var(--muted); font-size: 13px; padding: 4px 0; }
+.params > .editing { border-top: 2px solid var(--ink); padding-top: 8px; min-width: 0; }
+.params > .editing > .placeholder { color: var(--muted); font-size: 13px; padding: 4px 0; }
 .cards { display: grid; gap: 5px; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); align-items: start; }
 .nofind { display: none !important; }
 .panel .top.tools { justify-content: flex-start; }
@@ -5280,7 +5317,7 @@ _SCRIPT = """
   }
   function applyOpened(root) {
     var key = openedKey(root);
-    var editor = root.querySelector(":scope > .editor");
+    var editor = root.querySelector(":scope > .editing");
     if (key === null || !editor) { return; }
     var name = readOpened(key);
     var shown = name === null ? null : openable(editor, name);
@@ -5307,7 +5344,7 @@ _SCRIPT = """
     });
     if (!root) { return; }
     var key = openedKey(root);
-    var editor = root.querySelector(":scope > .editor");
+    var editor = root.querySelector(":scope > .editing");
     if (key === null || !editor || !openable(editor, name)) { return; }
     writeOpened(key, name);
     applyOpened(root);
@@ -5338,24 +5375,43 @@ _SCRIPT = """
   }
   function markFind(root) {
     var find = findIn(root);
+    var found = 0;
     Array.prototype.forEach.call(root.querySelectorAll(":scope > .summary .line[data-open]"), function (line) {
       var name = line.getAttribute("data-open");
       var section = line.closest(".ssec");
       var where = section ? (section.getAttribute("data-section") || "").toLowerCase() : "";
       var card = name.indexOf(NEW_COLOR_OPEN) === 0 ? null :
-        root.querySelector(':scope > .editor > .box[data-card="' + CSS.escape(name) + '"]');
+        root.querySelector(':scope > .editing > .box[data-card="' + CSS.escape(name) + '"]');
       var said = card ? findText(card) : line.textContent.toLowerCase();
       var unfound = find !== "" && said.indexOf(find) === -1 && where.indexOf(find) === -1;
       line.classList.toggle("nofind", unfound);
+      // Found: highlighted while a find stands (the summary and editor design's goal 8).
+      line.classList.toggle("found", find !== "" && !unfound);
+      if (find !== "" && !unfound) { found += 1; }
       if (card) { card.classList.toggle("nofind", unfound); }
     });
+    // Nothing found says so (the plan's Review Focus 4: "no setting matches").
+    var none = el(root.id === "training-params" ? "tfind-none" : "pfind-none");
+    if (none) { none.hidden = find === "" || found > 0; }
     return find;
   }
   function applyFind() {
     CARDS.forEach(function (id) { if (document.querySelector(id)) { markFind(document.querySelector(id)); } });
   }
+  // **Enter in a find box opens the first line found** (the summary and editor design's goal 8),
+  // in the summary's order; with nothing found, nothing (the plan's Review Focus 4).
+  function openFound(id) {
+    var root = el(id === "tfind" ? "training-params" : "params");
+    if (!root || findIn(root) === "") { return; }
+    var first = root.querySelector(":scope > .summary .line.found[data-open]");
+    if (first) { openSetting(first.getAttribute("data-open")); }
+  }
   ["pfind", "tfind"].forEach(function (id) {
-    if (el(id)) { el(id).addEventListener("input", applyFind); }
+    if (!el(id)) { return; }
+    el(id).addEventListener("input", applyFind);
+    el(id).addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); applyFind(); openFound(id); }
+    });
   });
   applyFind();
   // **A box's *more* a person opened** (the console interface design's goal 1: "everything else
@@ -5795,6 +5851,189 @@ _SCRIPT = """
     hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
     hold(box.querySelector("[data-discard]"), sending ? !answeredLong(out[name]) : !draft);
     mirrorOne(name);
+    markLine(name);
+  }
+  // **What only the page knows, on a summary line** (the summary and editor design's goal 3 and
+  // its call "when states combine"; the plan's Global Constraints): the rig's line (`_line`) is
+  // kept as the frame drew it (`wlxRig`, taken again after every `patchLine`), and where the page
+  // knows more -- a draft, a draft that cannot send, an act sending or a withdrawal out, an act the
+  // rig never confirmed, a refusal of an act applied together, a refusal a later change cleared --
+  // the line says it: at most two marks after the name, in precedence (`LINE_MARKS`), then ◆ where
+  // the value is drawn each trial; the value "in force → draft" (`draftText`); and in its title
+  // every state present in words, the rig's among them.
+  var EDITED = "edited";
+  var LINE_MARKS = ["!", "●", "…", "?", "◷", "⚠"];
+  var DRAW_ENDS = { non_aging: ["shortest", "longest"], uniform: ["low", "high"], normal: ["low", "high"] };
+  function linesOf(name) {
+    return document.querySelectorAll(inCards('.summary .line[data-open="' + CSS.escape(name) + '"]'));
+  }
+  function rigOf(line) {
+    var mk = line.querySelector(":scope > .mk");
+    var lv = line.querySelector(":scope > .lv");
+    var state = ["waiting", "refused", "warned"].filter(function (kind) {
+      return line.classList.contains(kind);
+    })[0] || "";
+    return { title: line.getAttribute("title") || "", mk: mk ? mk.textContent : "",
+             lv: lv ? lv.textContent : "", state: state, said: line.getAttribute("data-said") || "" };
+  }
+  // A typed number as its line says it: after it what the line writes after a number (`data-unit`,
+  // `web._line_unit`: "%", "°", " s"), else the unit beside the box's field.
+  function unitOf(box, field) {
+    var line = linesOf(nameOf(box))[0];
+    if (line && line.hasAttribute("data-unit")) { return line.getAttribute("data-unit"); }
+    var holder = field ? field.closest(".fu, label") : null;
+    var unit = holder ? holder.querySelector(".unit") : null;
+    return unit && unit.textContent ? " " + unit.textContent : "";
+  }
+  function endsOf(box, fields, kind, ends) {
+    var typed = ends.map(function (end) {
+      var found = Array.prototype.filter.call(fields, function (input) {
+        return input.getAttribute(kind) === end;
+      })[0];
+      return found ? found.value.trim() : "";
+    });
+    if (typed[0] === "" || typed[1] === "") { return EDITED; }
+    return typed[0] + "–" + typed[1] + unitOf(box, null);
+  }
+  // **A box's draft as its summary line says it** (the plan's Global Constraints), read from the
+  // box's own fields, never formatted again: one field, as typed with its unit -- a percent's `%`,
+  // a whole number as typed -- or as typed alone where the draft cannot send; a draw, its two ends
+  // as typed, "0.5–1.25 s"; a pool, "N of 12" from its ticks; a color, a group, a shape or a switch
+  // alone, or more than one kind of change, "edited". What differs from the frame's box (`served`),
+  // so an act still sending says what it sent; "" where nothing does.
+  function draftText(box) {
+    var name = nameOf(box);
+    var now = stateOf(box);
+    var given = served[name] ? stateOf(served[name]) : now;
+    var moved = Object.keys(now).concat(Object.keys(given)).filter(function (key, at, all) {
+      return all.indexOf(key) === at && now[key] !== given[key];
+    });
+    if (!moved.length) { return ""; }
+    if (box.classList.contains("group")) { return EDITED; }
+    var values = moved.filter(function (key) {
+      return key.indexOf("p:") === 0 && Object.prototype.hasOwnProperty.call(now, key);
+    });
+    var drawn = now.side !== undefined && now.side !== "fixed";
+    var formed = drawn && moved.some(function (key) {
+      return key === "side" || key === "shape" || key.indexOf("f:") === 0;
+    });
+    var ranged = moved.some(function (key) { return key.indexOf("n:") === 0; });
+    var kinds = values.length + (formed ? 1 : 0) + (ranged ? 1 : 0) + (moved.indexOf("hue") !== -1 ? 1 : 0);
+    if (kinds !== 1) { return EDITED; }
+    if (values.length) {
+      var setting = values[0].slice(2);
+      var field = null;
+      Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor input[data-param]"), function (input) {
+        if (input.getAttribute("data-param") === setting && shownIn(box, input)) { field = input; }
+      });
+      if (field) {
+        var raw = field.value.trim();
+        var cannot = drafts[name] && drafts[name].error;
+        return field.getAttribute("data-kind") === "word" || cannot ? raw : raw + unitOf(box, field);
+      }
+      var grid = box.querySelector(':scope > .editor [data-pool="' + CSS.escape(setting) + '"]');
+      if (!grid) { return EDITED; }
+      return grid.querySelectorAll("input.tick[data-bit]:checked").length + " of " +
+        grid.querySelectorAll("input.tick[data-bit]").length;
+    }
+    if (formed && DRAW_ENDS[now.shape]) {
+      return endsOf(box, formFields(box, now.side), "data-form", DRAW_ENDS[now.shape]);
+    }
+    if (formed && now.shape === "scaled") {
+      var factor = formFields(box, now.side)[0];
+      var unit = factor ? factor.parentElement.querySelector(":scope > .unit") : null;
+      return factor && factor.value.trim() ? factor.value.trim() + (unit ? " " + unit.textContent : "") : EDITED;
+    }
+    if (ranged) {
+      var numbers = box.querySelectorAll(".detail > .rng input[data-number]");
+      var named = Array.prototype.map.call(numbers, function (input) { return input.getAttribute("data-number"); });
+      var ends = named.indexOf("shortest") !== -1 ? ["shortest", "longest"] : ["low", "high"];
+      if (named.indexOf(ends[0]) !== -1 && named.indexOf(ends[1]) !== -1) {
+        return endsOf(box, numbers, "data-number", ends);
+      }
+    }
+    return EDITED;
+  }
+  // "in force → draft": a number's unit said once, after the draft ("1.00 → 1.50 s"), as the rig's
+  // line says what waits (`web._waits`); anything else as it is, then the arrow.
+  function arrowed(line, typed) {
+    var now = line.querySelector(":scope > .lv").getAttribute("data-now") || "";
+    var unit = line.getAttribute("data-unit");
+    var number = /^-?\\d+(\\.\\d+)?$/;
+    if (unit !== null && now.slice(now.length - unit.length) === unit &&
+        typed.slice(typed.length - unit.length) === unit &&
+        number.test(now.slice(0, now.length - unit.length)) &&
+        number.test(typed.slice(0, typed.length - unit.length))) {
+      return now.slice(0, now.length - unit.length) + " → " + typed;
+    }
+    return now + " → " + typed;
+  }
+  // Each state of a box present, `{mark, said, page}` in precedence: `page` where it is the page's
+  // own, which the rig's line does not say.
+  function lineStates(box, rig) {
+    var name = nameOf(box);
+    var draft = drafts[name] || null;
+    var sending = Boolean(out[name] && out[name].phase === "sending");
+    var say = box.querySelector(":scope > .status > .say");
+    var text = say ? say.textContent : "";
+    var given = served[name] ? served[name].querySelector(":scope > .status > .say") : null;
+    var cleared = rig.state === "refused" && !box.classList.contains("refused");
+    var rest = cleared && given ? given.getAttribute("data-rest-state") || "" : "";
+    var restSaid = cleared && given ? given.getAttribute("data-rest") || "" : "";
+    var states = [];
+    function add(mark, said, page) { states.push({ mark: mark, said: said, page: page }); }
+    if (draft && draft.error && !sending) { add("!", CANNOT + draft.error, true); }
+    if (text === TOGETHER) { add("!", TOGETHER, true); }
+    else if (rig.state === "refused" && !cleared) { add("!", rig.said, false); }
+    if (draft && !sending) { add("●", text.indexOf(NOT_SENT) === 0 ? (say.title || text) : NOT_SENT, true); }
+    if (sending) { add("…", SENDING, true); }
+    else if (withdrawalOf(name)) { add("…", WITHDRAWING, true); }
+    if (text.indexOf(NO_WORD) !== -1) { add("?", text, true); }
+    if (rig.state === "waiting") { add("◷", rig.said, false); }
+    if (rig.state === "warned") { add("⚠", rig.said, false); }
+    if (cleared) { add(rest === "warned" ? "⚠" : "", rest === "" ? "" : restSaid, true); }
+    else if (!rig.state && rig.said) { add("", rig.said, false); }
+    return states;
+  }
+  function markLine(name) {
+    var box = cardOf(name);
+    Array.prototype.forEach.call(linesOf(name), function (line) {
+      if (!line.wlxRig) { line.wlxRig = rigOf(line); }
+      var rig = line.wlxRig;
+      var states = box ? lineStates(box, rig) : [];
+      var own = states.some(function (one) { return one.page; });
+      var marks = [];
+      states.forEach(function (one) {
+        if (one.mark && marks.indexOf(one.mark) === -1 && marks.length < 2) { marks.push(one.mark); }
+      });
+      marks.sort(function (a, b) { return LINE_MARKS.indexOf(a) - LINE_MARKS.indexOf(b); });
+      var shown = rig.lv;
+      var typed = box && (drafts[name] || (out[name] && out[name].phase === "sending")) ? draftText(box) : "";
+      if (typed) { shown = arrowed(line, typed); }
+      var title = rig.title;
+      if (own || shown !== rig.lv) {
+        var saids = states.map(function (one) { return one.said; }).filter(Boolean);
+        var at = rig.title.indexOf(" · " + rig.lv);
+        if (at === -1) { title = [rig.title].concat(saids).join(" · "); }
+        else {
+          var tail = rig.title.slice(at + 3 + rig.lv.length);
+          if (rig.said && tail.indexOf(" · " + rig.said) === 0) { tail = tail.slice(3 + rig.said.length); }
+          title = [rig.title.slice(0, at), shown].concat(saids).join(" · ") + tail;
+        }
+      }
+      var mark = own ? marks.join("") + (line.classList.contains("drawn") ? "◆" : "") : rig.mk;
+      var mk = line.querySelector(":scope > .mk");
+      var lv = line.querySelector(":scope > .lv");
+      if (mk && mk.textContent !== mark) { mk.textContent = mark; }
+      if (lv && lv.textContent !== shown) { lv.textContent = shown; }
+      if (line.getAttribute("title") !== title) { line.setAttribute("title", title); }
+      var has = function (mark) { return states.some(function (one) { return one.mark === mark; }); };
+      line.classList.toggle("refused", has("!"));
+      line.classList.toggle("draft", has("●"));
+      line.classList.toggle("sending", has("…"));
+      line.classList.toggle("unconfirmed", has("?"));
+      line.classList.toggle("warned", has("⚠"));
+    });
   }
   // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
   // in it (the controls review's §3, rule 2); a button focused is not one, Chromium focusing
@@ -5928,7 +6167,7 @@ _SCRIPT = """
       })[0] || null;
     };
     var summary = own("summary");
-    var editor = own("editor");
+    var editor = own("editing");
     if (!summary || !editor) { return null; }
     return Array.prototype.map.call(summary.querySelectorAll(".ssec"), function (section) {
       return section.getAttribute("data-section") + ":" + Array.prototype.map.call(
@@ -5958,6 +6197,8 @@ _SCRIPT = """
         if (have.getAttribute(attr.name) !== attr.value) { have.setAttribute(attr.name, attr.value); }
       });
     });
+    // As the frame drew it again: what the page adds is said anew from it (`markLine`).
+    line.wlxRig = null;
   }
   // Every draft dropped (the console interface design's call: "dropped at the run's end"), and a
   // field focused in a box left, so no box keeps an editor of a run that is over.
@@ -6471,7 +6712,7 @@ _SCRIPT = """
         var header = section.querySelector(":scope > h4");
         var count = 0;
         Array.prototype.forEach.call(section.querySelectorAll(".line[data-open]"), function (line) {
-          var box = root.querySelector(':scope > .editor > .box[data-card="' + CSS.escape(line.getAttribute("data-open")) + '"]');
+          var box = root.querySelector(':scope > .editing > .box[data-card="' + CSS.escape(line.getAttribute("data-open")) + '"]');
           if (box) { count += unsent(box); }
         });
         if (header) { sayIn(slotIn(header, "ns"), count); }
@@ -7888,7 +8129,12 @@ _SCRIPT = """
     else if (e.key === "Escape") {
       e.preventDefault();
       var waited = out[name] && out[name].phase === "sending" && answeredLong(out[name]);
-      if (drafts[name] || waited) { discard(name, typed === field ? field : null); } else { typed.blur(); }
+      if (drafts[name] || waited) { discard(name, typed === field ? field : null); }
+      else {
+        typed.blur();
+        // A second Esc returns to the setting's summary line (a pinned copy's is on its tab).
+        leftFrom = typed === field ? name : null;
+      }
     }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
       e.preventDefault();
@@ -7917,6 +8163,52 @@ _SCRIPT = """
       return;
     }
     fieldKeys(e, field, field);
+  });
+  // **The summary at the keyboard** (the summary and editor design's goal 7): on a line, ↑ and ↓
+  // move to the line before or after it in the summary's order, past the lines the find box dims;
+  // Enter opens its setting and puts the editor's first field in focus (`firstField`). Esc in a
+  // field with no draft leaves the field (`fieldKeys`), and a second Esc returns to its line (the
+  // design's call), `leftFrom` the setting it left.
+  var leftFrom = null;
+  function firstField(root) {
+    var editor = root.querySelector(":scope > .editing");
+    var shown = editor ? Array.prototype.filter.call(editor.children, function (child) {
+      return !child.hidden && !child.classList.contains("placeholder");
+    })[0] : null;
+    if (!shown) { return null; }
+    return Array.prototype.filter.call(shown.querySelectorAll("input, select, textarea"), function (one) {
+      return !one.disabled && one.type !== "hidden" && one.getClientRects().length > 0;
+    })[0] || null;
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+    var line = e.target && e.target.closest ? e.target.closest(inCards(".summary .line[data-open]")) : null;
+    if (line && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      var summary = line.closest(".summary");
+      var lines = Array.prototype.filter.call(summary.querySelectorAll(".line[data-open]"), function (one) {
+        return one === line || !one.classList.contains("nofind");
+      });
+      var next = lines[lines.indexOf(line) + (e.key === "ArrowDown" ? 1 : -1)];
+      if (next) { next.focus(); }
+      return;
+    }
+    if (line && e.key === "Enter") {
+      e.preventDefault();
+      var name = line.getAttribute("data-open");
+      openSetting(name);
+      var into = firstField(line.closest(CARDS.join(", ")));
+      if (into) { into.focus(); }
+      return;
+    }
+    // The second Esc, its target the page itself: the first, whose target was the field, has
+    // just left it (`fieldKeys`) and comes here too.
+    if (e.key === "Escape" && leftFrom !== null &&
+        (e.target === document.body || e.target === document.documentElement)) {
+      var back = linesOf(leftFrom)[0];
+      leftFrom = null;
+      if (back && back.getClientRects().length) { e.preventDefault(); back.focus(); }
+    }
   });
   // **Closing the page with drafts asks once** (the console interface design's call): the
   // browser's own question; nothing else keeps a draft past a reload.
@@ -8221,14 +8513,14 @@ def page(
             <div class="stack"><section class="panel glass"><div class="top"><h2>Changes</h2></div><div class="feed" id="rt-changes">{p['rt-changes']}</div></section></div>
           </div>
         </div>
-        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top tools"><input type="search" class="field find" id="pfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="sub">each box sends nothing until its Apply · staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section>
+        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top tools"><input type="search" class="field find" id="pfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="nomatch" id="pfind-none" role="status" hidden>{_e(NO_MATCH)}</span><span class="sub">each box sends nothing until its Apply · staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section>
           <section class="panel glass"><div class="top"><h2>Moments of this run</h2>
             <span class="sub">a revert takes the task's settings and drawn ranges back to one</span>
             </div><div id="moments">{p['moments']}</div></section></div>
         <div class="tabpanel" id="tp-training">
           <section class="panel glass"><div class="top"><h2>Training</h2><span class="sub">on, frozen or the full task, staged until the next trial</span></div><div id="shaping">{p['shaping']}</div></section>
           <section class="panel glass train" id="rt-train" aria-label="training">{p['rt-train']}</section>
-          <section class="panel glass"><div class="top tools"><h2>Training settings</h2><input type="search" class="field find" id="tfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="sub">staged until the next trial</span></div><div class="params" id="training-params">{p['training-params']}</div></section>
+          <section class="panel glass"><div class="top tools"><h2>Training settings</h2><input type="search" class="field find" id="tfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="nomatch" id="tfind-none" role="status" hidden>{_e(NO_MATCH)}</span><span class="sub">staged until the next trial</span></div><div class="params" id="training-params">{p['training-params']}</div></section>
         </div>
         <div class="tabpanel" id="tp-setup">
           <section class="panel glass" id="pf-panel"><div class="top"><h2>Pre-flight</h2><span id="pf-sum">{p['pf-sum']}</span></div><div id="preflight">{p['preflight']}</div></section>

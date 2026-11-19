@@ -5236,7 +5236,7 @@ def test_one_new_color_panel_per_colors_section():
     for card in _cards(params).values():
         card = card.partition('<details class="newc"')[0]
         assert "data-newc" not in card and "New color" not in card
-    editor = params.partition('<div class="editor">')[2]
+    editor = params.partition('<div class="editing">')[2]
     colors = editor.partition('data-card="pairings"')[2].partition('data-card="fix_hold"')[0]
     # After the section's last box, in the editor, hidden until it is opened.
     assert ('</details></div><details class="newc" data-newc="Colors" hidden><summary>New color…'
@@ -5425,7 +5425,7 @@ def _lines(params: str) -> list:
     for piece in re.split(r'(?=<div class="ssec")', summary)[1:]:
         section = html.unescape(re.search(r'data-section="([^"]*)"', piece).group(1))
         for classes, name, mark, label, value in re.findall(
-                r'<button type="button" class="([^"]*)" data-open="([^"]*)" title="[^"]*">'
+                r'<button type="button" class="([^"]*)" data-open="([^"]*)"[^>]* title="[^"]*">'
                 r'<span class="mk">([^<]*)</span><span class="ln">([^<]*)</span>'
                 r'<span class="lv"[^>]*>([^<]*)</span></button>', piece):
             found.append((section, html.unescape(name), classes, mark, html.unescape(label),
@@ -5461,9 +5461,9 @@ def test_the_summary_has_a_line_for_every_box_in_section_order():
     summary, _, rest = params.partition('<div class="legend">')
     assert "<details" not in summary and summary.count('<div class="ssec"') == 5
     assert rest.startswith(html.escape(web.SUMMARY_LEGEND, quote=True) + "</div>"
-                           '<div class="editor"><div class="placeholder">'
+                           '<div class="editing"><div class="placeholder">'
                            "click a setting above to change it</div>")
-    editor = rest.partition('<div class="editor">')[2]
+    editor = rest.partition('<div class="editing">')[2]
     assert len(re.findall(r'<div class="box[^"]*" data-card="[^"]*"[^>]* hidden>', editor)) == len(boxes)
     assert '<details class="newc" data-newc="Colors" hidden>' in editor
     assert ('<h4 title="Timing · 2 settings · 0 changed">Timing · 2 settings</h4>' in summary
@@ -5512,7 +5512,7 @@ def test_a_line_marks_what_the_rig_knows():
     assert marked["reward_correct"] == (["line", "ceiling"], "", "0.15 mL")
     assert marked["odd_color"][:2] == (["line"], "")
     titles = dict((html.unescape(name), html.unescape(title)) for name, title in re.findall(
-        r'class="line[^"]*" data-open="([^"]*)" title="([^"]*)"', params))
+        r'class="line[^"]*" data-open="([^"]*)"[^>]* title="([^"]*)"', params))
     assert titles["iti"] == ("Time between trials (iti) · 1.00 → 1.50 s · waiting for the next "
                              "trial · jake (box, unverified)")
     assert titles["fix_hold"] == ("Fixation hold (fix_hold) · 0.5–1.25 s · drawn each trial, from a "
@@ -5521,4 +5521,46 @@ def test_a_line_marks_what_the_rig_knows():
     assert titles["set_size"].endswith(" · changed from the task's start")
     assert "in force, with a warning · from trial 39" in titles["distractor_fraction"]
     assert titles["reward_correct"].endswith("a welfare ceiling: sent alone, by its own Apply")
-    assert 'data-open="iti" title="' in params and '<span class="lv" data-now="1.00 s">' in params
+    assert 'data-open="iti" data-said="waiting for the next trial · jake (box, unverified)" ' \
+        'data-unit=" s" title="' in params and '<span class="lv" data-now="1.00 s">' in params
+
+
+def test_a_line_says_short_units_and_carries_what_the_page_reads():
+    """The ledger's ruling for the summary and editor build's Task 2 ("the summary's short units
+    ('°', 'cd/m²')"): a line says degrees as the sign against the number and cd/m² with its
+    square, in force, waiting and drawn alike, while the box keeps the setting's own unit; and it
+    carries what the page reads to say a draft as the rig's value is said (`markLine`):
+    `data-unit`, what the line writes after a number ("°", " cd/m²", " s", "%", nothing for a whole
+    number; none on a line whose value is no number), and `data-said`, the status its title says,
+    where there is one."""
+    from wl_xcon.link import Applied
+
+    rows, groups = _summary_rows()
+    shape = {"shape": "uniform", "numbers": {"low": 1.0, "high": 2.5},
+             "values": [], "weights": [], "by": "person"}
+    rows = rows + (
+        ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.0, False, source="task", step=0.1,
+                    section="Gaze windows", label="Fixation window"),
+        ParamRow.of("fix_luminance", "cd/m2", 0.0, 80.0, 40.0, False, source="task", step=1.0,
+                    section="Stimuli", label="Fixation point brightness",
+                    applied=Applied(12, "jake")),
+        ParamRow.of("ring_radius", "deg", 0.0, 20.0, 8.0, False, source="form", step=0.1,
+                    section="Stimuli", switch="drawn", shape=shape),
+    )
+    params = fragments(frame(params=rows, groups=groups, staged=(
+        Staged("fix_window", 2.0, 1.5, Box("jake"), False, cid="p-1"),)), view())["params"]
+    said = {name: value for _, name, _, _, _, value in _lines(params)}
+    assert (said["fix_window"], said["fix_luminance"], said["ring_radius"]) == (
+        "2.0 → 1.5°", "40 cd/m²", "1–2.5°")
+    assert web._number_said(rows[-3], 2.0) == "2.0°"
+    assert '<span class="unit">deg</span>' in _cards(params)["fix_window"]
+    assert '<span class="unit">cd/m2</span>' in _cards(params)["fix_luminance"]
+    units = {html.unescape(name): html.unescape(unit) for name, unit in re.findall(
+        r'class="line[^"]*" data-open="([^"]*)"[^>]* data-unit="([^"]*)"', params)}
+    assert units == {"iti": " s", "fix_hold": " s", "set_size": "", "distractor_fraction": "%",
+                     "reward_correct": " mL", "fix_window": "°", "fix_luminance": " cd/m²",
+                     "ring_radius": "°"}, units
+    told = {html.unescape(name): html.unescape(status) for name, status in re.findall(
+        r'class="line[^"]*" data-open="([^"]*)" data-said="([^"]*)"', params)}
+    assert told == {"fix_window": "waiting for the next trial · jake (box, unverified)",
+                    "fix_luminance": "in force from trial 12"}, told

@@ -105,7 +105,7 @@ _OPEN_ITS_BOX = """(selector) => {
   let node = null;
   try { node = document.querySelector(selector); } catch (e) { return "not css"; }
   if (!node) { return "none"; }
-  const box = node.closest("#params > .editor > .box, #training-params > .editor > .box");
+  const box = node.closest("#params > .editing > .box, #training-params > .editing > .box");
   if (!box || !box.hidden) { return "shown"; }
   const name = box.getAttribute("data-card");
   const line = Array.from(box.parentNode.parentNode.querySelectorAll(
@@ -3567,7 +3567,7 @@ def _open(page, name: str, root: str = "#params") -> None:
 def _opened(page, root: str = "#params") -> list:
     """What the editor of `root` shows: each box's or panel's name not hidden, or the
     placeholder's words."""
-    return page.evaluate("""(root) => { const editor = document.querySelector(root + ' > .editor');
+    return page.evaluate("""(root) => { const editor = document.querySelector(root + ' > .editing');
         return editor === null ? null : Array.from(editor.children).filter((child) => !child.hidden)
         .map((child) => child.getAttribute('data-card') || child.getAttribute('data-newc') ||
         child.textContent.trim()); }""", root)
@@ -3814,7 +3814,7 @@ _LINE_OVERRUNS = """(root) => {
 _EDITOR_OVERRUNS = """(root) => {
   const overruns = """ + _OVERRUNS + """;
   const found = [];
-  const editor = document.querySelector(root + ' > .editor');
+  const editor = document.querySelector(root + ' > .editing');
   for (const line of document.querySelectorAll(root + ' > .summary .line[data-open]')) {
     line.click();
     const edge = editor.getBoundingClientRect().right;
@@ -3857,10 +3857,10 @@ def test_no_text_passes_its_box_at_three_widths(rig, tmp_path):
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": LAPTOP_H})
             assert page.evaluate(_LINE_OVERRUNS, root) == [], (tab, width)
-            page.evaluate(f"document.querySelectorAll('{root} > .editor details')"
+            page.evaluate(f"document.querySelectorAll('{root} > .editing details')"
                           ".forEach((d) => {{ d.open = false; }})")
             assert page.evaluate(_EDITOR_OVERRUNS, root) == [], (tab, width, "closed")
-            page.evaluate(f"document.querySelectorAll('{root} > .editor details')"
+            page.evaluate(f"document.querySelectorAll('{root} > .editing details')"
                           ".forEach((d) => {{ d.open = true; }})")
             assert page.evaluate(_EDITOR_OVERRUNS, root) == [], (tab, width, "open")
             assert page.evaluate(_LINE_OVERRUNS, root) == [], (tab, width, "after")
@@ -3937,11 +3937,13 @@ def test_every_popout_line_is_above_the_fold_at_1280x800(rig, tmp_path):
     assert len(bottoms) >= 15, bottoms
     below = [(name, round(bottom)) for name, bottom in bottoms if bottom > LAPTOP_H]
     assert below == [], below
-    # In columns, four at 1280 wide (the design's goal 1).
+    # In columns (the design's goal 1): two at 1280 wide beside the demo screen, as wide as the
+    # longest plain name a task may declare with its value (the ledger's ruling for the build's
+    # Task 2, which the four of the design cut: `test_no_popout_name_is_cut_at_1280`).
     columns = page.evaluate("""() => new Set(Array.from(document.querySelectorAll(
         '#params > .summary > .ssec')).map((section) => Math.round(
         section.getBoundingClientRect().left))).size""")
-    assert columns == 4, columns
+    assert columns == 2, columns
 
 
 def _rects(page, root: str = "#params") -> list:
@@ -3949,7 +3951,7 @@ def _rects(page, root: str = "#params") -> list:
     legend and the find box, in page coordinates."""
     return page.evaluate("""(root) => Array.from(document.querySelectorAll(
         root + ' > .summary .line, ' + root + ' > .summary .ssec > h4, ' + root + ' > .legend, ' +
-        root + ' > .editor')).map((node) => { const r = node.getBoundingClientRect();
+        root + ' > .editing')).map((node) => { const r = node.getBoundingClientRect();
         return [node.getAttribute('data-open') || node.className, Math.round(r.left * 10),
                 Math.round((r.top + window.scrollY) * 10), Math.round(r.width * 10),
                 Math.round(r.height * 10)]; })""", root)
@@ -3970,7 +3972,7 @@ def test_a_click_opens_a_setting_and_nothing_above_moves(rig, tmp_path):
     page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
     page.click('label[for="t-task"]')
     lines = page.locator("#params > .summary .line[data-open]")
-    assert lines.count() == page.locator("#params > .editor > .box").count() + 1, (
+    assert lines.count() == page.locator("#params > .editing > .box").count() + 1, (
         "a line for every box, and the Colors section's New color…")
     assert _opened(page) == ["click a setting above to change it"]
     before = _rects(page)
@@ -4018,7 +4020,8 @@ def test_the_opened_setting_survives_a_frame_and_a_reload(rig):
                  ".value === '3.50'")
     assert _opened(page) == ["fix_window"]
     # The line takes the frame's value in place, its node kept (`patchLine`).
-    assert page.text_content(f"{line} > .lv") == "3.50 deg"
+    # Degrees said short on the line (the ledger's ruling for the build's Task 2).
+    assert page.text_content(f"{line} > .lv") == "3.50°"
     assert page.evaluate("(line) => document.querySelector(line).wlxSame === true", line)
     assert "changed" in page.get_attribute(line, "class").split()
     page.click('label[for="t-runtime"]')
@@ -4147,7 +4150,7 @@ def test_new_color_opens_from_the_colors_section(rig):
 
     _open(page, "new-color:Colors")
     assert _opened(page) == ["Colors"]
-    assert page.evaluate("document.querySelector('#params > .editor > [data-newc=\"Colors\"]').open")
+    assert page.evaluate("document.querySelector('#params > .editing > [data-newc=\"Colors\"]').open")
     page.fill('[data-newc="Colors"] input[data-newc-name]', "violet")
     rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
     _arrived(page, 41)
@@ -4413,7 +4416,9 @@ def test_the_box_walks_through_its_states(rig):
 def test_a_later_accepted_change_clears_the_refusal(rig):
     """The design's goal 4: "a refusal is cleared by a later accepted change of that setting". The
     frame keeps its last refusals, so the rig still sends this one after a later change of the
-    setting was staged and applied; the box says the change in force, not the old refusal."""
+    setting was staged and applied; the box says the change in force, not the old refusal, and so
+    does its summary line, the rig's ! dropped (the summary and editor build's Task 2: the page's
+    "cleared-refusal marks")."""
     from wl_xcon.actor import Box
     from wl_xcon.link import Applied, Refused, Staged
 
@@ -4441,6 +4446,10 @@ def test_a_later_accepted_change_clears_the_refusal(rig):
     _says(rig, page, "fix_hold", "in force from trial 43")
     assert "refused" not in _classes(page, "fix_hold")
     assert "applied" in _classes(page, "fix_hold")
+    assert page.get_attribute(_line("fix_hold"), "data-said").startswith("refused 0.95"), (
+        "the rig's line still says the refusal")
+    assert _marked(page, "fix_hold") == ("", "0.40 s", "fix_hold · 0.40 s · in force from trial 43")
+    assert "refused" not in page.get_attribute(_line("fix_hold"), "class").split()
 
 
 def test_apply_all_sends_one_command_and_both_take_effect_on_one_trial(rig):
@@ -4825,14 +4834,17 @@ _PRESSED = {
     "apply": (_b("fix_hold") + " [data-apply]", "fix_hold", "0.35 s"),
     "withdraw": (_b("fix_hold") + " [data-withdraw]", "fix_hold", "0.35 → 0.50 s"),
     "hand back": (_b("gap") + ' [data-cmd="hand_back"]', "gap", "0.65 s"),
+    # A summary line (the summary and editor build's Task 2: the plan's Review Focus 1).
+    "line": ('#params > .summary .line[data-open="set_size"]', "set_size", "6 objects"),
 }
 
 
 @pytest.mark.parametrize("control", [
-    "field", "stepper", "segment", "tick", "swatch", "apply", "withdraw", "hand back"])
+    "field", "stepper", "segment", "tick", "swatch", "apply", "withdraw", "hand back", "line"])
 def test_a_press_during_frames_acts_once(rig, control):
     """The plan's Review Focus 1: a frame lands while a trainer presses a box's control -- a field,
-    −/+, a segment of the switch, a tick, a swatch, Apply, *withdraw*, *hand back* -- a frame that
+    −/+, a segment of the switch, a tick, a swatch, Apply, *withdraw*, *hand back*, a summary line
+    (the summary and editor build's Task 2, which opens its setting) -- a frame that
     changes that box's head and every neighbor's: the press acts once, and the box shows the
     frame's news after. The mouse goes down, the frame of trial 41 arrives, the mouse comes up.
     Run in WebKit too, where earlier fix rounds found a frame replacing the button under a press."""
@@ -4907,6 +4919,9 @@ def test_a_press_during_frames_acts_once(rig, control):
         assert _say(page, "fix_hold") == "sending…"
     elif control == "withdraw":
         assert [(type(s), s.cid) for s in sent] == [(Withdraw, staged[0].cid)]
+    elif control == "line":
+        assert sent == [] and _opened(page) == ["set_size"]
+        assert page.text_content(target + " > .lv") == "6"
     else:
         assert [(type(s), s.name) for s in sent] == [(HandBack, "gap")]
     for neighbor, shown in (("response_deadline", "0.60 s"), ("set_size", "6 objects"),
@@ -5304,7 +5319,7 @@ def test_the_top_bar_stays_in_view_while_settings_scroll(rig, tmp_path):
     for cmd in ("pause", "mark", "reward", "stop"):
         button = _rect(page, f'#bar [data-cmd="{cmd}"]')
         assert bar["top"] <= button["top"] and button["bottom"] <= bar["bottom"], cmd
-    last = page.evaluate("document.querySelector('#params > .editor > .box:not([hidden])')"
+    last = page.evaluate("document.querySelector('#params > .editing > .box:not([hidden])')"
                          ".getBoundingClientRect().bottom")
     assert last <= LAPTOP_H + 1, "the opened box is scrolled up under the bar"
 
@@ -5748,3 +5763,384 @@ def test_the_demo_keys_fold_after_the_first_visit(rig):
         blocked.reload()
         blocked.wait_for_selector("#demo-pane", state="visible")
         assert blocked.evaluate("document.getElementById('demo-fold').open") is True
+
+
+# **The summary and editor build's Task 2: what only the page knows, on the lines; find and the
+# keyboard.**
+
+
+def _line(name: str, root: str = "#params") -> str:
+    return f'{root} > .summary .line[data-open="{name}"]'
+
+
+def _marked(page, name: str, root: str = "#params") -> tuple:
+    """A summary line's marks, its value and its title, as the page shows them."""
+    return tuple(page.evaluate(
+        "(s) => { const l = document.querySelector(s); return [l.querySelector('.mk').textContent,"
+        " l.querySelector('.lv').textContent, l.getAttribute('title')]; }", _line(name, root)))
+
+
+def _popout_started(tmp_path, **over):
+    """`_popout_frame` with each setting that holds no value yet at its task's start (the pop-out's
+    `Param.start`), as a run shows them: the values a line says, and so how much of its width
+    they take."""
+    import importlib.util
+
+    from _demo import POPOUT, xtasks_or_skip
+
+    made = _popout_frame(tmp_path, **over)
+    spec = importlib.util.spec_from_file_location("popout_started", xtasks_or_skip() / POPOUT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    starts = {param.name: param.start for param in module.TASK.params}
+    return dataclasses.replace(made, params=tuple(
+        dataclasses.replace(row, value=starts[row.name])
+        if row.value is None and isinstance(starts.get(row.name), (int, float)) else row
+        for row in made.params))
+
+
+def test_no_popout_name_is_cut_at_1280(rig, tmp_path):
+    """The ledger's ruling for the summary and editor build's Task 2, on the Task 1 screenshot at
+    1280 × 800 ("Time to find the fixation…", "Ring distance from cen…", "Disc wind… 0.0 × disc
+    radi…"): no plain name of the pop-out's Task parameters is cut short -- at 1280 × 800 with the
+    demo screen's column shown, its settings at their start values, and every line still above
+    the fold -- nor at 1024 or 1440 wide. The columns are as wide as the longest plain name a task
+    may declare with a value beside it, and the summary says "°" and "cd/m²". Through the wire, in
+    a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_started(tmp_path, demo=True))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params .box", state="attached")
+    assert page.is_visible("#demo-pane"), "the demo screen's column is shown"
+    said = dict(page.eval_on_selector_all("#params > .summary .line[data-open]", """lines =>
+        lines.map((line) => [line.getAttribute('data-open'), line.querySelector('.lv').textContent])"""))
+    assert said["fix_hold"] == "0.5–1.25 s" and said["ring_radius"] == "8.0°", said
+    assert said["fix_luminance"] == "40 cd/m²", said
+    for width in WIDTHS:
+        page.set_viewport_size({"width": width, "height": LAPTOP_H})
+        cut = page.eval_on_selector_all("#params > .summary .line > .ln", """names => names.filter(
+            (name) => name.scrollWidth > name.clientWidth + 0.5).map((name) => name.textContent)""")
+        assert cut == [], (width, cut)
+        if width == 1280:
+            below = page.eval_on_selector_all("#params > .summary .line", """lines => lines.filter(
+                (line) => line.getBoundingClientRect().bottom + window.scrollY > 800).map(
+                (line) => line.getAttribute('data-open'))""")
+            assert below == [], below
+
+
+def test_a_draft_survives_opening_another_and_its_line_says_so(rig):
+    """The summary and editor design's goal 4 and its anti-goal ("a trainer who believes an unsent
+    edit is in force"): a value typed in one setting, then another opened, the first's box hidden
+    keeps the draft, and its line says so -- ● after the name, the value in force and then the
+    draft, "0.30 → 0.50 s", *not sent* in its title -- across a frame; the drafts bar names it, and
+    Apply all sends it, the line then saying … *sending…*. In a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import ApplyMany
+
+    page = _task6_page(rig)
+    rest = _marked(page, "fix_hold")
+    assert rest == ("", "0.30 s", "fix_hold · 0.30 s"), rest
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.50")
+    _open(page, "set_size")
+    assert _opened(page) == ["set_size"]
+    assert _marked(page, "fix_hold") == ("●", "0.30 → 0.50 s", "fix_hold · 0.30 → 0.50 s · not sent")
+    assert "draft" in page.get_attribute(_line("fix_hold"), "class").split()
+    _offer(rig, 41, params=_task6_rows())
+    _arrived(page, 41)
+    assert _marked(page, "fix_hold")[:2] == ("●", "0.30 → 0.50 s")
+    assert _marked(page, "set_size") == ("", "4", "set_size · 4"), "a line with no draft as drawn"
+    assert _bar(page) == "1 edit not sent: fix_hold"
+
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (sent,) = rig.dispatch.seen
+    assert type(sent) is ApplyMany
+    assert [(change.name, change.value) for change in sent.changes] == [("fix_hold", 0.5)]
+    mark, value, title = _marked(page, "fix_hold")
+    assert (mark, value) == ("…", "0.30 → 0.50 s") and "sending…" in title.split(" · ")
+
+
+def test_a_draft_over_a_waiting_change_shows_both_marks(rig):
+    """The plan's Review Focus 3: a draft typed over a change already waiting for the next trial
+    shows ●◷, the arrow's value the draft's, and its title says both -- *not sent* with who is
+    changing it, and the waiting change with who sent it; discarded, the line is the rig's again,
+    word for word. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Staged
+
+    page = _task6_page(rig, staged=(Staged("fix_hold", 0.3, 0.6, Box("Ana"), False, cid="other-1"),))
+    rig_line = _marked(page, "fix_hold")
+    assert rig_line[:2] == ("◷", "0.30 → 0.60 s"), rig_line
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.80")
+    _open(page, "set_size")
+
+    mark, value, title = _marked(page, "fix_hold")
+    assert (mark, value) == ("●◷", "0.30 → 0.80 s")
+    told = title.split(" · ")
+    assert told[:2] == ["fix_hold", "0.30 → 0.80 s"], told
+    assert "not sent · Ana (box, unverified) is changing this to 0.60" in title, title
+    assert "waiting for the next trial · Ana (box, unverified)" in title, title
+    assert {"draft", "waiting"} <= set(page.get_attribute(_line("fix_hold"), "class").split())
+
+    page.click(f'{_b("fix_hold")} [data-discard]')
+    assert _marked(page, "fix_hold") == rig_line
+
+
+def test_a_lines_draft_text_for_each_kind(rig):
+    """The plan's Global Constraints, "draft text on a line", read from the box's own fields: one
+    number field, the value in force, then the typed number with its unit once ("0.30 → 0.5 s"), a
+    percent's `%` ("80 → 85%"), a degree's "°", a whole number as typed ("4 → 6"); a draw, its two
+    ends as typed ("0.50 s → 0.5–1.25 s"); a pool, "N of 12" from its ticks; a color and a group,
+    "edited"; and a draft that cannot send, the typed text alone, marked ! as well as ●, *cannot
+    send* and its reason in the title. In a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
+    from wl_xcon.link import ParamRow
+
+    extra = (
+        ParamRow.of("distractor_fraction", "fraction", 0.0, 1.0, 0.8, False, source="task",
+                    step=0.05, percent=True, section="Stimuli"),
+        ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.0, False, source="task", step=0.1,
+                    section="Gaze windows"),
+        ParamRow.of("wait", "s", 0.05, 2.0, 0.5, False, source="task", step=0.05, switch="drawn",
+                    section="Timing"),
+    )
+    colors = tuple(row for row in _matrix_rows(40) if row.name in ("distractor_appearance", "pairings"))
+    page = _task6_page(rig, params=_group_rows() + extra + colors, groups=_move_up())
+
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.fill(f'{_b("set_size")} input[data-param="set_size"]', "6")
+    page.fill(f'{_b("distractor_fraction")} input[data-param="distractor_fraction"]', "85")
+    page.fill(f'{_b("fix_window")} input[data-param="fix_window"]', "2.5")
+    page.click(f'{_b("wait")} [data-switch="drawn"]')
+    page.fill(f'{_b("wait")} [data-fields="non_aging"] input[data-form="shortest"]', "0.5")
+    page.fill(f'{_b("wait")} [data-fields="non_aging"] input[data-form="longest"]', "1.25")
+    page.click(_tick("green among red"))
+    page.click(f'{_b("distractor_appearance")} .hue[data-color="red"]')
+    page.fill(f'{_b("Move up")} input[data-param="move_up_bar"]', "90")
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "abc")
+
+    for name, value in (("fix_hold", "0.30 → 0.5 s"), ("set_size", "4 → 6"),
+                        ("distractor_fraction", "80 → 85%"), ("fix_window", "2.0 → 2.5°"),
+                        ("wait", "0.50 s → 0.5–1.25 s"), ("pairings", "2 of 12 → 3 of 12"),
+                        ("distractor_appearance", "green → edited"),
+                        ("Move up", "80% · 50 → edited")):
+        mark, said, title = _marked(page, name)
+        assert (mark, said) == ("●", value), (name, mark, said)
+        assert "not sent" in title.split(" · "), (name, title)
+    mark, said, title = _marked(page, "response_deadline")
+    assert (mark, said) == ("!●", "0.60 s → abc"), (mark, said)
+    assert "cannot send · response_deadline needs a number" in title, title
+    assert "refused" in page.get_attribute(_line("response_deadline"), "class").split()
+    assert rig.dispatch.seen == []
+
+
+def test_a_refusal_stays_on_its_line_while_another_is_open(rig):
+    """The plan's Review Focus 5: a draft applied and refused, then another setting opened -- the
+    refused one's line keeps ! and ● with its draft after the arrow, the refusal and *not sent* in
+    its title, across a frame; opening it again shows the refusal on its status line and the draft
+    back in its field. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Refused
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.90")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    refusal = Refused("fix_hold", Box("Jake Westerberg"), "'fix_hold' at 0.9 is refused: too long",
+                      cid=rig.dispatch.seen[-1].cid, value=0.9)
+    _offer(rig, 41, params=_task6_rows(), refusals=(refusal,))
+    _says(rig, page, "fix_hold", "refused 0.90", start=True)
+    _open(page, "set_size")
+
+    for trial in (None, 42):
+        if trial is not None:
+            _offer(rig, trial, params=_task6_rows(), refusals=(refusal,))
+            _arrived(page, trial)
+        mark, value, title = _marked(page, "fix_hold")
+        assert (mark, value) == ("!●", "0.30 → 0.90 s"), (trial, mark, value)
+        assert "refused 0.90 · " in title and "not sent" in title.split(" · "), title
+    assert _opened(page) == ["set_size"]
+    _open(page, "fix_hold")
+    assert _opened(page) == ["fix_hold"]
+    assert _say(page, "fix_hold").startswith("refused 0.90")
+    assert page.input_value(field) == "0.90"
+    assert len(rig.dispatch.seen) == 1
+
+
+def test_sending_and_not_confirmed_marks(rig):
+    """The plan's Global Constraints: an act sent and not yet answered by a frame marks its line …
+    (*sending…* in the title), the value the one sent after the arrow; left with no word from the
+    rig for `ANSWER_FRAMES` frames, the box lets it go (the whole-build review's I2) and the line
+    says ? with the box's words, "not confirmed by the rig", the edit a draft again (●). In a real
+    browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.evaluate("document.getElementById('sent').textContent = ''")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    rig.wait_for(lambda: page.text_content("#sent").strip().startswith("sent"))
+    page.evaluate("document.activeElement.blur()")
+    _open(page, "set_size")
+    for trial in (None, 41, 42):
+        if trial is not None:
+            _offer(rig, trial, params=_task6_rows())
+            _arrived(page, trial)
+        mark, value, title = _marked(page, "fix_hold")
+        assert (mark, value) == ("…", "0.30 → 0.5 s"), (trial, mark, value)
+        assert "sending…" in title.split(" · "), title
+    _offer(rig, 43, params=_task6_rows())
+    _says(rig, page, "fix_hold", "not confirmed by the rig · check the value in force")
+    mark, value, title = _marked(page, "fix_hold")
+    assert (mark, value) == ("●?", "0.30 → 0.5 s"), (mark, value)
+    assert "not confirmed by the rig · check the value in force" in title
+    assert "unconfirmed" in page.get_attribute(_line("fix_hold"), "class").split()
+
+
+def test_find_highlights_lines_and_enter_opens_the_first(rig):
+    """The summary and editor design's goal 8: the find box highlights the lines it finds -- by a
+    plain name, a code name, a section, a group's setting -- and dims the rest; Enter in it opens
+    the first found, in the summary's order, sending nothing; cleared, nothing is highlighted or
+    dimmed. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import ParamRow
+
+    rows = tuple(dataclasses.replace(row, label="Fixation hold") if row.name == "fix_hold" else row
+                 for row in _group_rows()) + (
+        ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.0, False, section="Gaze windows"),
+        ParamRow.of("fix_size", "deg", 0.0, 9.0, 0.5, False, section="Stimuli/fixation point"),
+    )
+    page = _task6_page(rig, params=rows, groups=_move_up())
+    every = page.locator("#params > .summary .line[data-open]").count()
+
+    def found():
+        return page.eval_on_selector_all("#params > .summary .line.found",
+                                         "lines => lines.map((line) => line.getAttribute('data-open'))")
+
+    for typed, expected in (("fixation hold", ["fix_hold"]), ("FIX_WIN", ["fix_window"]),
+                            ("stimuli", ["set_size", "fix_size"]), ("move_up_window", ["Move up"])):
+        page.fill("#pfind", typed)
+        assert found() == expected and _found(page) == expected, typed
+        assert page.locator("#params > .summary .line.nofind").count() == every - len(expected)
+        assert not page.is_visible("#pfind-none"), typed
+    page.fill("#pfind", "stimuli")
+    page.press("#pfind", "Enter")
+    assert _opened(page) == ["set_size"]
+    page.fill("#pfind", "move_up_window")
+    page.press("#pfind", "Enter")
+    assert _opened(page) == ["Move up"]
+    page.fill("#pfind", "")
+    assert found() == [] and page.locator("#params > .summary .line.nofind").count() == 0
+    assert rig.dispatch.seen == []
+
+
+def test_find_with_no_match_opens_nothing(rig):
+    """The plan's Review Focus 4: a find that matches nothing dims every line, highlights none and
+    says "no setting matches"; Enter then opens nothing -- the editor keeps its placeholder, or the
+    setting already opened -- and sends nothing; cleared, the words go. In a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    _offer(rig, 40, params=_task6_rows())
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    every = page.locator("#params > .summary .line[data-open]").count()
+    assert every > 0
+    for opened in (None, "fix_hold"):
+        if opened is not None:
+            page.fill("#pfind", "")
+            _open(page, opened)
+        page.fill("#pfind", "no such setting")
+        assert page.locator("#params > .summary .line.nofind").count() == every
+        assert page.locator("#params > .summary .line.found").count() == 0
+        assert page.is_visible("#pfind-none")
+        assert page.text_content("#pfind-none") == "no setting matches"
+        page.press("#pfind", "Enter")
+        assert _opened(page) == (["click a setting above to change it"] if opened is None else [opened])
+    page.fill("#pfind", "")
+    assert not page.is_visible("#pfind-none")
+    assert rig.dispatch.seen == []
+
+
+def test_the_summary_steps_with_the_arrow_keys(rig):
+    """The summary and editor design's goal 7: on a summary line, ↓ and ↑ move to the next and the
+    previous line in the summary's order, past the lines the find box dims, and stop at the ends;
+    Enter opens the setting and puts its editor's first field in focus; Esc in that field, with no
+    draft, leaves it, and a second Esc returns focus to its line (the design's call). Nothing is
+    sent. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    page = _task6_page(rig)
+    order = page.eval_on_selector_all("#params > .summary .line[data-open]",
+                                      "lines => lines.map((line) => line.getAttribute('data-open'))")
+    assert order[:3] == ["fix_hold", "response_deadline", "set_size"], order
+
+    def focused():
+        return page.evaluate("document.activeElement.getAttribute('data-open') || "
+                             "document.activeElement.getAttribute('data-param') || "
+                             "document.activeElement.tagName")
+
+    page.focus(_line("fix_hold"))
+    for key, expected in (("ArrowDown", "response_deadline"), ("ArrowDown", "set_size"),
+                          ("ArrowUp", "response_deadline"), ("ArrowUp", "fix_hold"),
+                          ("ArrowUp", "fix_hold")):
+        page.keyboard.press(key)
+        assert focused() == expected, (key, expected)
+    page.focus(_line(order[-1]))
+    page.keyboard.press("ArrowDown")
+    assert focused() == order[-1]
+    page.fill("#pfind", "set_size")
+    page.focus(_line("fix_hold"))
+    page.keyboard.press("ArrowDown")
+    assert focused() == "set_size", "past the lines the find box dims"
+    page.fill("#pfind", "")
+
+    page.focus(_line("response_deadline"))
+    page.keyboard.press("Enter")
+    assert _opened(page) == ["response_deadline"]
+    assert focused() == "response_deadline" and page.evaluate(
+        "document.activeElement.tagName") == "INPUT", "the editor's first field"
+    page.keyboard.press("Escape")
+    assert focused() == "BODY", "Esc with no draft leaves the field"
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.matches('.summary .line[data-open=\"response_deadline\"]')")
+    assert rig.dispatch.seen == []
+
+
+def test_a_frame_during_a_press_on_a_line_opens_it_once(rig):
+    """The plan's Review Focus 1: a frame lands while a summary line is pressed -- one changing that
+    line's value and its neighbors' -- and the press opens the setting once, the line's node kept
+    and its value the frame's after; then, a field of the opened box being typed in, another frame
+    changes the setting's value in force: the field keeps its focus and its draft, and the line
+    says the draft over the new value in force. In a real browser: run with `WLX_BROWSER=webkit`
+    too, for Safari."""
+    page = _task6_page(rig, params=_matrix_rows(40))
+    line = _line("set_size")
+    page.evaluate("""(line) => {
+        window.__opens = 0;
+        document.querySelector(line).wlxSame = true;
+        document.addEventListener('click', (e) => {
+            if (e.target.closest && e.target.closest(line)) { window.__opens += 1; } }, true);
+    }""", line)
+    page.hover(line)
+    page.mouse.down()
+    _offer(rig, 41, params=_matrix_rows(41))
+    _arrived(page, 41)
+    assert page.text_content(f"{line} > .lv") == "4", "held while the line is pressed"
+    page.mouse.up()
+    rig.wait_for(lambda: page.text_content(f"{line} > .lv") == "6")
+    assert _opened(page) == ["set_size"]
+    assert page.evaluate("window.__opens") == 1
+    assert page.evaluate("(line) => document.querySelector(line).wlxSame === true", line)
+
+    field = f'{_b("set_size")} input[data-param="set_size"]'
+    page.fill(field, "8")
+    rows = tuple(dataclasses.replace(row, value=7) if row.name == "set_size" else row
+                 for row in _matrix_rows(41))
+    _offer(rig, 42, params=rows)
+    _arrived(page, 42)
+    rig.wait_for(lambda: page.text_content(f"{line} > .lv") == "7 → 8")
+    assert page.evaluate("document.activeElement.getAttribute('data-param')") == "set_size"
+    assert page.input_value(field) == "8" and _marked(page, "set_size")[0] == "●"
+    assert page.evaluate("(line) => document.querySelector(line).wlxSame === true", line)
+    assert rig.dispatch.seen == []
