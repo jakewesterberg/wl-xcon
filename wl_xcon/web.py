@@ -59,7 +59,9 @@ from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
-from wl_xcon.task import BELOW_ZERO, OTHER, TRAINING_SECTION, Family, Outcome, at_hardest
+from wl_xcon.task import (
+    BELOW_ZERO, CEILINGS, OTHER, TRAINING_SECTION, Family, Outcome, at_hardest,
+)
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
 
@@ -2865,7 +2867,13 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
 
 
 def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
-    """One box per `ParamRow` (`_box`, the console interface rework's Task 5: head, editor, one
+    """**A settings tab: the summary, its legend, then the editor** (the summary and editor design
+    of 2026-11-19, mock-up A, which the PI chose: "go A"): one line per box in the summary
+    (`_summary`), and in the editor below it every box and each section's New color… panel, each
+    `hidden` but the one the page opens (`_hidden`; `openSetting` in the script), with a
+    placeholder said while none is.
+
+    One box per `ParamRow` (`_box`, the console interface rework's Task 5: head, editor, one
     status line and a *more* opened in place): value, unit, range, the ceiling flag, a staged
     marker, and -- P4d-2b b2a -- the input and its − and + that set it and the last refusal of it
     with its sentence (spec §5.2: "A refusal shows on the card and in the feed"), its gist on the
@@ -2905,36 +2913,30 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     for change in frame.staged:
         if change.cid:
             acts.setdefault(change.cid, []).append(change.name)
-    # **Each setting's group** (`Telemetry.groups`; the console interface rework's Task 7), by the
-    # first group naming it, a ceiling never (`check`'s `bad-group` refuses one at load): a group's
-    # box stands where its first setting would, and its settings have no box of their own.
-    rows = {row.name: row for row in frame.params}
-    grouped: dict = {}
-    for group in frame.groups:
-        for setting in group.settings:
-            if setting in rows and not rows[setting].bounded:
-                grouped.setdefault(setting, group)
-    drawn: set = set()
-    colored = []
+    entries = [entry for entry in _entries(frame) if _training(entry[0]) == training]
     cards = []
-    for row in frame.params:
-        section = row.section or OTHER
-        group = grouped.get(row.name)
+    for section, row, group, members in entries:
         if group is not None:
-            if group.name in drawn:
-                continue
-            drawn.add(group.name)
-            members = [rows[name] for name in group.settings if grouped.get(name) is group]
-            cards.append((section, sum(1 for member in members if member.changed),
-                          _group_box(group, members, frame, view, staged, acts), len(members)))
+            cards.append((section, _group_box(group, members, frame, view, staged, acts)))
             continue
         change = staged.get(row.name)
         refusal = refused.get(row.name)
         together = tuple(acts.get(change.cid, ())) if change is not None and change.cid else ()
         label, editor = _editor(row, frame, view)
-        cards.append((section, 1 if row.changed else 0,
-                      _box(row, frame, view, label, editor, change, refusal, together), 1))
-        colored.append((section, row))
+        cards.append((section, _box(row, frame, view, label, editor, change, refusal, together)))
+    panels = _new_colors([(section, row) for section, row, group, _ in entries if group is None],
+                         view)
+    # **The editor** (the summary and editor design's goal 2): every box, and each section's New
+    # color… panel after its boxes, in the summary's order, each `hidden` until the page's script
+    # opens it (`openSetting`), so drafts, `patchCards` and `judge` keep every box; the
+    # placeholder said while none is opened.
+    shown = []
+    for top, node in _in_order(cards):
+        for section, found in [(top, node["own"])] + [
+                (f"{top}/{sub}", subs) for sub, subs in node["subs"].items()]:
+            shown.extend(_hidden(html) for _, html in found)
+            if section in panels and found:
+                shown.append(_hidden(panels[section]))
     # **A withdrawal the rig refused** (`Refused` named `withdraw`, its `cid` the act's; the
     # console interface rework's Task 4), its reason in short, for the script to say on the act's
     # boxes ("not withdrawn · it is already in force from trial 41 ..."): no box is named
@@ -2947,10 +2949,297 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     # -- a change waiting no more may have applied.
     declined += "".join(f'<span class="wdn" data-cid="{_e(cid)}"></span>'
                         for cid in frame.withdrawals)
-    run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
-    return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run,
-                      _new_colors(colored, view))
+    return (_summary(frame, view, training)
+            + f'<div class="legend">{_e(SUMMARY_LEGEND)}</div>'
+            + f'<div class="editor"><div class="placeholder">{_e(EDITOR_EMPTY)}</div>'
+            + "".join(shown) + "</div>"
             + f'<div class="wdrs" hidden>{declined}</div>')
+
+
+#: **What each mark on a summary line means** (the summary and editor design's goal 3), said once
+#: under the summary.
+SUMMARY_LEGEND = ("● not sent · ◷ waiting for the next trial · ◆ drawn each trial · ! refused · "
+                  "⚠ with a warning")
+
+#: **What the editor says with no setting opened** (the summary and editor design's goal 5).
+EDITOR_EMPTY = "click a setting above to change it"
+
+#: **A section's line that opens its New color… panel** (the summary and editor design's call:
+#: "the *New color…* panel opens from the Colors section's header in the summary, into the
+#: editor"), and the prefix of its `data-open`, the section after it.
+NEW_COLOR_LINE, NEW_COLOR_OPEN = "New color…", "new-color:"
+
+
+def _hidden(markup: str) -> str:
+    """A box's or a panel's markup with `hidden` on its own tag, for the editor (`_params`): the
+    page's script shows the one opened (`openSetting`), last among its attributes. Every value
+    this module writes in an attribute is escaped (`_e`), so its tag's first `>` closes it."""
+    tag, close, rest = markup.partition(">")
+    if not tag.startswith("<") or not close:
+        raise ValueError("the editor hides an element")
+    return f"{tag} hidden>{rest}"
+
+
+def _entries(frame) -> list:
+    """**Each box a frame's settings make, in the frame's order** (`_params`, `_summary`):
+    `(section, row, None, (row,))` for a setting's own box, `(section, None, group, members)` for
+    a group's (`Telemetry.groups`; the console interface rework's Task 7), which stands where its
+    first setting would, by the first group naming each setting, a ceiling never (`check`'s
+    `bad-group` refuses one at load); a group's settings have no box of their own. A row naming no
+    section is under Other."""
+    rows = {row.name: row for row in frame.params}
+    grouped: dict = {}
+    for group in frame.groups:
+        for setting in group.settings:
+            if setting in rows and not rows[setting].bounded:
+                grouped.setdefault(setting, group)
+    drawn: set = set()
+    found = []
+    for row in frame.params:
+        section = row.section or OTHER
+        group = grouped.get(row.name)
+        if group is None:
+            found.append((section, row, None, (row,)))
+        elif group.name not in drawn:
+            drawn.add(group.name)
+            found.append((section, None, group,
+                          [rows[name] for name in group.settings if grouped.get(name) is group]))
+    return found
+
+
+def _in_order(items: list) -> list:
+    """**`(section, ...)` items in their sections' order** (the console settings design's §7; the
+    PI, 2026-11-16: "The task file names it"; the summary and editor design's call: "the Ceilings
+    section comes last"): each section in the order its first item comes, a subsection
+    (`"Stimuli/fixation point"`) under its parent, which keeps its own items first, and Ceilings
+    (`task.CEILINGS`) last. `[(top, {"own": [...], "subs": {sub: [...]}})]`."""
+    tree: dict = {}
+    for item in items:
+        top, _, sub = item[0].partition("/")
+        node = tree.setdefault(top, {"own": [], "subs": {}})
+        (node["subs"].setdefault(sub, []) if sub else node["own"]).append(item)
+    return ([(top, node) for top, node in tree.items() if top != CEILINGS]
+            + [(top, node) for top, node in tree.items() if top == CEILINGS])
+
+
+def _number_said(row, value: object) -> str:
+    """**A number as a summary line says it** (`_summary_value`): at its box's decimals
+    (`_figure`) with its unit, a percent's ×100 with `%` against it, a whole number's with none
+    ("4", the mock-up the PI chose: "Number of discs 4")."""
+    shown = _figure(row, value)
+    if row.whole:
+        return shown
+    if row.percent:
+        return f"{shown}%"
+    unit = _unit_of(row)
+    return f"{shown} {unit}" if unit else shown
+
+
+#: **The numbers of a draw a summary line says as its range** (`ParamRow.shape`'s, by shape):
+#: shortest to longest, low to high; a list's values from least to most.
+_DRAW_ENDS = {"non_aging": ("shortest", "longest"), "uniform": ("low", "high"),
+              "normal": ("low", "high")}
+
+#: **What a summary line says in a value's place** where each trial has one of its own and no
+#: shape says its range (the sources of `_PER_TRIAL`), in short; the line's title says it whole.
+_PER_TRIAL_SHORT = {
+    "conditions": "from conditions", "pool": "from pairings", "staircase": "by its staircase",
+    "draw": "drawn each trial", "range": "drawn each trial", "form": "drawn each trial",
+}
+
+
+def _drawn_said(row) -> str | None:
+    """**A draw in force as a summary line says it** (`ParamRow.shape`): its range, "0.5–1.25 s",
+    each end every digit it holds (`_significant`), a percent's ×100; a scaling, its factor
+    against `SCALED_UNIT`; with no shape, the range of the draw's live numbers a person may change
+    (`ParamRow.numbers`, its `low` and `high`); `None` where none names a range."""
+    shape = row.shape or {}
+    kind = shape.get("shape")
+    numbers = shape.get("numbers") or {}
+    if not shape and row.source in ("draw", "range") and isinstance(row.numbers, dict):
+        kind, numbers = "uniform", row.numbers
+    if kind == "scaled":
+        factor = numbers.get("factor")
+        return None if factor is None else f"{_significant(float(factor))} {SCALED_UNIT}"
+    if kind in _DRAW_ENDS:
+        ends = [numbers.get(name) for name in _DRAW_ENDS[kind]]
+    elif kind in ("list", "weights") and shape.get("values"):
+        ends = [min(shape["values"]), max(shape["values"])]
+    else:
+        return None
+    if not all(isinstance(end, (int, float)) and not isinstance(end, bool) for end in ends):
+        return None
+    if row.percent:
+        return f"{_significant(_hundred(ends[0]))}–{_significant(_hundred(ends[1]))}%"
+    said = f"{_significant(float(ends[0]))}–{_significant(float(ends[1]))}"
+    return f"{said} {row.unit}" if row.unit else said
+
+
+def _summary_value(row) -> str:
+    """**The value in force as a summary line says it** (the summary and editor design's call:
+    "the summary's value is the rig's: rendered in Python from the same row the box uses"), plain
+    text: a pool's "2 of 12"; a color's hue, or "from pairings" where its pool draws it; a value
+    the training switch holds, in its words ("frozen at 0.60 s"); a position or an appearance in
+    the rig's words; a draw in force as its range, "0.5–1.25 s" (`_drawn_said`); a value each
+    trial gives its own, in short (`_PER_TRIAL_SHORT`); else the number at its box's decimals with
+    its unit (`_number_said`), a ceiling's too, or the value as written."""
+    if row.members is not None:
+        whole = _whole(row.value)
+        total = len(row.members)
+        if whole is None or not 1 <= whole < 1 << total:
+            return _figure(row, row.value)
+        return f"{sum(1 for member in row.members if whole & member.bit)} of {total}"
+    if row.color is not None:
+        hue = row.color.get("hue") if isinstance(row.color, dict) else None
+        if hue:
+            return str(hue)
+        if row.source == "pool":
+            return _PER_TRIAL_SHORT["pool"]
+        return row.words if row.words is not None else _figure(row, row.value)
+    held = _HELD_BY.get(row.source)
+    if held is not None:
+        return f"{held[0]} {_number_said(row, row.value)}"
+    if row.position is not None:
+        return row.position
+    if row.words is not None:
+        return row.words
+    drawn = _drawn_said(row)
+    if drawn is not None:
+        return drawn
+    if row.source in _PER_TRIAL_SHORT:
+        return _PER_TRIAL_SHORT[row.source]
+    if isinstance(row.value, (int, float)) and not isinstance(row.value, bool):
+        return _number_said(row, row.value)
+    return _figure(row, row.value)
+
+
+def _drawn(row) -> bool:
+    """**Whether a summary line marks its value ◆, drawn each trial** (the summary and editor
+    design's goal 3): a value its conditions, its draw, its pool or its staircase gives each trial
+    (`_PER_TRIAL`), a person's draw among them -- not a size scaled by eccentricity, whose objects
+    each have their own but no trial draws."""
+    if row.source not in _PER_TRIAL:
+        return False
+    return not (row.shape is not None and row.shape.get("shape") == "scaled")
+
+
+def _waits(row, change, now: str) -> str:
+    """**A line's value with what waits for the next trial after an arrow** (the summary and
+    editor design's goal 3: "in force → waiting"): a number's unit once, after what waits ("0.30 →
+    0.50 s"), anything else as it is, then the arrow; `now` alone where nothing waits."""
+    if change is None:
+        return now
+    becomes = _plain(_becomes(change, row))
+    if (not change.hands_back and isinstance(change.now, (int, float))
+            and not isinstance(change.now, bool) and row.members is None
+            and now == _number_said(row, row.value)):
+        return f"{_figure(row, row.value)} → {_number_said(row, change.now)}"
+    return f"{now} → {becomes}"
+
+
+def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, said: str,
+          drawn: bool, changed: bool, bounded: bool, words: str) -> str:
+    """**One summary line** (the summary and editor design's goal 1), a button that opens its
+    setting in the editor (`data-open`, its box's `data-card`): its marks (`span.mk`), its plain
+    name (`span.ln`) and its value in force (`span.lv`, the in force alone in `data-now`), with
+    what waits after an arrow. The marks the rig knows (the design's call on combined states):
+    ◷ a change waiting (`waiting`), else ! a refusal (`refused`), else ⚠ a warning (`warned`), as
+    the box's status line ranks them (`_status`), then ◆ a value drawn each trial (`drawn`); and
+    the classes `changed` (it differs from the task's start) and `ceiling`. Its `title` says
+    every state in words: the whole name, the value, the status line whole, how it is drawn,
+    changed, a ceiling."""
+    mark, kind = {"staged": ("◷", "waiting"), "refused": ("!", "refused"),
+                  "warned": ("⚠", "warned")}.get(state, ("", ""))
+    classes = " ".join(word for word in ("line", kind, "drawn" if drawn else "",
+                                         "changed" if changed else "",
+                                         "ceiling" if bounded else "") if word)
+    named = label if label == codes else f"{label} ({codes})"
+    told = [named, shown]
+    if state:
+        told.append(_whole_say(state, said))
+    if drawn:
+        told.append(words)
+    if changed:
+        told.append("changed from the task's start")
+    if bounded:
+        told.append("a welfare ceiling: sent alone, by its own Apply")
+    return (f'<button type="button" class="{classes}" data-open="{_e(name)}" '
+            f'title="{_e(" · ".join(told))}"><span class="mk">{mark}{"◆" if drawn else ""}</span>'
+            f'<span class="ln">{_e(label)}</span><span class="lv" data-now="{_e(now)}">'
+            f"{_e(shown)}</span></button>")
+
+
+def _summary(frame, view: View, training: bool) -> str:
+    """**The summary of a settings tab** (the summary and editor design's goal 1; the PI,
+    2026-11-19: "perhaps some way to visualize all params at top and clicking opens the ability to
+    change it below", mock-up A): one line per box `_params` draws (`_line`), a group's one
+    (its title, its settings' values joined by " · "), in its sections (`_sections`), the
+    Ceilings section last; a section holding a color card ends with a *New color…* line that opens
+    its panel. Each line's value is the rig's (`_summary_value`); the page's script adds what it
+    alone knows. `view` is the boxes' (nothing here is gated: a line sends nothing)."""
+    staged = {change.name: change for change in frame.staged}
+    refused = {refusal.name: refusal for refusal in frame.refusals}
+    peers = _percents(frame)
+    entries = [entry for entry in _entries(frame) if _training(entry[0]) == training]
+    lines = []
+    for section, row, group, members in entries:
+        if group is None:
+            change = staged.get(row.name)
+            state, said = _status(row, change, refused.get(row.name), peers)
+            now = _summary_value(row)
+            drawn = _drawn(row)
+            words = _plain(_PER_TRIAL[row.source][0]) if drawn else ""
+            lines.append((section, 1 if row.changed else 0, _line(
+                row.name, row.label or row.name, row.name, now, _waits(row, change, now),
+                state, said, drawn, row.changed, row.bounded, words), 1))
+            continue
+        state, said = _group_state(members, frame, staged)
+        values = [_summary_value(member) for member in members]
+        now = " · ".join(values)
+        shown = " · ".join(_waits(member, staged.get(member.name), value)
+                           for member, value in zip(members, values))
+        drawn = [member for member in members if _drawn(member)]
+        words = "; ".join(f"{member.label or member.name} {_plain(_PER_TRIAL[member.source][0])}"
+                          for member in drawn)
+        changed = sum(1 for member in members if member.changed)
+        lines.append((section, changed, _line(
+            group.name, group.name, ", ".join(member.name for member in members), now, shown,
+            state, said, bool(drawn), bool(changed), False, words), len(members)))
+    colored = {section for section, row, group, _ in entries
+               if group is None and isinstance(row.color, dict) and row.color.get("sets")}
+    panels = {section: f'<button type="button" class="line newcolor" '
+                       f'data-open="{_e(NEW_COLOR_OPEN + section)}" title="{_e(NEW_COLOR_LINE)} '
+                       f'{_e(section)}: define a color and save it as a proposal"><span class="mk">'
+                       f'</span><span class="ln">{_e(NEW_COLOR_LINE)}</span><span class="lv">'
+                       f"</span></button>" for section in colored}
+    run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
+    return _sections(frame.task, lines, run, panels)
+
+
+def _group_state(members: list, frame, staged: dict) -> tuple[str, str]:
+    """**A group's state and status line, as its box ranks them** (`_group_box`): a change of it
+    waiting, the last refusal of any of its settings, the change in force latest, else
+    `GROUP_REST`; its marks on its summary line (`_line`)."""
+    by_name = {row.name: row for row in members}
+    change = next((staged[row.name] for row in members if row.name in staged), None)
+    if change is not None:
+        return "staged", f"{WAITING} · {_who(change.by)}"
+    refusal = None
+    for one in frame.refusals:
+        if one.name in by_name:
+            refusal = one
+    if refusal is not None:
+        row = by_name[refusal.name]
+        value = "" if refusal.value is None else f" {_e(_refused_value(row, refusal.value))}"
+        gist = _gist(_in_percent(row, refusal.why, _percents(frame)))
+        return "refused", f"refused {_e(row.label or row.name)}{value} · {_e(gist)}"
+    applied = [row for row in members if row.applied is not None]
+    if applied:
+        last = max(applied, key=lambda row: row.applied.trial)
+        if last.warned:
+            return "warned", f"in force, with a warning · from trial {_e(last.applied.trial)}"
+        return "applied", f"in force from trial {_e(last.applied.trial)}"
+    return "", _e(GROUP_REST)
 
 
 def _echoes(row) -> bool:
@@ -3183,9 +3472,10 @@ def _training(section: str) -> bool:
 
 
 def _training_params(frame: Telemetry | None, view: View) -> str:
-    """**The cards of every section under Training** (`_training`; the console settings design's
-    §8), in their sections as the Task parameters tab lays its own out (`_sections`), each card as
-    `_params` makes it; a line saying none where the task declares none."""
+    """**The settings of every section under Training** (`_training`; the console settings
+    design's §8), as the Task parameters tab lays its own out (`_params`: the summary, in its
+    sections, and the editor), each box as `_params` makes it; a line saying none where the task
+    declares none."""
     if frame is None:
         return _NONE
     if not any(_training(row.section or OTHER) for row in frame.params):
@@ -3250,49 +3540,44 @@ def _runtime_shaping(frame: Telemetry | None) -> str:
 
 
 def _count(settings: int, changed: int) -> str:
-    """A section header's counts (`Timing · 7 settings · 2 changed`; the console settings design's
-    §7: "each header counts its settings and how many differ from the task's start")."""
+    """A section header's counts whole (`7 settings · 2 changed`; the console settings design's §7:
+    "each header counts its settings and how many differ from the task's start"), its `title`
+    in the summary, whose line says the settings alone (`_sections`)."""
     return f"{settings} setting{'' if settings == 1 else 's'} · {changed} changed"
 
 
 def _sections(task: str, cards: list, run: str = "", panels: dict | None = None) -> str:
-    """**The cards in their sections** (the console settings design's §7; the PI, 2026-11-16:
-    "The task file names it", "As you last left them"): each `(section, changed, html)` under the
-    section its row names (`ParamRow.section`; a row naming none, one made by hand, under Other),
-    **in the order each section's first setting is declared**, a subsection (`"Stimuli/fixation
-    point"`) nested in its parent, which keeps its own settings first. Each is a `<details>`
-    headed by its name and `_count`, a parent's count taking in its subsections' -- all open as
-    sent: the page opens each as last left, per `task` (`data-task`), in `localStorage`
-    (`applySections`), which the rig never reads. A section with no setting is not made. `run`
-    names the run in progress (`data-run`; "" between runs): the script drops every draft when it
-    changes (the console interface design's call: "drafts ... dropped at the run's end").
-
-    Each card is `(section, changed, html, settings)`: a group's box holds `settings` settings,
-    `changed` of them differing from the task's start, and counts them all (`_group_box`); and
-    `panels` gives a section's one New color… panel, after its boxes (`_new_colors`)."""
+    """**The summary's lines in their sections** (the console settings design's §7; the PI,
+    2026-11-16: "The task file names it"; the summary and editor design's goal 1): each `(section,
+    changed, html, settings)` under the section its row names (`ParamRow.section`; a row naming
+    none, one made by hand, under Other), **in the order each section's first setting is
+    declared**, Ceilings last (`_in_order`), a subsection (`"Stimuli/fixation point"`) nested in
+    its parent, which keeps its own lines first. Each is a `<div class="ssec" data-section=…>`
+    headed by its name and how many settings it holds (`<h4>Timing · 6 settings</h4>`, a parent's
+    taking in its subsections', a group's box counting each of its settings), on one line, the
+    whole with how many changed from the task's start in its `title` (`_count`); sections no
+    longer fold (the design's call: "the summary is short enough"). A section with no setting is
+    not made. `panels` gives a section's *New color…* line, after its lines. `task` names the task
+    (`data-task`: what the page keeps the opened setting and the pins under), and `run` the run in
+    progress (`data-run`; "" between runs): the script drops every draft when it changes (the
+    console interface design's call: "drafts ... dropped at the run's end")."""
     panels = panels or {}
-    tree: dict = {}
-    for named, changed, html, settings in cards:
-        top, _, sub = named.partition("/")
-        node = tree.setdefault(top, {"own": [], "subs": {}})
-        (node["subs"].setdefault(sub, []) if sub else node["own"]).append(
-            (changed, html, settings))
 
     def block(name: str, own: list, counted: list, inside: str = "") -> str:
-        count = _count(sum(settings for _, _, settings in counted),
-                       sum(changed for changed, _, _ in counted))
+        settings = sum(item[3] for item in counted)
+        whole = _count(settings, sum(item[1] for item in counted))
         label = name.rpartition("/")[2]
-        cards = (f'<div class="cards">{"".join(html for _, html, _ in own)}</div>{panels.get(name, "")}'
-                 if own else "")
-        return (f'<details class="sec" data-sec="{_e(name)}" open>'
-                f"<summary>{_e(label)} · {count}</summary>{cards}{inside}</details>")
+        said = f"{settings} setting{'' if settings == 1 else 's'}"
+        lines = "".join(item[2] for item in own) + (panels.get(name, "") if own else "")
+        return (f'<div class="ssec" data-section="{_e(name)}"><h4 title="{_e(label)} · {whole}">'
+                f"{_e(label)} · {said}</h4>{lines}{inside}</div>")
 
     parts = []
-    for top, node in tree.items():
+    for top, node in _in_order(cards):
         subs = "".join(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
         every = node["own"] + [one for found in node["subs"].values() for one in found]
         parts.append(block(top, node["own"], every, subs))
-    return (f'<div class="secs" data-task="{_e(task)}" data-run="{_e(run)}">'
+    return (f'<div class="summary" data-task="{_e(task)}" data-run="{_e(run)}">'
             f'{"".join(parts)}</div>')
 
 
@@ -3988,13 +4273,29 @@ body.session-shut .session { display: none !important; }
 .kv.wrap > .btn { flex-shrink: 1; max-width: 100%; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; }
-.secs { display: grid; gap: 6px; }
-.sec { border: 0; padding: 0; }
-.sec .sec { margin-top: 4px; }
-.sec > summary { cursor: pointer; font-weight: 600; font-size: 12.5px; padding: 1px 0; }
-.sec .sec > summary { font-weight: 500; color: var(--muted); }
-.sec[open] > summary { margin-bottom: 3px; }
-.sec > summary .ns, .tab .tns { color: var(--accent); font-weight: 600; }
+.summary { columns: 4 13.5em; column-gap: 20px; min-width: 0; }
+.ssec { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; margin: 0 0 6px; min-width: 0; }
+.ssec .ssec { margin: 3px 0 0; }
+.ssec > h4 { margin: 0 0 1px; height: 17px; line-height: 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssec .ssec > h4 { text-transform: none; letter-spacing: 0; font-weight: 500; border-bottom: 0; }
+.ssec > h4 .ns, .tab .tns { color: var(--accent); font-weight: 600; }
+.line { display: flex; align-items: center; gap: 5px; box-sizing: border-box; width: 100%; height: 20px; margin: 0; padding: 0 4px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; line-height: 20px; text-align: left; cursor: pointer; min-width: 0; }
+.line:hover { background: var(--surface-2); }
+.line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.line[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.line > .mk { flex: none; min-width: 2em; font-size: 11px; color: var(--accent); white-space: nowrap; text-align: center; }
+.line > .ln { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line > .lv { flex: 0 1 auto; max-width: 62%; min-width: 0; font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.line.waiting > .lv { color: var(--accent); }
+.line.refused > .mk, .line.refused > .lv { color: var(--crit); }
+.line.warned > .mk { color: var(--warn); }
+.line.changed > .ln { font-weight: 600; }
+.line.ceiling > .ln { color: var(--warn); font-weight: 600; }
+.line.newcolor > .ln { color: var(--accent); }
+.summary .line.nofind { display: flex !important; opacity: 0.35; }
+.params > .legend { font-size: 11px; color: var(--muted); }
+.params > .editor { border-top: 2px solid var(--ink); padding-top: 8px; min-width: 0; }
+.params > .editor > .placeholder { color: var(--muted); font-size: 13px; padding: 4px 0; }
 .cards { display: grid; gap: 5px; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); align-items: start; }
 .nofind { display: none !important; }
 .panel .top.tools { justify-content: flex-start; }
@@ -4924,37 +5225,105 @@ _SCRIPT = """
       group.hidden = group.getAttribute("data-fields") !== shape;
     });
   }
-  // **The sections of the Task parameters tab and the Training tab** (the console settings
-  // design's §7 and §8; the PI, 2026-11-16, "As you last left them"): each opens as it was last
-  // left, per task and per tab, in the browser's own storage under `wlx.sections.<task>` for the
-  // Task parameters tab and `wlx.training-sections.<task>` for the Training tab (the whole-build
-  // review's I3) -- the names of those left closed. Every access is inside `try`: a store that
-  // throws (a private window, blocked site data) leaves every section open, and a click still
-  // opens and closes them. The find box, the Task parameters tab's, filters its cards by name and
-  // opens the sections of those it finds, without touching what is kept.
-  var SECTIONS_KEY = "wlx.sections.";
-  var TRAINING_SECTIONS_KEY = "wlx.training-sections.";
-  function sectionsKey(root) {
-    return (root.closest("#training-params") ? TRAINING_SECTIONS_KEY : SECTIONS_KEY) +
-      root.getAttribute("data-task");
+  // **The setting opened in each settings tab's editor** (the summary and editor design's goals 2
+  // and 5; the PI, 2026-11-19: "clicking opens the ability to change it below"): a click on a
+  // summary line (`.line[data-open]`) shows that setting's box -- or its section's New color…
+  // panel, `new-color:SECTION` -- in the editor below, every other hidden and the placeholder with
+  // them, its line `aria-pressed`; nothing above the editor moves. Kept per task and per tab, the
+  // last opened, in the browser's own storage under `wlx.opened.<task>` for the Task parameters
+  // tab and `wlx.training-opened.<task>` for the Training tab, every access inside `try`, and held
+  // for the page as well, so a store that throws keeps it while the page is shown; shown again on
+  // a reload and after every frame (`applyOpened`). One no longer among the tab's settings -- a
+  // new task or run without it, a group regrouped -- is dropped, and the placeholder said (the
+  // plan's Review Focus 2). Sections no longer fold: the summary is short enough (the design's
+  // call), so `wlx.sections.<task>` is no longer read or written.
+  var OPENED_KEY = "wlx.opened.";
+  var TRAINING_OPENED_KEY = "wlx.training-opened.";
+  var NEW_COLOR_OPEN = "new-color:";
+  var openedHeld = {};
+  function openedKey(root) {
+    var summary = root.querySelector(":scope > .summary");
+    if (!summary) { return null; }
+    return (root.id === "training-params" ? TRAINING_OPENED_KEY : OPENED_KEY) +
+      (summary.getAttribute("data-task") || "");
   }
-  function readSections(key) {
+  function readOpened(key) {
+    if (!Object.prototype.hasOwnProperty.call(openedHeld, key)) {
+      var name = null;
+      try {
+        var raw = window.localStorage.getItem(key);
+        name = typeof raw === "string" && raw !== "" ? raw : null;
+      } catch (e) { name = null; }
+      openedHeld[key] = name;
+    }
+    return openedHeld[key];
+  }
+  function writeOpened(key, name) {
+    openedHeld[key] = name;
     try {
-      var raw = window.localStorage.getItem(key);
-      var kept = raw ? JSON.parse(raw) : null;
-      return kept && typeof kept === "object" && !Array.isArray(kept) ? kept : {};
-    } catch (e) { return {}; }
+      if (name === null) { window.localStorage.removeItem(key); }
+      else { window.localStorage.setItem(key, name); }
+    } catch (e) { /* kept for this page only */ }
   }
-  function writeSections(key, kept) {
-    try { window.localStorage.setItem(key, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
+  // What `name` opens in `editor`: its box, or its section's New color… panel.
+  function openable(editor, name) {
+    if (name.indexOf(NEW_COLOR_OPEN) === 0) {
+      return editor.querySelector(':scope > [data-newc="' + CSS.escape(name.slice(NEW_COLOR_OPEN.length)) + '"]');
+    }
+    return editor.querySelector(':scope > .box[data-card="' + CSS.escape(name) + '"]');
+  }
+  // `id` the tab's root (`params` by default): the name opened in its editor, else null.
+  function openedName(id) {
+    var root = el(id || "params");
+    var key = root ? openedKey(root) : null;
+    return key === null ? null : readOpened(key);
+  }
+  function applyOpened(root) {
+    var key = openedKey(root);
+    var editor = root.querySelector(":scope > .editor");
+    if (key === null || !editor) { return; }
+    var name = readOpened(key);
+    var shown = name === null ? null : openable(editor, name);
+    var line = name === null ? null : root.querySelector(':scope > .summary .line[data-open="' + CSS.escape(name) + '"]');
+    if (name !== null && (!shown || !line)) {
+      writeOpened(key, null);
+      name = null;
+      shown = null;
+    }
+    Array.prototype.forEach.call(editor.children, function (child) {
+      var hide = child.classList.contains("placeholder") ? shown !== null : child !== shown;
+      if (child.hidden !== hide) { child.hidden = hide; }
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(":scope > .summary .line[data-open]"), function (one) {
+      var on = one.getAttribute("data-open") === name ? "true" : "false";
+      if (one.getAttribute("aria-pressed") !== on) { one.setAttribute("aria-pressed", on); }
+    });
+  }
+  function openSetting(name) {
+    var root = null;
+    CARDS.forEach(function (id) {
+      var found = document.querySelector(id + ' > .summary .line[data-open="' + CSS.escape(name) + '"]');
+      if (found && !root) { root = found.closest(CARDS.join(", ")); }
+    });
+    if (!root) { return; }
+    var key = openedKey(root);
+    var editor = root.querySelector(":scope > .editor");
+    if (key === null || !editor || !openable(editor, name)) { return; }
+    writeOpened(key, name);
+    applyOpened(root);
+    // A section's New color… panel opens unfolded, and is kept so across frames (`newColors`).
+    var panel = name.indexOf(NEW_COLOR_OPEN) === 0 ? openable(editor, name) : null;
+    if (panel && !panel.open) {
+      panel.open = true;
+      newColorRead(panel);
+    }
   }
   // **The find box, on both settings tabs** (the console interface design's goal 5; the ledger's
   // find ruling for the rework's Task 8): a box is found by its code name, its plain name, a
   // group's settings' code names and plain names, or the name of a section it stands in -- a
-  // parent's name finds its subsections' boxes too -- each section holding none hidden. The marks
-  // alone, the sections left open or closed as they are (`applyFind`): for boxes put back between
-  // frames (`settle`), where opening the sections as last kept would undo a click a store that
-  // throws could not keep.
+  // parent's name finds its subsections' boxes too; each summary line takes its box's mark, the
+  // lines found left as they are and the rest dimmed (the summary and editor design's goal 8), a
+  // New color… line found by its words or its section's name.
   function findIn(root) {
     var box = root.closest("#params") ? el("pfind") : root.closest("#training-params") ? el("tfind") : null;
     return box ? box.value.trim().toLowerCase() : "";
@@ -4969,45 +5338,26 @@ _SCRIPT = """
   }
   function markFind(root) {
     var find = findIn(root);
-    Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
-      var section = card.closest("details.sec");
-      var where = section ? (section.getAttribute("data-sec") || "").toLowerCase() : "";
-      card.classList.toggle("nofind", find !== "" && findText(card).indexOf(find) === -1 &&
-                                      where.indexOf(find) === -1);
-    });
-    Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-      section.classList.toggle("nofind", find !== "" && section.querySelector(".box:not(.nofind)") === null);
+    Array.prototype.forEach.call(root.querySelectorAll(":scope > .summary .line[data-open]"), function (line) {
+      var name = line.getAttribute("data-open");
+      var section = line.closest(".ssec");
+      var where = section ? (section.getAttribute("data-section") || "").toLowerCase() : "";
+      var card = name.indexOf(NEW_COLOR_OPEN) === 0 ? null :
+        root.querySelector(':scope > .editor > .box[data-card="' + CSS.escape(name) + '"]');
+      var said = card ? findText(card) : line.textContent.toLowerCase();
+      var unfound = find !== "" && said.indexOf(find) === -1 && where.indexOf(find) === -1;
+      line.classList.toggle("nofind", unfound);
+      if (card) { card.classList.toggle("nofind", unfound); }
     });
     return find;
   }
   function applyFind() {
-    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), markFind);
-  }
-  function applySections() {
-    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
-      var kept = readSections(sectionsKey(root));
-      var find = markFind(root);
-      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-        var matches = section.querySelector(".box:not(.nofind)") !== null;
-        section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
-      });
-    });
-  }
-  // A section a person opened or closed is kept (the click is on its summary, before it toggles).
-  function keepSection(e) {
-    var summary = e.target.closest(inCards("details.sec > summary"));
-    if (!summary) { return; }
-    var section = summary.parentNode;
-    var key = sectionsKey(section.closest(".secs"));
-    var kept = readSections(key);
-    if (section.open) { kept[section.getAttribute("data-sec")] = true; }
-    else { delete kept[section.getAttribute("data-sec")]; }
-    writeSections(key, kept);
+    CARDS.forEach(function (id) { if (document.querySelector(id)) { markFind(document.querySelector(id)); } });
   }
   ["pfind", "tfind"].forEach(function (id) {
-    if (el(id)) { el(id).addEventListener("input", applySections); }
+    if (el(id)) { el(id).addEventListener("input", applyFind); }
   });
-  applySections();
+  applyFind();
   // **A box's *more* a person opened** (the console interface design's goal 1: "everything else
   // opens inside the box on a click"), by setting, kept open across the frames that replace the
   // boxes until it is closed. The click is on its summary, before it toggles.
@@ -5170,7 +5520,7 @@ _SCRIPT = """
     return true;
   }
   function paneOf(box, side) {
-    return box.querySelector('.editor [data-side="' + CSS.escape(side) + '"]');
+    return box.querySelector(':scope > .editor [data-side="' + CSS.escape(side) + '"]');
   }
   function shapeOf(pane) {
     var select = pane ? pane.querySelector("select[data-shape]") : null;
@@ -5200,16 +5550,16 @@ _SCRIPT = """
   }
   function stateOf(box) {
     var state = {};
-    var side = box.querySelector(".editor [data-switch].on");
+    var side = box.querySelector(":scope > .editor [data-switch].on");
     if (side) { state.side = side.getAttribute("data-switch"); }
-    Array.prototype.forEach.call(box.querySelectorAll(".editor input[data-param]"), function (input) {
+    Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor input[data-param]"), function (input) {
       if (!shownIn(box, input)) { return; }
       var raw = input.value.trim();
       state["p:" + input.getAttribute("data-param")] =
         input.getAttribute("data-kind") === "word" ? raw : numberOf(raw);
     });
     // A pool's ticks, keyed as the setting's value they send (`draftOf`: one `set`).
-    Array.prototype.forEach.call(box.querySelectorAll(".editor [data-pool]"), function (grid) {
+    Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor [data-pool]"), function (grid) {
       if (!shownIn(box, grid)) { return; }
       state["p:" + grid.getAttribute("data-pool")] = "#" + poolSum(grid);
     });
@@ -5221,7 +5571,7 @@ _SCRIPT = """
         state["f:" + field] = field === "values" || field === "weights" ? listOf(raw) : numberOf(raw);
       });
     }
-    var hue = box.querySelector(".editor .hue.on[data-color]");
+    var hue = box.querySelector(":scope > .editor .hue.on[data-color]");
     if (hue) { state.hue = hue.getAttribute("data-colorset") + "/" + hue.getAttribute("data-color"); }
     Array.prototype.forEach.call(box.querySelectorAll(".detail > .rng input[data-number]"), function (input) {
       state["n:" + input.getAttribute("data-number")] = numberOf(input.value.trim());
@@ -5253,13 +5603,13 @@ _SCRIPT = """
       if (key.indexOf("p:") !== 0 || now[key] === base[key]) { return; }
       var setting = key.slice(2);
       var field = null;
-      Array.prototype.forEach.call(box.querySelectorAll(".editor input[data-param]"), function (input) {
+      Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor input[data-param]"), function (input) {
         if (input.getAttribute("data-param") === setting && shownIn(box, input)) { field = input; }
       });
       if (!field) {
         // A pool's grid: its ticks are one `set` of the pool's number, a pair added or taken
         // away alike; none ticked is no pool, which the rig refuses (`task.Pool`).
-        var grid = box.querySelector('.editor [data-pool="' + CSS.escape(setting) + '"]');
+        var grid = box.querySelector(':scope > .editor [data-pool="' + CSS.escape(setting) + '"]');
         var sum = grid ? poolSum(grid) : 0;
         if (!sum) { wrong("tick at least one pair"); return; }
         changes.push({ kind: "set", name: setting, value: sum });
@@ -5302,7 +5652,7 @@ _SCRIPT = """
       changes.push(command);
     }
     if (now.hue !== undefined && now.hue !== base.hue) {
-      var hue = box.querySelector(".editor .hue.on[data-color]");
+      var hue = box.querySelector(":scope > .editor .hue.on[data-color]");
       changes.push({ kind: "color", name: name, colorset: hue.getAttribute("data-colorset"),
                      color: hue.getAttribute("data-color") });
     }
@@ -5483,8 +5833,9 @@ _SCRIPT = """
   function controlsOf(node) {
     var found = {};
     Array.prototype.forEach.call(node.querySelectorAll(
-        ".editor input[data-param], .editor input[data-form], .editor select[data-shape], " +
-        ".editor input.tick[data-bit], .detail > .rng input[data-number]"), function (control) {
+        ":scope > .editor input[data-param], :scope > .editor input[data-form], " +
+        ":scope > .editor select[data-shape], :scope > .editor input.tick[data-bit], " +
+        ":scope > details.more > .detail > .rng input[data-number]"), function (control) {
       var key = control.hasAttribute("data-param") ? "p:" + control.getAttribute("data-param")
         : control.hasAttribute("data-bit") ? "t:" + control.getAttribute("data-bit")
         : control.hasAttribute("data-number") ? "n:" + control.getAttribute("data-number")
@@ -5515,18 +5866,18 @@ _SCRIPT = """
       if (key === "shape") { showShape(box, control.value); }
     });
     var sideOf = function (node) {
-      var on = node.querySelector(".editor [data-switch].on");
+      var on = node.querySelector(":scope > .editor [data-switch].on");
       return on ? on.getAttribute("data-switch") : null;
     };
     if (sideOf(box) !== null && sideOf(box) === sideOf(before) && sideOf(given) !== sideOf(before)) {
       showSide(box, sideOf(given));
     }
     var hueOf = function (node) {
-      var on = node.querySelector(".editor .hue.on[data-color]");
+      var on = node.querySelector(":scope > .editor .hue.on[data-color]");
       return on ? on.getAttribute("data-colorset") + "/" + on.getAttribute("data-color") : "";
     };
     if (hueOf(box) === hueOf(before) && hueOf(given) !== hueOf(before)) {
-      Array.prototype.forEach.call(box.querySelectorAll(".editor .hue[data-color]"), function (hue) {
+      Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor .hue[data-color]"), function (hue) {
         var on = hue.getAttribute("data-colorset") + "/" + hue.getAttribute("data-color") === hueOf(given);
         hue.classList.toggle("on", on);
         hue.setAttribute("aria-pressed", on ? "true" : "false");
@@ -5567,13 +5918,46 @@ _SCRIPT = """
     });
     box.className = given.className;
   }
+  // A tab's layout: its summary's sections and their lines, then its editor's boxes and panels,
+  // in order; null for a tab that lays out none. `root` is the tab's root or a frame's fragment,
+  // whose own children are read (`:scope` names no element in a fragment).
   function skeletonOf(root) {
-    var secs = root.querySelector(".secs");
-    if (!secs) { return null; }
-    return Array.prototype.map.call(secs.querySelectorAll("details.sec"), function (section) {
-      return section.getAttribute("data-sec") + ":" + Array.prototype.map.call(
-        section.querySelectorAll(":scope > .cards > .box"), nameOf).join(",");
-    }).join("|");
+    var own = function (name) {
+      return Array.prototype.filter.call(root.children, function (child) {
+        return child.classList.contains(name);
+      })[0] || null;
+    };
+    var summary = own("summary");
+    var editor = own("editor");
+    if (!summary || !editor) { return null; }
+    return Array.prototype.map.call(summary.querySelectorAll(".ssec"), function (section) {
+      return section.getAttribute("data-section") + ":" + Array.prototype.map.call(
+        section.querySelectorAll(":scope > .line"), function (line) {
+          return line.getAttribute("data-open");
+        }).join(",");
+    }).join("|") + "||" + Array.prototype.map.call(editor.children, function (child) {
+      return child.getAttribute("data-card") || child.getAttribute("data-newc") || child.className;
+    }).join(",");
+  }
+  // **A summary line brought up to the frame's in place** (the summary and editor design's
+  // anti-goal: "the page jumping under the pointer"), its node kept, so a focused line keeps its
+  // focus: its classes, title and value, and each mark; `aria-pressed` is the page's own
+  // (`applyOpened`).
+  function patchLine(line, given) {
+    Array.prototype.slice.call(line.attributes).forEach(function (attr) {
+      if (attr.name !== "aria-pressed" && !given.hasAttribute(attr.name)) { line.removeAttribute(attr.name); }
+    });
+    Array.prototype.forEach.call(given.attributes, function (attr) {
+      if (line.getAttribute(attr.name) !== attr.value) { line.setAttribute(attr.name, attr.value); }
+    });
+    Array.prototype.forEach.call(given.children, function (part, at) {
+      var have = line.children[at];
+      if (!have) { line.appendChild(part.cloneNode(true)); return; }
+      if (have.textContent !== part.textContent) { have.textContent = part.textContent; }
+      Array.prototype.forEach.call(part.attributes, function (attr) {
+        if (have.getAttribute(attr.name) !== attr.value) { have.setAttribute(attr.name, attr.value); }
+      });
+    });
   }
   // Every draft dropped (the console interface design's call: "dropped at the run's end"), and a
   // field focused in a box left, so no box keeps an editor of a run that is over.
@@ -5605,7 +5989,7 @@ _SCRIPT = """
     var made = document.createElement("template");
     made.innerHTML = html;
     var next = made.content;
-    var secs = next.querySelector(".secs");
+    var secs = next.querySelector(".summary");
     // Only a tab that lays out boxes names the run: the Training tab of a task with no Training
     // section names none.
     if (secs) {
@@ -5632,16 +6016,20 @@ _SCRIPT = """
     });
     var layout = skeletonOf(root);
     if (layout !== null && layout === skeletonOf(next)) {
-      var live = root.querySelector(".secs");
+      var live = root.querySelector(":scope > .summary");
       ["data-task", "data-run"].forEach(function (attr) {
         live.setAttribute(attr, secs.getAttribute(attr) || "");
       });
-      Array.prototype.forEach.call(live.querySelectorAll("details.sec"), function (section) {
-        var other = secs.querySelector('details.sec[data-sec="' + CSS.escape(section.getAttribute("data-sec")) + '"]');
-        var summary = section.querySelector(":scope > summary");
-        var said = other.querySelector(":scope > summary").textContent;
+      Array.prototype.forEach.call(live.querySelectorAll(".ssec"), function (section) {
+        var other = secs.querySelector('.ssec[data-section="' + CSS.escape(section.getAttribute("data-section")) + '"]');
+        var header = section.querySelector(":scope > h4");
+        var fresh = other.querySelector(":scope > h4");
         // The rig's counts; what is not sent is said after them again by `settle` (`countDrafts`).
-        if (summary.textContent !== said) { summary.textContent = said; }
+        if (header.textContent !== fresh.textContent) { header.textContent = fresh.textContent; }
+        if (header.title !== fresh.title) { header.title = fresh.title; }
+        Array.prototype.forEach.call(section.querySelectorAll(":scope > .line"), function (line, at) {
+          patchLine(line, other.querySelectorAll(":scope > .line")[at]);
+        });
       });
       var oldRefused = root.querySelector(":scope > .wdrs");
       var newRefused = next.querySelector(".wdrs");
@@ -5654,6 +6042,8 @@ _SCRIPT = """
           patchDirty(box, given[name], before[name]);
           kept[name] = true;
         } else if (kept[name] || !before[name] || !before[name].isEqualNode(given[name])) {
+          // Shown or hidden in the editor as the box it replaces (`applyOpened`).
+          given[name].hidden = box.hidden;
           box.replaceWith(given[name]);
           delete kept[name];
           restoreBox(given[name]);
@@ -5683,8 +6073,8 @@ _SCRIPT = """
       }
     }
     Array.prototype.forEach.call(root.querySelectorAll(".box"), track);
-    applySections();
     judge();
+    // The opened setting shown again (`applyOpened`), in `settle`.
     settle();
   }
   // **The rig's answers to this page's acts, read off the frame**: an act whose id a box's
@@ -5783,6 +6173,7 @@ _SCRIPT = """
   function putBack(box) {
     var name = nameOf(box);
     var back = served[name].cloneNode(true);
+    back.hidden = box.hidden;
     box.replaceWith(back);
     delete kept[name];
     restoreBox(back);
@@ -5801,12 +6192,14 @@ _SCRIPT = """
         if (kept[name]) { refresh(box); }
         if (kept[name] && served[name] && !dirty(box)) {
           var fresh = served[name].cloneNode(true);
+          fresh.hidden = box.hidden;
           box.replaceWith(fresh);
           delete kept[name];
           restoreBox(fresh);
         }
       });
     }
+    CARDS.forEach(function (id) { if (document.querySelector(id)) { applyOpened(document.querySelector(id)); } });
     Array.prototype.forEach.call(boxes(), refresh);
     applyFind();
     restoreNewColors();
@@ -5993,6 +6386,7 @@ _SCRIPT = """
       if (range && back) { range.replaceWith(back); }
     } else if (served[name]) {
       var fresh = served[name].cloneNode(true);
+      fresh.hidden = box.hidden;
       box.replaceWith(fresh);
       delete kept[name];
       restoreBox(fresh);
@@ -6073,11 +6467,14 @@ _SCRIPT = """
       var root = el(pair[0]);
       var tab = document.querySelector('label.tab[for="' + pair[1] + '"]');
       if (!root || !tab) { return; }
-      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-        var summary = section.querySelector(":scope > summary");
+      Array.prototype.forEach.call(root.querySelectorAll(":scope > .summary .ssec"), function (section) {
+        var header = section.querySelector(":scope > h4");
         var count = 0;
-        Array.prototype.forEach.call(section.querySelectorAll(".box"), function (box) { count += unsent(box); });
-        if (summary) { sayIn(slotIn(summary, "ns"), count); }
+        Array.prototype.forEach.call(section.querySelectorAll(".line[data-open]"), function (line) {
+          var box = root.querySelector(':scope > .editor > .box[data-card="' + CSS.escape(line.getAttribute("data-open")) + '"]');
+          if (box) { count += unsent(box); }
+        });
+        if (header) { sayIn(slotIn(header, "ns"), count); }
       });
       var total = 0;
       Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) { total += unsent(box); });
@@ -6100,8 +6497,8 @@ _SCRIPT = """
   var pinsHeld = {};
   var TWINS = "input, select, textarea, button";
   function pinTask() {
-    var secs = document.querySelector(inCards(".secs"));
-    return secs ? secs.getAttribute("data-task") || "" : "";
+    var summary = document.querySelector(inCards(".summary"));
+    return summary ? summary.getAttribute("data-task") || "" : "";
   }
   function readPins(task) {
     if (!pinsHeld[task]) {
@@ -6172,7 +6569,7 @@ _SCRIPT = """
     }
     var keep = function (name) {
       return name === "id" || (name === "open" && to.tagName === "DETAILS") ||
-        (top && (name === "data-card" || name === "data-pin"));
+        (top && (name === "data-card" || name === "data-pin" || name === "hidden"));
     };
     Array.prototype.slice.call(to.attributes).forEach(function (attr) {
       if (!keep(attr.name) && !from.hasAttribute(attr.name)) { to.removeAttribute(attr.name); }
@@ -6226,6 +6623,8 @@ _SCRIPT = """
       if (!copy) {
         copy = copyOf(original);
         copy.removeAttribute("data-card");
+        // Shown on Runtime whether or not its original is the one opened in the editor.
+        copy.removeAttribute("hidden");
         copy.setAttribute("data-pin", name);
         copy.classList.remove("nofind");
         var more = copy.querySelector(":scope > details.more");
@@ -6363,9 +6762,8 @@ _SCRIPT = """
       served[nameOf(box)] = box.cloneNode(true);
       track(box);
     });
-    var secs = document.querySelector(inCards(".secs"));
-    runKey = secs ? secs.getAttribute("data-run") : null;
-    applySections();
+    var summary = document.querySelector(inCards(".summary"));
+    runKey = summary ? summary.getAttribute("data-run") : null;
     settle();
   }
   function choose(select, value) {
@@ -7215,8 +7613,10 @@ _SCRIPT = """
   }
   document.addEventListener("click", function (e) {
     if (!e.target.closest) { return; }
-    keepSection(e);
     keepMore(e);
+    // A summary line opens its setting in the editor below (`openSetting`).
+    var opening = e.target.closest(inCards(".summary .line[data-open]"));
+    if (opening) { openSetting(opening.getAttribute("data-open")); return; }
     var pinning = e.target.closest(inCards("[data-pin-toggle]"));
     if (pinning) { togglePin(pinning.getAttribute("data-pin-toggle")); return; }
     var answering = e.target.closest("[data-answer]");

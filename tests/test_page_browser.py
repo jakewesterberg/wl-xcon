@@ -96,6 +96,62 @@ class _Dispatch:
         return 200, {"status": "sent", "said": "sent: test"}
 
 
+#: **A box acted on through a selector is opened in its tab's editor first** (`_Opening`; the
+#: summary and editor design of 2026-11-19): the setting's summary line clicked, as a person does,
+#: by the line's own `click()`, so no pointer press holds a frame the test is timing. The box the
+#: selector's first match stands in; nothing where it is open already, stands in none, or is not
+#: there yet (an action waits for it, as Playwright's would, up to `WAIT_S`).
+_OPEN_ITS_BOX = """(selector) => {
+  let node = null;
+  try { node = document.querySelector(selector); } catch (e) { return "not css"; }
+  if (!node) { return "none"; }
+  const box = node.closest("#params > .editor > .box, #training-params > .editor > .box");
+  if (!box || !box.hidden) { return "shown"; }
+  const name = box.getAttribute("data-card");
+  const line = Array.from(box.parentNode.parentNode.querySelectorAll(
+    ":scope > .summary .line[data-open]")).find((one) => one.getAttribute("data-open") === name);
+  if (!line) { return "no line"; }
+  line.click();
+  return box.hidden ? "still hidden" : "opened";
+}"""
+
+
+class _Opening:
+    """**A Playwright page whose actions on a setting's box open it first** (the summary and
+    editor design of 2026-11-19: every box stays as it was, in an editor that shows the one
+    opened): a click, a fill, a key, a focus, a hover, a tick, a visibility read or a wait for a
+    box to be shown, given a selector whose first match stands in a box of `#params`' or
+    `#training-params`' editor, clicks that box's summary line first (`_OPEN_ITS_BOX`), so every test of a box's behavior reads as it did
+    on the grid and goes through the line a person uses. Everything else is the page's own."""
+
+    _ACTS = frozenset({"click", "dblclick", "fill", "press", "focus", "check", "uncheck", "hover",
+                       "type", "select_option", "set_checked", "tap", "is_visible",
+                       "wait_for_selector"})
+    _WAITS = frozenset({"click", "dblclick", "fill", "press", "focus", "check", "uncheck", "hover",
+                        "type", "select_option", "set_checked", "tap", "wait_for_selector"})
+
+    def __init__(self, page) -> None:
+        object.__setattr__(self, "_page", page)
+
+    def __setattr__(self, name, value) -> None:
+        setattr(self._page, name, value)
+
+    def __getattr__(self, name):
+        attr = getattr(self._page, name)
+        if name not in self._ACTS or not callable(attr):
+            return attr
+
+        def acting(selector, *args, **kwargs):
+            if isinstance(selector, str) and kwargs.get("state", "visible") == "visible":
+                waits = kwargs.get("timeout", WAIT_S * 1000) / 1000 if name in self._WAITS else 0
+                end = time.monotonic() + waits
+                while self._page.evaluate(_OPEN_ITS_BOX, selector) == "none" and time.monotonic() < end:
+                    self._page.wait_for_timeout(50)
+            return attr(selector, *args, **kwargs)
+
+        return acting
+
+
 class _Rig:
     def __init__(self, tmp_path, browser, *, keys: bool = True, gaze: bool = False) -> None:
         self._browser = browser
@@ -144,7 +200,7 @@ class _Rig:
         """A Playwright page, in a context of its own, already at the rig's page."""
         context = self._browser.new_context(ignore_https_errors=True)
         self._contexts.append(context)
-        page = context.new_page()
+        page = _Opening(context.new_page())
         page.set_default_timeout(WAIT_S * 1000)
         page.goto(self.page_url)
         assert page.evaluate("window.isSecureContext"), "the page is not a secure context"
@@ -888,7 +944,7 @@ def test_a_duplicated_tab_forgets_its_copy_and_the_first_tab_keeps_working(rig):
     first = rig.browser_page()
     _sign_in(first)
     copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
-    second = first.context.new_page()  # a tab of the same browser
+    second = _Opening(first.context.new_page())  # a tab of the same browser
     second.set_default_timeout(WAIT_S * 1000)
     second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
     second.add_init_script(_SIGNOUTS)
@@ -916,7 +972,7 @@ def test_a_duplicate_is_inert_while_it_waits_for_the_lock_and_never_signs_out_th
     first = rig.browser_page()
     _sign_in(first)
     copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
-    second = first.context.new_page()
+    second = _Opening(first.context.new_page())
     second.set_default_timeout(WAIT_S * 1000)
     second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
     second.add_init_script(_SIGNOUTS)
@@ -939,7 +995,7 @@ def test_a_duplicate_woken_during_its_wait_never_renews_with_the_originals_token
     first = rig.browser_page()
     _sign_in(first)
     copied = first.evaluate("window.sessionStorage.getItem('wlx-signin')")  # never asserted on
-    second = first.context.new_page()
+    second = _Opening(first.context.new_page())
     second.set_default_timeout(WAIT_S * 1000)
     second.add_init_script(f"window.sessionStorage.setItem('wlx-signin', {json.dumps(copied)});")
     second.goto(rig.page_url)
@@ -1899,7 +1955,7 @@ class _BoxRig:
         self._context = browser.new_context()
         self._context.add_init_script(
             "window.localStorage.setItem('wlx-console-name', 'Box Op')")
-        self.page = self._context.new_page()
+        self.page = _Opening(self._context.new_page())
         self.page.set_default_timeout(WAIT_S * 1000)
         self.url = f"http://127.0.0.1:{port}/"
 
@@ -2233,7 +2289,9 @@ def test_a_card_updates_once_a_hand_back_or_a_range_has_applied(rig):
                         "uniform from 0.75 s to 1.5 s", {"low": 0.75, "high": 1.5}))
     rig.hub.offer(decode(encode(frame(params=applied))))
 
-    rig.wait_for(lambda: "set or drawn by its conditions" in page.inner_text("#params")
+    # `text_content`: the editor shows one box (the summary and editor design of 2026-11-19), and
+    # `inner_text` reads no box it hides.
+    rig.wait_for(lambda: "set or drawn by its conditions" in page.text_content("#params")
                  and page.input_value('#params input[data-number="high"]') == "1.5"
                  and _say(page, "wait") != "sending…")
     assert [type(seen) for seen in rig.dispatch.seen] == [HandBack, SetRange]
@@ -2692,7 +2750,7 @@ class _DemoBox:
         self._context.add_init_script(
             "window.wlxBlocked = []; document.addEventListener('securitypolicyviolation',"
             " (e) => window.wlxBlocked.push(e.violatedDirective));")
-        self.page = self._context.new_page()
+        self.page = _Opening(self._context.new_page())
         self.page.set_default_timeout(WAIT_S * 1000)
         self.url = f"http://127.0.0.1:{port}/"
 
@@ -3153,7 +3211,7 @@ class _LiveDemo:
             "(() => { const sent = window.fetch; window.wlxGazeAt = 0;"
             " window.fetch = function (url) { if (url === '/gaze') {"
             " window.wlxGazeAt = performance.now(); } return sent.apply(this, arguments); }; })()")
-        self.page = self._context.new_page()
+        self.page = _Opening(self._context.new_page())
         self.page.set_default_timeout(WAIT_S * 1000)
         self.at: tuple[float, float] | None = None
 
@@ -3460,7 +3518,8 @@ def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
     _sign_in(page)
     page.click('label[for="t-task"]')
     panel = '[data-newc="Other"]'
-    page.click(f"{panel} > summary")
+    _open(page, "new-color:Other")
+    assert page.evaluate("document.querySelector('[data-newc=\"Other\"]').open")
     page.fill(f'{panel} [data-newc-fields="hue_angle"] input[data-newc-num="hue_deg"]', "290")
     page.fill(f"{panel} input[data-newc-name]", "violet")
     assert page.inner_text(f"{panel} .src") == f"{NEW_COLOR_SAVED[0]}isohue{NEW_COLOR_SAVED[1]}"
@@ -3499,84 +3558,28 @@ def _sectioned(rig, task="tasks/fixation_detection.py", **over):
     rig.hub.offer(decode(encode(frame(params=rows, task=task, **over))))
 
 
-def _open_of(page, name: str) -> bool:
-    return page.evaluate(
-        "(n) => document.querySelector('#params details.sec[data-sec=\"' + n + '\"]').open", name)
+def _open(page, name: str, root: str = "#params") -> None:
+    """**Open setting `name` in its tab's editor** as a person does, by a click on its summary
+    line (the summary and editor design of 2026-11-19)."""
+    page.click(f'{root} > .summary .line[data-open="{name}"]')
 
 
-def _shown(page, name: str) -> bool:
-    return page.is_visible(f'#params .box[data-card="{name}"]')
+def _opened(page, root: str = "#params") -> list:
+    """What the editor of `root` shows: each box's or panel's name not hidden, or the
+    placeholder's words."""
+    return page.evaluate("""(root) => { const editor = document.querySelector(root + ' > .editor');
+        return editor === null ? null : Array.from(editor.children).filter((child) => !child.hidden)
+        .map((child) => child.getAttribute('data-card') || child.getAttribute('data-newc') ||
+        child.textContent.trim()); }""", root)
 
 
-def test_the_find_box_finds_a_setting_in_a_collapsed_section_and_opens_it(rig):
-    """The design's §7: a find box on top filters the cards by name and opens the sections of the
-    ones it finds -- a section a person closed too -- hiding the others and the sections with none,
-    then leaves them as they were last left once it is cleared. In a real browser: run with
-    `WLX_BROWSER=webkit` too, for Safari."""
-    _sectioned(rig)
-    page = rig.browser_page()
-    page.click('label[for="t-task"]')
-    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
-    assert not _open_of(page, "Gaze windows") and not _shown(page, "fix_window")
-
-    page.fill("#pfind", "fix_w")
-
-    assert _open_of(page, "Gaze windows") and _shown(page, "fix_window")
-    assert not _shown(page, "fix_hold") and not _shown(page, "fix_size")
-    assert not page.is_visible('#params details.sec[data-sec="Timing"]')
-    assert not page.is_visible('#params details.sec[data-sec="Stimuli"]')
-    page.fill("#pfind", "FIX_S")
-    assert _shown(page, "fix_size") and not _shown(page, "fix_window")
-    assert _open_of(page, "Stimuli") and _open_of(page, "Stimuli/fixation point")
-
-    page.fill("#pfind", "")
-
-    assert _shown(page, "fix_hold") and _shown(page, "fix_size")
-    assert not _open_of(page, "Gaze windows"), "the section stays as it was last left"
-    assert page.text_content('#params details.sec[data-sec="Gaze windows"] > summary') == (
-        "Gaze windows · 1 setting · 1 changed")
-
-
-def test_sections_open_as_last_left_per_task(rig):
-    """The design's §7: a section a person closed stays closed across a frame, a reload and the
-    page being shown again, for that task alone, under `wlx.sections.<task>` in `localStorage`;
-    another task's sections open as they were, and the first's closed again on return."""
-    _sectioned(rig)
-    page = rig.browser_page()
-    page.click('label[for="t-task"]')
-    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
-    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
-    page.click('#params details.sec[data-sec="Stimuli/fixation point"] > summary')
-    page.click('#params details.sec[data-sec="Timing"] > summary')
-    page.click('#params details.sec[data-sec="Timing"] > summary')
-
-    _sectioned(rig, trial_index=41)
-    _until(page, "document.querySelector('#params .secs') !== null")
-    assert not _open_of(page, "Gaze windows") and not _open_of(page, "Stimuli/fixation point")
-    assert _open_of(page, "Timing") and _open_of(page, "Stimuli")
-    kept = page.evaluate("JSON.parse(window.localStorage.getItem('wlx.sections.tasks/"
-                         "fixation_detection.py'))")
-    assert kept == {"Gaze windows": True, "Stimuli/fixation point": True}
-
-    page.reload()
-    page.click('label[for="t-task"]')
-    assert not _open_of(page, "Gaze windows") and _open_of(page, "Timing")
-
-    _sectioned(rig, task="tasks/popout_search.py", trial_index=42)
-    _until(page, "document.querySelector('#params .secs').getAttribute('data-task')"
-                 " === 'tasks/popout_search.py'")
-    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
-    _sectioned(rig, trial_index=43)
-    _until(page, "document.querySelector('#params .secs').getAttribute('data-task')"
-                 " === 'tasks/fixation_detection.py'")
-    assert not _open_of(page, "Gaze windows")
-
-
-def test_a_store_that_throws_leaves_every_section_open(rig):
-    """The design's §7: `localStorage` failing -- a private window, blocked site data -- leaves
-    every section open, and a click still closes one for as long as the page is shown; nothing is
-    raised into the page. The store is made to throw on every read and write before the page
-    runs. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+def test_a_store_that_throws_still_opens_a_setting(rig):
+    """The summary and editor design's goal 5, with the browser's store failing -- a private
+    window, blocked site data -- on every read and write before the page runs: a click still opens
+    a setting and a frame keeps it opened, for as long as the page is shown; a reload shows the
+    placeholder; nothing is raised into the page. Replaces `test_a_store_that_throws_leaves_every_
+    section_open`: the sections no longer fold. In a real browser: run with `WLX_BROWSER=webkit`
+    too, for Safari."""
     _sectioned(rig)
     page = rig.browser_page()
     page.add_init_script(
@@ -3588,15 +3591,17 @@ def test_a_store_that_throws_leaves_every_section_open(rig):
     page.reload()
     page.click('label[for="t-task"]')
 
-    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
-    page.click('#params details.sec[data-sec="Gaze windows"] > summary')
-    assert not _open_of(page, "Gaze windows")
+    assert _opened(page) == ["click a setting above to change it"]
+    _open(page, "fix_window")
+    assert _opened(page) == ["fix_window"]
     _sectioned(rig, trial_index=41)
-    _until(page, "document.querySelector('#params .secs') !== null")
+    _until(page, "document.querySelector('#params .summary') !== null")
+    page.wait_for_timeout(300)  # housekeeping: past the frame's patch
+    assert _opened(page) == ["fix_window"]
     page.reload()
     page.click('label[for="t-task"]')
 
-    assert all(_open_of(page, n) for n in ("Timing", "Gaze windows", "Stimuli"))
+    assert _opened(page) == ["click a setting above to change it"]
     assert not [e for e in errors if "storage is blocked" in e], errors
 
 
@@ -3611,12 +3616,6 @@ def _training_rows(gain, step=0.1):
         (ParamRow("gain", "", None, None, gain, False, None, "run"), "Training"),
         (ParamRow.of("fade_in_step", "fraction", 0.05, 1.0, step, False), "Training/Fade-in"),
     ))
-
-
-def _training_open(page, name: str) -> bool:
-    return page.evaluate(
-        "(n) => document.querySelector('#training-params details.sec[data-sec=\"' + n + '\"]')"
-        ".open", name)
 
 
 def test_a_press_on_a_training_card_is_not_lost_when_a_frame_lands_under_it(rig):
@@ -3646,32 +3645,34 @@ def test_a_press_on_a_training_card_is_not_lost_when_a_frame_lands_under_it(rig)
     assert (type(sent), sent.name, sent.by.name) == (HandBack, "move_up_bar", "Jake Westerberg")
 
 
-def test_a_collapsed_training_section_stays_collapsed_across_a_frame(rig):
-    """The whole-build review's I3: a Training section a person closed stays closed across a frame
-    that changes the Training tab's cards and across a reload, kept for its task under the Training
-    tab's own key, `wlx.training-sections.<task>`; the Task parameters tab's are not touched. In a
-    real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+def test_the_training_tabs_opened_setting_is_kept_under_its_own_key(rig):
+    """The summary and editor design's goal 5 on the Training tab: the setting opened in its
+    editor stays opened across a frame that changes its boxes and across a reload, kept for its
+    task under the Training tab's own key, `wlx.training-opened.<task>`; the Task parameters tab's
+    is not touched. Replaces `test_a_collapsed_training_section_stays_collapsed_across_a_frame`:
+    the sections no longer fold. In a real browser: run with `WLX_BROWSER=webkit` too, for
+    Safari."""
     _offer(rig, 40, params=_training_rows(2.0))
     page = rig.browser_page()
     page.click('label[for="t-training"]')
-    assert _training_open(page, "Training") and _training_open(page, "Training/Fade-in")
+    assert _opened(page, "#training-params") == ["click a setting above to change it"]
 
-    page.click('#training-params details.sec[data-sec="Training/Fade-in"] > summary')
-    assert not _training_open(page, "Training/Fade-in")
+    _open(page, "fade_in_step", "#training-params")
+    assert _opened(page, "#training-params") == ["fade_in_step"]
     _offer(rig, 41, params=_training_rows(2.0, step=0.3))
     _arrived(page, 41)
     _until(page, "document.querySelector('#training-params').textContent.indexOf('0.30') !== -1")
 
-    assert not _training_open(page, "Training/Fade-in"), "the section stays as it was last left"
-    assert _training_open(page, "Training")
-    kept = page.evaluate("JSON.parse(window.localStorage.getItem('wlx.training-sections.tasks/"
-                         "fixation_detection.py'))")
-    assert kept == {"Training/Fade-in": True}
-    assert page.evaluate("window.localStorage.getItem('wlx.sections.tasks/"
+    assert _opened(page, "#training-params") == ["fade_in_step"]
+    assert page.evaluate("window.localStorage.getItem('wlx.training-opened.tasks/"
+                         "fixation_detection.py')") == "fade_in_step"
+    assert page.evaluate("window.localStorage.getItem('wlx.opened.tasks/"
                          "fixation_detection.py')") is None
     page.reload()
     page.click('label[for="t-training"]')
-    assert not _training_open(page, "Training/Fade-in") and _training_open(page, "Training")
+    assert _opened(page, "#training-params") == ["fade_in_step"]
+    assert page.get_attribute('#training-params .line[data-open="fade_in_step"]',
+                              "aria-pressed") == "true"
 
 
 # --- the console interface rework's Task 5: the box, drawn (the design of 2026-11-19) ----------
@@ -3776,12 +3777,71 @@ _OVERRUNS = """(root) => {
 }"""
 
 
+#: **What passes a summary line's edge, a section's or the summary's** (the summary and editor
+#: design's "How it is judged done": "no text past its line or the editor's edge"): each line's
+#: mark, name and value inside its line, each section's header inside its section and each
+#: section inside the summary; a text cut short with an ellipsis is a line's design (its whole in
+#: the line's `title`, the header's in its own), so it is found only where no title holds it; and
+#: the page scrolling across.
+_LINE_OVERRUNS = """(root) => {
+  const found = [];
+  const past = (inner, outer) => inner.right > outer.right + 0.5 || inner.left < outer.left - 0.5 ||
+    inner.bottom > outer.bottom + 0.5 || inner.top < outer.top - 0.5;
+  for (const line of document.querySelectorAll(root + ' > .summary .line')) {
+    const edge = line.getBoundingClientRect();
+    for (const part of line.children) {
+      const rect = part.getBoundingClientRect();
+      if (rect.width > 0 && past(rect, edge)) { found.push(line.getAttribute('data-open') + ': ' + part.className); }
+      if (part.scrollWidth > part.clientWidth + 1 && !line.getAttribute('title')) {
+        found.push(line.getAttribute('data-open') + ': ' + part.className + ' cut with no title');
+      }
+    }
+  }
+  const whole = document.querySelector(root + ' > .summary').getBoundingClientRect();
+  for (const section of document.querySelectorAll(root + ' > .summary .ssec')) {
+    const head = section.querySelector(':scope > h4');
+    if (past(head.getBoundingClientRect(), section.getBoundingClientRect())) { found.push('header ' + head.textContent); }
+    if (head.scrollWidth > head.clientWidth + 1 && !head.title) { found.push('header cut ' + head.textContent); }
+    if (past(section.getBoundingClientRect(), whole)) { found.push('section ' + section.getAttribute('data-section')); }
+  }
+  if (document.documentElement.scrollWidth > window.innerWidth) { found.push('the page scrolls across'); }
+  return found;
+}"""
+
+#: **What passes the editor's edge, or its box's, for every setting opened in turn**: each line
+#: of the tab clicked (its own `click()`, so no pointer press holds a frame), then every shown
+#: node in the editor whose right edge passes the editor's, and `_OVERRUNS` on the box shown.
+_EDITOR_OVERRUNS = """(root) => {
+  const overruns = """ + _OVERRUNS + """;
+  const found = [];
+  const editor = document.querySelector(root + ' > .editor');
+  for (const line of document.querySelectorAll(root + ' > .summary .line[data-open]')) {
+    line.click();
+    const edge = editor.getBoundingClientRect().right;
+    for (const node of editor.querySelectorAll('*')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) { continue; }
+      const shut = node.parentElement && node.parentElement.closest('details:not([open])');
+      if (shut && node.closest('summary') === null) { continue; }
+      if (rect.right > edge + 0.5) {
+        found.push(line.getAttribute('data-open') + ': ' + node.tagName.toLowerCase() + '.' +
+          (node.getAttribute('class') || '') + ' past the editor by ' + Math.round(rect.right - edge));
+      }
+    }
+    found.push(...overruns(root));
+  }
+  return found;
+}"""
+
+
 def test_no_text_passes_its_box_at_three_widths(rig, tmp_path):
     """The PI, trying the console in Safari (2026-11-19): "text overruns the boxes, eg, color
-    section". At 1024, 1280 and 1440 wide, on the Task parameters and the Training tabs, no box's
-    text passes its edge (`_OVERRUNS`): not the color boxes, not the longest plain name, not the
-    long refusal, not a drawn box's shapes; and again with every box's *more* and every color's
-    New color open, a box with its *more* open taking its row. Through the wire, in a real
+    section". At 1024, 1280 and 1440 wide, on the Task parameters and the Training tabs, no
+    summary line's text passes its line (`_LINE_OVERRUNS`), and with each setting opened in turn
+    no text passes the editor or its box (`_EDITOR_OVERRUNS`): not the color boxes, not the
+    longest plain name, not the long refusal, not a drawn box's shapes; and again with every box's
+    *more* and every New color panel open. Rewritten for the summary and editor design of
+    2026-11-19 from the grid's boxes to the lines and the editor. Through the wire, in a real
     browser: run with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.link import decode, encode
 
@@ -3789,23 +3849,21 @@ def test_no_text_passes_its_box_at_three_widths(rig, tmp_path):
     page = rig.browser_page()
     for tab, root in (("t-task", "#params"), ("t-training", "#training-params")):
         page.click(f'label[for="{tab}"]')
-        page.wait_for_selector(f"{root} .box", state="visible")
+        page.wait_for_selector(f"{root} .box", state="attached")
+        assert page.locator(f"{root} > .summary .line").count() > 0, (tab, "the summary's lines")
         if root == "#params":
             assert page.locator("#params .box .clr").count() >= 2, "the color boxes are measured"
+            assert page.locator("#params > .summary .line.newcolor").count() == 1
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": LAPTOP_H})
-            page.evaluate(f"document.querySelectorAll('{root} .box details')"
+            assert page.evaluate(_LINE_OVERRUNS, root) == [], (tab, width)
+            page.evaluate(f"document.querySelectorAll('{root} > .editor details')"
                           ".forEach((d) => {{ d.open = false; }})")
-            assert page.evaluate(_OVERRUNS, root) == [], (tab, width, "closed")
-            page.evaluate(f"document.querySelectorAll('{root} .box details')"
+            assert page.evaluate(_EDITOR_OVERRUNS, root) == [], (tab, width, "closed")
+            page.evaluate(f"document.querySelectorAll('{root} > .editor details')"
                           ".forEach((d) => {{ d.open = true; }})")
-            assert page.evaluate(_OVERRUNS, root) == [], (tab, width, "open")
-            # An open box takes its row, so its reasons read across it (the layout review's
-            # finding 2: a refusal read in about four lines instead of about fifteen).
-            assert page.evaluate(
-                f"(() => {{ const box = document.querySelector('{root} .box');"
-                f" const row = box.parentNode.getBoundingClientRect();"
-                f" return box.getBoundingClientRect().width > row.width - 2; }})()")
+            assert page.evaluate(_EDITOR_OVERRUNS, root) == [], (tab, width, "open")
+            assert page.evaluate(_LINE_OVERRUNS, root) == [], (tab, width, "after")
 
 
 def test_an_open_more_stays_open_across_a_frame(rig):
@@ -3826,7 +3884,8 @@ def test_an_open_more_stays_open_across_a_frame(rig):
     page.click('#params .box[data-card="timeout"] > details.more > summary')
     _offer(rig, 41, params=rows("a reason of trial 41"))
     _arrived(page, 41)
-    rig.wait_for(lambda: "a reason of trial 41" in page.inner_text("#params"))
+    # `text_content`: the editor shows one box, and `inner_text` reads no box it hides.
+    rig.wait_for(lambda: "a reason of trial 41" in page.text_content("#params"))
 
     assert page.evaluate("[document.querySelector('#params .box[data-card=\"fix_hold\"] > "
                          "details.more').open, document.querySelector('#params "
@@ -3835,20 +3894,268 @@ def test_an_open_more_stays_open_across_a_frame(rig):
 
 def test_the_first_setting_starts_within_260px_at_1280x800(rig, tmp_path):
     """The design's "How it is judged done": "the first setting within the first 260 px at 1280 ×
-    800" (the layout review's finding 4: about 500 px went before it). Measured from the top of
-    the page, unscrolled, on the Task parameters tab: the one bar that stays in view (the console
-    interface rework's Task 8) put the session's details behind *session*, so the tabs follow it."""
+    800" (the layout review's finding 4: about 500 px went before it), which the summary and
+    editor design makes the first summary line's (its call: "The 260 px rule becomes: the first
+    summary line within 260 px of the top at 1280 × 800"). Measured from the top of the page,
+    unscrolled, on the Task parameters tab: the one bar that stays in view (the console interface
+    rework's Task 8) put the session's details behind *session*, so the tabs follow it."""
     from wl_xcon.link import decode, encode
 
     rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
     page = rig.browser_page()
     page.set_viewport_size({"width": 1280, "height": 800})
     page.click('label[for="t-task"]')
-    page.wait_for_selector("#params .box", state="visible")
+    page.wait_for_selector("#params .box", state="attached")
+    assert page.locator("#params > .summary .line").count() > 0, "the summary's lines"
 
-    top = page.evaluate("document.querySelector('#params .box').getBoundingClientRect().top"
-                        " + window.scrollY")
+    top = page.evaluate("document.querySelector('#params > .summary .line').getBoundingClientRect()"
+                        ".top + window.scrollY")
     assert top <= 260, top
+
+
+def test_every_popout_line_is_above_the_fold_at_1280x800(rig, tmp_path):
+    """The summary and editor design's goal 1: "all of the pop-out's Task parameters fit above
+    the editor on a 1280 × 800 screen with the top bar", judged as its call says: the pop-out as
+    built, at 1280 × 800 with the demo screen's column shown (as in the PI's try-out), no banner,
+    the drafts bar at the window's foot (fixed, not in the flow; none here), the last summary
+    line's bottom within 800 px, unscrolled. Through the wire, in a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path, demo=True))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params .box", state="attached")
+    assert page.locator("#params > .summary .line").count() > 0, "the summary's lines"
+    assert page.is_visible("#demo-pane"), "the demo screen's column is shown"
+    assert not page.is_visible("#stream") and not page.is_visible("#drafts")
+
+    bottoms = page.evaluate("""() => Array.from(document.querySelectorAll(
+        '#params > .summary .line')).map((line) => [line.getAttribute('data-open'),
+        line.getBoundingClientRect().bottom + window.scrollY])""")
+    assert len(bottoms) >= 15, bottoms
+    below = [(name, round(bottom)) for name, bottom in bottoms if bottom > LAPTOP_H]
+    assert below == [], below
+    # In columns, four at 1280 wide (the design's goal 1).
+    columns = page.evaluate("""() => new Set(Array.from(document.querySelectorAll(
+        '#params > .summary > .ssec')).map((section) => Math.round(
+        section.getBoundingClientRect().left))).size""")
+    assert columns == 4, columns
+
+
+def _rects(page, root: str = "#params") -> list:
+    """Where everything above the editor stands: each summary line, each section's header, the
+    legend and the find box, in page coordinates."""
+    return page.evaluate("""(root) => Array.from(document.querySelectorAll(
+        root + ' > .summary .line, ' + root + ' > .summary .ssec > h4, ' + root + ' > .legend, ' +
+        root + ' > .editor')).map((node) => { const r = node.getBoundingClientRect();
+        return [node.getAttribute('data-open') || node.className, Math.round(r.left * 10),
+                Math.round((r.top + window.scrollY) * 10), Math.round(r.width * 10),
+                Math.round(r.height * 10)]; })""", root)
+
+
+def test_a_click_opens_a_setting_and_nothing_above_moves(rig, tmp_path):
+    """The summary and editor design's goal 2 and its anti-goal ("the page jumping under the
+    pointer: opening a setting changes nothing above the editor"): at 1280 × 800 the editor first
+    says "click a setting above to change it"; a click on a summary line opens that setting's box
+    there, alone, its line pressed; and opening three in turn -- a drawn hold with its long
+    refusal, the pairings' grid, a whole count -- leaves every line, every header, the legend and
+    the editor's top where they were. Through the wire, in a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    lines = page.locator("#params > .summary .line[data-open]")
+    assert lines.count() == page.locator("#params > .editor > .box").count() + 1, (
+        "a line for every box, and the Colors section's New color…")
+    assert _opened(page) == ["click a setting above to change it"]
+    before = _rects(page)
+    editor_top = before[-1][2]
+    heights = page.eval_on_selector_all(
+        "#params > .summary .line", "lines => lines.map((line) => line.getBoundingClientRect().height)")
+    assert len(set(heights)) == 1 and 18 <= heights[0] <= 22, heights
+
+    for name in ("fix_hold", "pairings", "set_size"):
+        _open(page, name)
+        assert _opened(page) == [name], name
+        pressed = page.eval_on_selector_all(
+            "#params > .summary .line[aria-pressed='true']",
+            "lines => lines.map((line) => line.getAttribute('data-open'))")
+        assert pressed == [name], (name, pressed)
+        after = _rects(page)
+        assert after[:-1] == before[:-1], name
+        assert after[-1][2] == editor_top, name
+    assert page.is_visible(f'{_b("set_size")} input[data-param="set_size"]')
+    assert rig.dispatch.seen == [], "opening a setting sends nothing"
+
+
+def test_the_opened_setting_survives_a_frame_and_a_reload(rig):
+    """The summary and editor design's goal 5: the setting opened stays opened across a frame that
+    changes it, a tab switch and a reload, kept per task in the browser's own storage
+    (`wlx.opened.<task>`); another task's settings open with nothing opened, and the first task's
+    opens again on return. Replaces `test_sections_open_as_last_left_per_task`: the sections no
+    longer fold. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    _sectioned(rig)
+    page = rig.browser_page()
+    page.click('label[for="t-task"]')
+    assert _opened(page) == ["click a setting above to change it"]
+    _open(page, "fix_window")
+    assert _opened(page) == ["fix_window"]
+
+    from wl_xcon.link import ParamRow, decode, encode
+    rows = (ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, section="Timing"),
+            ParamRow.of("fix_window", "deg", 0.0, 9.0, 3.5, False, section="Gaze windows",
+                        changed=True),
+            ParamRow.of("fix_size", "deg", 0.0, 9.0, 0.5, False, section="Stimuli/fixation point"))
+    line = '#params > .summary .line[data-open="fix_window"]'
+    page.evaluate("(line) => { document.querySelector(line).wlxSame = true; }", line)
+    rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
+    _until(page, "document.querySelector('#params input[data-param=\"fix_window\"]')"
+                 ".value === '3.50'")
+    assert _opened(page) == ["fix_window"]
+    # The line takes the frame's value in place, its node kept (`patchLine`).
+    assert page.text_content(f"{line} > .lv") == "3.50 deg"
+    assert page.evaluate("(line) => document.querySelector(line).wlxSame === true", line)
+    assert "changed" in page.get_attribute(line, "class").split()
+    page.click('label[for="t-runtime"]')
+    page.click('label[for="t-task"]')
+    assert _opened(page) == ["fix_window"]
+    _open(page, "fix_size")
+    kept = page.evaluate("window.localStorage.getItem('wlx.opened.tasks/fixation_detection.py')")
+    assert kept == "fix_size"
+
+    page.reload()
+    page.click('label[for="t-task"]')
+    assert _opened(page) == ["fix_size"]
+    assert page.is_visible(f'{_b("fix_size")} input[data-param="fix_size"]')
+
+    _sectioned(rig, task="tasks/popout_search.py", trial_index=42)
+    _until(page, "document.querySelector('#params .summary').getAttribute('data-task')"
+                 " === 'tasks/popout_search.py'")
+    assert _opened(page) == ["click a setting above to change it"]
+    _sectioned(rig, trial_index=43)
+    _until(page, "document.querySelector('#params .summary').getAttribute('data-task')"
+                 " === 'tasks/fixation_detection.py'")
+    assert _opened(page) == ["fix_size"]
+
+
+def test_an_opened_setting_that_is_gone_shows_the_placeholder(rig):
+    """The plan's Review Focus 2: the setting opened disappears -- a run without it, a group
+    regrouped -- and the editor falls back to "click a setting above to change it", the stored
+    name dropped, so it does not come back with the setting, and nothing is raised into the page.
+    In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    errors = []
+    page = _task6_page(rig, params=_group_rows(), groups=_move_up())
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    key = "wlx.opened.tasks/fixation_detection.py"
+    assert page.locator('#params > .summary .line[data-open="set_size"]').count() == 1
+    _open(page, "set_size")
+    assert _opened(page) == ["set_size"]
+
+    _offer(rig, 41, params=tuple(row for row in _group_rows() if row.name != "set_size"),
+           groups=_move_up())
+    _until(page, "document.querySelector('#params .box[data-card=\"set_size\"]') === null")
+    assert _opened(page) == ["click a setting above to change it"]
+    assert page.evaluate(f"window.localStorage.getItem('{key}')") is None
+    _offer(rig, 42, params=_group_rows(), groups=_move_up())
+    _until(page, "document.querySelector('#params .box[data-card=\"set_size\"]') !== null")
+    assert _opened(page) == ["click a setting above to change it"], "dropped, not kept"
+
+    _open(page, "Move up")
+    assert _opened(page) == ["Move up"]
+    _offer(rig, 43, params=_group_rows(), groups=())
+    _until(page, "document.querySelector('#params .box[data-card=\"move_up_bar\"]') !== null")
+    assert _opened(page) == ["click a setting above to change it"]
+    assert page.evaluate(f"window.localStorage.getItem('{key}')") is None
+    assert page.locator('#params > .summary .line[aria-pressed="true"]').count() == 0
+    assert errors == []
+
+
+def test_a_group_line_opens_its_sentence(rig):
+    """The summary and editor design's goal 6: a group is one line -- its title, its settings'
+    values joined -- and one editor, its sentence with its fields in place and one Apply, which
+    sends one `apply_many` of what it changed under one command id, as its box did on the grid.
+    In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import ApplyMany, SetParameter
+
+    page = _task6_page(rig, params=_group_rows(), groups=_move_up())
+    line = '#params > .summary .line[data-open="Move up"]'
+    assert page.locator(line).count() == 1, "a group is one line"
+    assert page.text_content(f"{line} > .ln") == "Move up"
+    assert page.text_content(f"{line} > .lv") == "80% · 50"
+    assert page.locator('#params > .summary .line[data-open="move_up_bar"]').count() == 0
+
+    _open(page, "Move up")
+    assert _opened(page) == ["Move up"]
+    box = _b("Move up")
+    assert page.eval_on_selector_all(
+        f"{box} .editor .sentence > *",
+        "parts => parts.map((p) => p.matches('.gs') ? p.textContent : '[' +"
+        " p.querySelector('input').value + ']')"
+    ) == ["Move up when at least ", "[80]", " of the last ", "[50]", " answers are right"]
+    page.fill(f'{box} input[data-param="move_up_bar"]', "90")
+    page.fill(f'{box} input[data-param="move_up_window"]', "51")
+    assert page.locator(f"{box} [data-apply]").count() == 1
+    page.click(f"{box} [data-apply]")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    time.sleep(0.3)  # housekeeping: room for a wrong second send to arrive
+
+    (sent,) = rig.dispatch.seen
+    assert type(sent) is ApplyMany and sent.cid
+    assert [(type(change), change.name, change.value) for change in sent.changes] == [
+        (SetParameter, "move_up_bar", 0.9), (SetParameter, "move_up_window", 51.0)]
+
+
+def test_new_color_opens_from_the_colors_section(rig):
+    """The summary and editor design's call "Colors: the *New color…* panel opens from the Colors
+    section's header in the summary, into the editor": the Colors section's lines end with *New
+    color…*, which opens its section's panel in the editor, unfolded, the color boxes hidden; what
+    is typed in it stays across a frame; opening a color box hides it again. In a real browser:
+    run with `WLX_BROWSER=webkit` too, for Safari."""
+    from pathlib import Path
+
+    from wl_xcon.link import ParamRow, decode, encode
+    from wl_xcon.photometry import ColorSet
+
+    isohue = ColorSet.load(Path(__file__).parent / "fixtures" / "isohue_design.json")
+    color = {
+        "sets": {"isohue": {"apex": list(isohue.apex), "luminance_cd_m2": 15.0,
+                            "design": dict(isohue.design),
+                            "hues": {hue: {"xy": list(xy), "srgb": "#808080"}
+                                     for hue, xy in isohue.colors.items()}}},
+        "set": "isohue", "hue": "green", "approximate": True,
+        "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+        "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False},
+    }
+    rows = (ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, section="Timing"),
+            ParamRow.of("odd_color", "appearance", None, None, None, False, source="run",
+                        color=color, section="Colors"),
+            ParamRow.of("distractor_color", "appearance", None, None, None, False, source="run",
+                        color=color, section="Colors"))
+    rig.hub.offer(decode(encode(frame(params=rows))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    colors = page.eval_on_selector_all(
+        '#params > .summary .ssec[data-section="Colors"] > .line',
+        "lines => lines.map((line) => line.getAttribute('data-open'))")
+    assert colors == ["odd_color", "distractor_color", "new-color:Colors"], colors
+
+    _open(page, "new-color:Colors")
+    assert _opened(page) == ["Colors"]
+    assert page.evaluate("document.querySelector('#params > .editor > [data-newc=\"Colors\"]').open")
+    page.fill('[data-newc="Colors"] input[data-newc-name]', "violet")
+    rig.hub.offer(decode(encode(frame(params=rows, trial_index=41))))
+    _arrived(page, 41)
+    assert _opened(page) == ["Colors"]
+    assert page.input_value('[data-newc="Colors"] input[data-newc-name]') == "violet"
+    _open(page, "odd_color")
+    assert _opened(page) == ["odd_color"]
+    assert not page.is_visible('[data-newc="Colors"]')
 
 
 def test_runtime_still_needed_reads_as_words_at_three_widths(rig):
@@ -4978,12 +5285,17 @@ def test_the_top_bar_stays_in_view_while_settings_scroll(rig, tmp_path):
     page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
     assert page.is_visible("#head-id") and page.get_attribute("#session-btn", "aria-expanded") == "true"
     page.click('label[for="t-task"]')
-    page.wait_for_selector("#params .box", state="visible")
+    page.wait_for_selector("#params > .summary .line", state="visible")
     assert not page.is_visible("#head-id"), "the session's details are behind *session* here"
     assert page.get_attribute("#session-btn", "aria-expanded") == "false"
+    # A tall setting opened, its reasons and its draw's profile shown, so the page runs past the
+    # window (rewritten for the summary and editor design of 2026-11-19: one box is shown).
+    _open(page, "fix_hold")
+    page.click(f'{_b("fix_hold")} > details.more > summary')
 
     page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-    assert page.evaluate("window.scrollY") > LAPTOP_H / 2, "the settings scroll"
+    # One box shown, not the grid's twenty, so the page runs less far past the window than it did.
+    assert page.evaluate("window.scrollY") > 100, "the settings scroll"
     bar = _rect(page, "#bar")
     assert abs(bar["top"]) < 1 and bar["bottom"] < 100, bar
     said = " ".join(page.text_content("#bar-nums").split())
@@ -4992,9 +5304,9 @@ def test_the_top_bar_stays_in_view_while_settings_scroll(rig, tmp_path):
     for cmd in ("pause", "mark", "reward", "stop"):
         button = _rect(page, f'#bar [data-cmd="{cmd}"]')
         assert bar["top"] <= button["top"] and button["bottom"] <= bar["bottom"], cmd
-    last = page.evaluate("Array.from(document.querySelectorAll('#params .box')).pop()"
+    last = page.evaluate("document.querySelector('#params > .editor > .box:not([hidden])')"
                          ".getBoundingClientRect().bottom")
-    assert last <= LAPTOP_H + 1, "the last box is scrolled up under the bar"
+    assert last <= LAPTOP_H + 1, "the opened box is scrolled up under the bar"
 
     page.click('#bar [data-cmd="stop"]')
     confirm = _rect(page, "#stop-confirm")
@@ -5011,9 +5323,11 @@ def test_the_top_bar_stays_in_view_while_settings_scroll(rig, tmp_path):
 
 
 def _found(page, root: str = "#params") -> list:
+    """The summary lines the find box leaves undimmed, by the setting each opens (rewritten for
+    the summary and editor design of 2026-11-19: the boxes are in the editor, one shown)."""
     return page.eval_on_selector_all(
-        f"{root} .box:not(.nofind)", "boxes => boxes.filter((b) => b.offsetParent !== null)"
-        ".map((b) => b.getAttribute('data-card'))")
+        f"{root} > .summary .line[data-open]:not(.nofind):not(.newcolor)",
+        "lines => lines.map((line) => line.getAttribute('data-open'))")
 
 
 def test_find_matches_a_plain_name_a_code_name_and_a_section(rig):
@@ -5039,6 +5353,9 @@ def test_find_matches_a_plain_name_a_code_name_and_a_section(rig):
     every = _found(page)
     assert {"fix_hold", "Move up", "fix_window", "fix_size", "set_size"} <= set(every)
 
+    page.fill("#pfind", "fix_win")
+    assert page.is_visible('#params > .summary .line[data-open="set_size"]'), (
+        "a line not found is dimmed, not hidden (the summary and editor design's goal 8)")
     for typed, found in (("fixation hold", ["fix_hold"]), ("FIX_WIN", ["fix_window"]),
                          ("stimuli", ["set_size", "fix_size"]),
                          ("fixation point", ["fix_size"]), ("gaze", ["fix_window"]),
@@ -5062,7 +5379,7 @@ def test_find_matches_a_plain_name_a_code_name_and_a_section(rig):
 
 def test_a_section_and_its_tab_count_the_edits_not_sent(rig):
     """The console interface rework's Task 8: each section's header counts what in it is not sent
-    after the rig's counts ("Timing · 2 settings · 0 changed · 1 not sent"), a group's settings
+    after the rig's counts ("Timing · 2 settings · 1 not sent"), a group's settings
     each once and a parent taking in its subsections, and each settings tab's label says how many
     while any exists; a frame keeps them, and Discard all clears them, leaving the rig's counts
     as they were."""
@@ -5074,39 +5391,40 @@ def test_a_section_and_its_tab_count_the_edits_not_sent(rig):
     page = _task6_page(rig, params=rows, groups=_move_up())
 
     def header(name, root="#params"):
+        # The summary's section header (the summary and editor design of 2026-11-19).
         return " ".join(page.text_content(
-            f'{root} details.sec[data-sec="{name}"] > summary').split())
+            f'{root} .ssec[data-section="{name}"] > h4').split())
 
     def tab(which):
         return " ".join(page.text_content(f'label[for="{which}"]').split())
 
-    assert (header("Timing"), tab("t-task")) == ("Timing · 2 settings · 0 changed", "Task parameters")
+    assert (header("Timing"), tab("t-task")) == ("Timing · 2 settings", "Task parameters")
     page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
-    assert header("Timing") == "Timing · 2 settings · 0 changed · 1 not sent"
+    assert header("Timing") == "Timing · 2 settings · 1 not sent"
     assert tab("t-task") == "Task parameters · 1 not sent"
     page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
     page.fill(f'{_b("Move up")} input[data-param="move_up_bar"]', "90")
     page.fill(f'{_b("Move up")} input[data-param="move_up_window"]', "51")
-    assert header("Timing") == "Timing · 2 settings · 0 changed · 2 not sent"
-    assert header("Rules") == "Rules · 2 settings · 0 changed · 2 not sent"
-    assert header("Stimuli") == "Stimuli · 1 setting · 0 changed"
+    assert header("Timing") == "Timing · 2 settings · 2 not sent"
+    assert header("Rules") == "Rules · 2 settings · 2 not sent"
+    assert header("Stimuli") == "Stimuli · 1 setting"
     assert tab("t-task") == "Task parameters · 4 not sent"
     page.click('label[for="t-training"]')
     page.fill(f'{_b("crowd_step", "#training-params")} input[data-param="crowd_step"]', "2")
-    assert header("Training", "#training-params") == "Training · 1 setting · 0 changed · 1 not sent"
+    assert header("Training", "#training-params") == "Training · 1 setting · 1 not sent"
     assert header("Training/staircases", "#training-params") == (
-        "staircases · 1 setting · 0 changed · 1 not sent")
+        "staircases · 1 setting · 1 not sent")
     assert tab("t-training") == "Training · 1 not sent"
     _offer(rig, 41, params=rows, groups=_move_up())
     _arrived(page, 41)
     page.click('label[for="t-task"]')
-    assert header("Timing") == "Timing · 2 settings · 0 changed · 2 not sent"
+    assert header("Timing") == "Timing · 2 settings · 2 not sent"
     page.click(f'{_b("fix_hold")} [data-discard]')
-    assert header("Timing") == "Timing · 2 settings · 0 changed · 1 not sent"
+    assert header("Timing") == "Timing · 2 settings · 1 not sent"
 
     page.click("#drafts-discard")
     assert (header("Timing"), header("Rules"), tab("t-task"), tab("t-training")) == (
-        "Timing · 2 settings · 0 changed", "Rules · 2 settings · 0 changed", "Task parameters",
+        "Timing · 2 settings", "Rules · 2 settings", "Task parameters",
         "Training")
     assert rig.dispatch.seen == []
 
@@ -5190,9 +5508,14 @@ def test_a_box_keeps_its_height_as_its_status_changes(rig):
     rig.dispatch.delay = 0.5  # housekeeping: long enough to measure *sending…*
 
     def measured():
-        return [(round(_rect(page, _b(name))["height"], 1),
-                 round(_rect(page, f'{_b(name)} input[data-param="{name}"]')["top"], 1))
-                for name in ("fix_hold", "response_deadline")]
+        # Each opened in the editor in turn, measured where it stands (rewritten for the summary
+        # and editor design of 2026-11-19, which shows one box at a time).
+        found = []
+        for name in ("fix_hold", "response_deadline"):
+            _open(page, name)
+            found.append((round(_rect(page, _b(name))["height"], 1),
+                          round(_rect(page, f'{_b(name)} input[data-param="{name}"]')["top"], 1)))
+        return found
 
     rest = measured()
     for name, value in (("fix_hold", "0.5"), ("response_deadline", "0.8")):
@@ -5288,6 +5611,11 @@ def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
     assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
 
     _offer(rig, 42, params=_task6_rows(), withdrawals=(sent.cid,))
+    # Another setting opened in the editor, so the pinned box is hidden there as the page loads:
+    # its copy is shown on Runtime all the same (the summary and editor design of 2026-11-19).
+    page.click('label[for="t-task"]')
+    _open(page, "set_size")
+    page.click('label[for="t-runtime"]')
     page.reload()
     page.wait_for_selector(SIGNED_IN, timeout=WAIT_S * 1000)
     page.wait_for_selector(copy, state="visible")

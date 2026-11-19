@@ -2835,10 +2835,11 @@ def test_the_sign_in_script_uses_pkce_and_keeps_its_tokens_in_session_storage_on
     assert '"offline_access"' in _SCRIPT and '"S256"' in _SCRIPT
     assert 'credentials: "omit"' in _SCRIPT
     assert "sessionStorage" in _SCRIPT and "Authorization" in _SCRIPT
-    # The box's name keeps its `localStorage` (two uses), and so do the sections' last-left state
-    # (two more, the console settings design's §7), the pins and the demo keys' first visit (two
+    # The box's name keeps its `localStorage` (two uses), and so do the setting opened in each
+    # settings tab's editor (three: read, kept, dropped; the summary and editor design's goal 5,
+    # which retired the sections' last-left state), the pins and the demo keys' first visit (two
     # each, the console interface rework's Task 8); the sign-in never touches it.
-    assert _SCRIPT.count("localStorage") == 8
+    assert _SCRIPT.count("localStorage") == 9
     assert "console.log" not in _SCRIPT
     # The authorization code leaves the address bar before anything else is done with it.
     assert _SCRIPT.index("history.replaceState") < _SCRIPT.index("tokenRequest({")
@@ -3633,9 +3634,11 @@ def test_where_a_value_comes_from_its_draw_its_numbers_and_the_moments_are_escap
     # Five on the held card (its condition, its draw, a number's name thrice), the other card's
     # conditions and its staged hand-back -- in its *more*, and in its head after the arrow and
     # that head's `title` (the console interface rework's Task 5), and in who is changing it under
-    # a draft, `data-under` (its Task 6) -- seven in the feed (a range's block among them), the
-    # moment's words and what a revert to it changes, and the setting the eased line names.
-    assert text.count(html.escape(EVIL, quote=True)) == 19
+    # a draft, `data-under` (its Task 6), and on its summary line after the arrow and in the
+    # line's `title` (the summary and editor design's goal 3) -- seven in the feed (a range's
+    # block among them), the moment's words and what a revert to it changes, and the setting the
+    # eased line names.
+    assert text.count(html.escape(EVIL, quote=True)) == 21
 
 
 def test_the_page_says_while_a_persons_change_keeps_trials_out_of_moving_up():
@@ -5106,8 +5109,9 @@ def test_a_groups_sentence_reads_with_its_fields_in_place():
     assert list(cards) == ["Move up", "fix_hold"]
     box = cards["Move up"]
     # `data-echo`: its fields show what its head would, so its head says it only while it differs
-    # (the console interface rework's Task 8).
-    assert box.startswith(' group wide" data-card="Move up" data-echo>')
+    # (the console interface rework's Task 8); `hidden` until it is opened in the editor (the
+    # summary and editor design's goal 2).
+    assert box.startswith(' group wide" data-card="Move up" data-echo hidden>')
     assert ('<span class="lbl" title="Move up">Move up</span><span class="code" '
             'title="move_up_bar, move_up_window">move_up_bar, move_up_window</span>') in box
     sentence = re.search(r'<div class="sentence">(.*?)</div><div class="status">', box).group(1)
@@ -5124,7 +5128,8 @@ def test_a_groups_sentence_reads_with_its_fields_in_place():
     assert box.count('data-apply="Move up"') == 1 and "data-apply=\"move_up" not in params
     assert web.GROUP_REST in box
     assert '<span class="gn">Bar to move up</span>' in box and '0 to 100 % · a fraction is at most 100%' in box
-    assert re.search(r'<summary>Rules · 3 settings · 0 changed</summary>', params)
+    # The summary's header (the summary and editor design of 2026-11-19), the whole in its title.
+    assert '<h4 title="Rules · 3 settings · 0 changed">Rules · 3 settings</h4>' in params
 
     listed = fragments(frame(params=_group_rows(), groups=(replace(group, sentence=None),)),
                        view())["params"]
@@ -5202,7 +5207,10 @@ def test_one_new_color_panel_per_colors_section():
     """The design's call: "the new-color panel moves out of each color's box into one *New
     color…* panel for the Colors section": no color box holds one; each section holding a color
     box has one, after its boxes, keyed by the section, offering every set its boxes show, the
-    first box's set chosen; a section with none has none."""
+    first box's set chosen; a section with none has none. Rewritten for the summary and editor
+    design (2026-11-19): the panel stands in the editor after its section's boxes, `hidden` until
+    the *New color…* line its section's summary ends with opens it (`new-color:SECTION`; the
+    design's "Colors" call)."""
     def color(sets, chosen):
         return {"sets": {named: {"apex": [0.31, 0.33], "luminance_cd_m2": 15.0, "design": None,
                                  "hues": {"red": {"xy": [0.46, 0.33], "srgb": "#c76f6a"}}}
@@ -5228,15 +5236,21 @@ def test_one_new_color_panel_per_colors_section():
     for card in _cards(params).values():
         card = card.partition('<details class="newc"')[0]
         assert "data-newc" not in card and "New color" not in card
-    colors = params.partition('data-sec="Colors"')[2].partition('data-sec="Timing"')[0]
-    # After the section's last box and the end of its boxes' grid.
-    assert ('</details></div></div><details class="newc" data-newc="Colors"><summary>New color…'
+    editor = params.partition('<div class="editor">')[2]
+    colors = editor.partition('data-card="pairings"')[2].partition('data-card="fix_hold"')[0]
+    # After the section's last box, in the editor, hidden until it is opened.
+    assert ('</details></div><details class="newc" data-newc="Colors" hidden><summary>New color…'
             '</summary>') in colors
     into = re.search(r'data-newc-into[^>]*>(.*?)</select>', colors).group(1)
     assert re.findall(r'<option value="([^"]*)"( selected)?', into) == [
         ("isohue", " selected"), ("bright", ""), ("", "")]
-    timing = re.search(r'<details class="sec" data-sec="Timing" open>.*?</details>', params).group(0)
-    assert "newc" not in timing
+    summary = params.partition('<div class="legend">')[0]
+    opens = re.findall(r'<div class="ssec" data-section="([^"]+)">|data-open="([^"]+)"', summary)
+    assert [one for pair in opens for one in pair if one] == [
+        "Colors", "odd_color", "distractor_color", "pairings", "new-color:Colors",
+        "Timing", "fix_hold", "Cues", "cue_color", "new-color:Cues"]
+    assert ('<button type="button" class="line newcolor" data-open="new-color:Colors" '
+            'title="New color… Colors: define a color and save it as a proposal">') in summary
 
 
 
@@ -5284,8 +5298,9 @@ def test_the_bar_holds_the_runs_numbers_and_buttons_and_the_session_is_behind_a_
 
 def test_a_section_counts_its_unsent_drafts():
     """The console interface rework's Task 8: a section's header counts what in it is not sent,
-    after the rig's counts. What the rig counts is the header's one text -- `N settings · M
-    changed`, a group's settings each once, a parent's taking in its subsections' -- so the page's
+    after the rig's counts. What the rig counts is the header's one text -- `N settings`, the
+    whole `N settings · M changed` in its title, a group's settings each once, a parent's taking
+    in its subsections' -- so the page's
     script puts "· K not sent" after it in a slot of its own (`countDrafts`, from `showBar`, the
     one place drafts are summed), counting a group's draft by the settings it changes (`unsent`),
     and after a frame's new counts `settle` says it again. The browser test
@@ -5301,14 +5316,16 @@ def test_a_section_counts_its_unsent_drafts():
     group = GroupRow("Move up", ("move_up_bar", "move_up_window"), None, "Rules")
     params = fragments(frame(params=rows, groups=(group,)), view())["params"]
 
-    summaries = re.findall(r'<details class="sec" data-sec="([^"]+)" open><summary>([^<]*)</summary>',
+    summaries = re.findall(r'<div class="ssec" data-section="([^"]+)"><h4 title="([^"]*)">([^<]*)</h4>',
                            params)
-    assert summaries == [("Timing", "Timing · 2 settings · 1 changed"),
-                         ("Timing/points", "points · 1 setting · 0 changed"),
-                         ("Rules", "Rules · 2 settings · 1 changed")]
+    # Rewritten for the summary and editor design (2026-11-19): the summary's section headers
+    # (`.ssec > h4`) say the settings on one line, the whole with what changed in their title.
+    assert summaries == [("Timing", "Timing · 2 settings · 1 changed", "Timing · 2 settings"),
+                         ("Timing/points", "points · 1 setting · 0 changed", "points · 1 setting"),
+                         ("Rules", "Rules · 2 settings · 1 changed", "Rules · 2 settings")]
     counting = _script_between("function unsent(box)", "  // **Pins**")
     assert 'box.classList.contains("group") ? Math.max(1, draft.changes.length) : 1' in counting
-    assert 'sayIn(slotIn(summary, "ns"), count)' in counting
+    assert 'sayIn(slotIn(header, "ns"), count)' in counting
     assert 'sayIn(slotIn(tab, "tns"), total)' in counting
     assert '" · " + count + " not sent"' in counting
     assert _script_between("function showBar() {", "var bar = ").strip() == "countDrafts();"
@@ -5365,3 +5382,143 @@ def test_every_box_has_a_pin_and_a_mark_for_more_in_its_head():
                 _said(first)) == ("button", name, "false", "pin to Runtime"), name
         assert "disabled" not in first.attrs, name
     assert ".box > .more > summary { position: absolute; top: 1px; right: 2px;" in _CSS
+
+
+# --- the settings tabs as a summary and one editor (the design of 2026-11-19, Task 1) -----------
+
+
+def _summary_rows():
+    """A task's settings of every kind a summary line says (the plan's Task 1): a plain number, a
+    whole number, a percent and a person's draw in Timing and Stimuli, a group of two in Rules, a
+    color and a pool in Colors, and the reward size, a ceiling, declared first but shown last."""
+    from wl_xcon.link import GroupRow
+
+    color = {"sets": {"isohue": {"apex": [0.31, 0.33], "luminance_cd_m2": 15.0, "design": None,
+                                 "hues": {"red": {"xy": [0.46, 0.33], "srgb": "#c76f6a"}}}},
+             "set": "isohue", "hue": "red", "approximate": True,
+             "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+             "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False}}
+    shape = {"shape": "non_aging", "numbers": {"shortest": 0.5, "longest": 1.25},
+             "values": [], "weights": [], "by": "person"}
+    rows = (
+        ParamRow.of("reward_correct", "mL", 0.0, 0.4, 0.15, True, step=0.01, section="Ceilings"),
+        ParamRow.of("iti", "s", 0.2, 5.0, 1.0, False, source="task", step=0.05, section="Timing",
+                    label="Time between trials"),
+        ParamRow.of("fix_hold", "s", 0.1, 2.0, 0.5, False, source="form", step=0.05,
+                    section="Timing", label="Fixation hold", switch="drawn", shape=shape),
+        ParamRow.of("set_size", "objects", 1.0, 36.0, 4, False, source="task", whole=True,
+                    step=1.0, section="Stimuli", label="Number of discs"),
+        ParamRow.of("distractor_fraction", "fraction", 0.0, 1.0, 0.8, False, source="task",
+                    step=0.05, percent=True, section="Stimuli", label="Distractor brightness"),
+        ParamRow.of("odd_color", "appearance", None, None, None, False, source="run",
+                    color=color, section="Colors", label="Odd disc color"),
+        _pool_row(),
+    ) + tuple(replace(row, section="Rules") for row in _group_rows() if row.name != "fix_hold")
+    group = GroupRow("Move up", ("move_up_bar", "move_up_window"), _MOVE_UP, "Rules")
+    return rows, (group,)
+
+
+def _lines(params: str) -> list:
+    """Each summary line, in page order: `(section, data-open, classes, mk, ln, lv)`."""
+    summary = params.partition('<div class="legend">')[0]
+    found = []
+    for piece in re.split(r'(?=<div class="ssec")', summary)[1:]:
+        section = html.unescape(re.search(r'data-section="([^"]*)"', piece).group(1))
+        for classes, name, mark, label, value in re.findall(
+                r'<button type="button" class="([^"]*)" data-open="([^"]*)" title="[^"]*">'
+                r'<span class="mk">([^<]*)</span><span class="ln">([^<]*)</span>'
+                r'<span class="lv"[^>]*>([^<]*)</span></button>', piece):
+            found.append((section, html.unescape(name), classes, mark, html.unescape(label),
+                          html.unescape(value)))
+    return found
+
+
+def test_the_summary_has_a_line_for_every_box_in_section_order():
+    """The summary and editor design's goal 1 (the PI, 2026-11-19: "perhaps some way to visualize
+    all params at top and clicking opens the ability to change it below"; mock-up A): above the
+    editor, one line per box, by section in the task's order with Ceilings last, each opening its
+    box (`data-open` is its `data-card`), its value the rig's as the box shows it -- "1.00 s", a
+    whole number's "4", a percent's "80%", a person's draw "0.5–1.25 s", a pool's "2 of 12", a
+    color's hue, a group's settings' values joined -- and a Colors section ending in its New
+    color… line; then the legend, then the editor holding every box hidden and its placeholder."""
+    rows, groups = _summary_rows()
+    params = fragments(frame(params=rows, groups=groups), view())["params"]
+    lines = _lines(params)
+
+    assert [(section, name, label, value) for section, name, _, _, label, value in lines] == [
+        ("Timing", "iti", "Time between trials", "1.00 s"),
+        ("Timing", "fix_hold", "Fixation hold", "0.5–1.25 s"),
+        ("Stimuli", "set_size", "Number of discs", "4"),
+        ("Stimuli", "distractor_fraction", "Distractor brightness", "80%"),
+        ("Colors", "odd_color", "Odd disc color", "red"),
+        ("Colors", "pairings", "pairings", "2 of 12"),
+        ("Colors", "new-color:Colors", "New color…", ""),
+        ("Rules", "Move up", "Move up", "80% · 50"),
+        ("Ceilings", "reward_correct", "reward_correct", "0.15 mL"),
+    ]
+    boxes = list(_cards(params))
+    assert [name for _, name, *_ in lines if not name.startswith("new-color:")] == boxes
+    summary, _, rest = params.partition('<div class="legend">')
+    assert "<details" not in summary and summary.count('<div class="ssec"') == 5
+    assert rest.startswith(html.escape(web.SUMMARY_LEGEND, quote=True) + "</div>"
+                           '<div class="editor"><div class="placeholder">'
+                           "click a setting above to change it</div>")
+    editor = rest.partition('<div class="editor">')[2]
+    assert len(re.findall(r'<div class="box[^"]*" data-card="[^"]*"[^>]* hidden>', editor)) == len(boxes)
+    assert '<details class="newc" data-newc="Colors" hidden>' in editor
+    assert ('<h4 title="Timing · 2 settings · 0 changed">Timing · 2 settings</h4>' in summary
+            and '<h4 title="Rules · 2 settings · 0 changed">Rules · 2 settings</h4>' in summary)
+    assert 'data-task="tasks/fixation_detection.py" data-run="2027-01-14_01/0"' in summary
+    assert web._summary_value(rows[0]) == "0.15 mL"
+    # A value each trial gives its own, in short; a position and an appearance in the rig's words.
+    for fields, said in (({"source": "conditions"}, "from conditions"),
+                         ({"source": "pool"}, "from pairings"),
+                         ({"source": "draw"}, "drawn each trial"),
+                         ({"source": "range", "numbers": {"low": 1.0, "high": 3.5}}, "1–3.5 s"),
+                         ({"source": "frozen"}, "frozen at 1.00 s"),
+                         ({"position": "10° at 45°"}, "10° at 45°"),
+                         ({"words": "hollow ring"}, "hollow ring")):
+        assert web._summary_value(replace(rows[1], **fields)) == said, fields
+
+
+def test_a_line_marks_what_the_rig_knows():
+    """The summary and editor design's goal 3 and its call on combined states: a line marks what
+    the rig's frame says, never color alone -- ◆ a value drawn each trial (`drawn`), ◷ a change
+    waiting for the next trial with the value in force first and what waits after an arrow
+    (`waiting`), ! the box's refusal as its status line ranks it (`refused`), ⚠ a warning
+    (`warned`) -- and its classes say a value changed from the task's start (`changed`) and a
+    reward size (`ceiling`); its `title` says each state in words."""
+    from wl_xcon.link import Applied
+
+    rows, groups = _summary_rows()
+    rows = tuple(replace(row, changed=True) if row.name == "set_size" else
+                 replace(row, applied=Applied(39, "jake"), warned=("crowded",))
+                 if row.name == "distractor_fraction" else row for row in rows)
+    jake = Box("jake")
+    params = fragments(frame(
+        params=rows, groups=groups,
+        staged=(Staged("iti", 1.0, 1.5, jake, False, cid="p-1"),
+                Staged("move_up_window", 50.0, 60.0, jake, False, cid="p-2")),
+        refusals=(Refused("set_size", jake, "set-size: 40 objects do not fit", cid="p-3",
+                          value=40.0),)), view())["params"]
+    marked = {name: (classes.split(), mark, value) for _, name, classes, mark, _, value in _lines(params)}
+    assert set(marked) >= {"iti", "fix_hold", "set_size", "Move up", "reward_correct"}, marked
+
+    assert marked["iti"] == (["line", "waiting"], "◷", "1.00 → 1.50 s")
+    assert marked["fix_hold"] == (["line", "drawn"], "◆", "0.5–1.25 s")
+    assert marked["set_size"] == (["line", "refused", "changed"], "!", "4")
+    assert marked["distractor_fraction"] == (["line", "warned"], "⚠", "80%")
+    assert marked["Move up"] == (["line", "waiting"], "◷", "80% · 50 → 60")
+    assert marked["reward_correct"] == (["line", "ceiling"], "", "0.15 mL")
+    assert marked["odd_color"][:2] == (["line"], "")
+    titles = dict((html.unescape(name), html.unescape(title)) for name, title in re.findall(
+        r'class="line[^"]*" data-open="([^"]*)" title="([^"]*)"', params))
+    assert titles["iti"] == ("Time between trials (iti) · 1.00 → 1.50 s · waiting for the next "
+                             "trial · jake (box, unverified)")
+    assert titles["fix_hold"] == ("Fixation hold (fix_hold) · 0.5–1.25 s · drawn each trial, from a "
+                                  "person's draw")
+    assert titles["set_size"].startswith("Number of discs (set_size) · 4 · refused 40 · ")
+    assert titles["set_size"].endswith(" · changed from the task's start")
+    assert "in force, with a warning · from trial 39" in titles["distractor_fraction"]
+    assert titles["reward_correct"].endswith("a welfare ceiling: sent alone, by its own Apply")
+    assert 'data-open="iti" title="' in params and '<span class="lv" data-now="1.00 s">' in params

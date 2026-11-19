@@ -1,8 +1,9 @@
 """The Task parameters tab in sections (the console settings design's §7; the PI, 2026-11-16: "The
 task file names it", "As you last left them"): `Param.section` names the section, `/` making a
 subsection; a setting naming none goes to Timing where its unit is seconds, else Other; each
-header counts its settings and how many differ from the task's start. The browser's half, how a
-section opens as last left, is in `test_page_browser.py`. Engine test material, run only in the
+header counts its settings and how many differ from the task's start. The sections are the
+summary's (the summary and editor design of 2026-11-19), which no longer fold; the browser's
+half is in `test_page_browser.py`. Engine test material, run only in the
 simulator: no number here is a timing claim about the rig.
 """
 
@@ -61,20 +62,23 @@ def _row(name, section, changed=False, unit="s"):
     return ParamRow.of(name, unit, 0.0, 10.0, 1.0, False, section=section, changed=changed)
 
 
-def _sections_only(html: str) -> str:
-    """The pane with each box's own `<details>` -- its *more*, a color's New color -- taken out,
-    so only the sections' are left (the console interface rework's Task 5)."""
-    return re.sub(r'<details class="(?:more|newc)".*?</details>', "", html, flags=re.S)
+def _summary_only(html: str) -> str:
+    """The pane's summary, before its legend and the editor (the summary and editor design of
+    2026-11-19): the sections are its."""
+    return html.partition('<div class="legend">')[0]
 
 
 def _groups(html: str) -> list[tuple[str, list]]:
-    """Each section's `<details>` header and the names of the boxes directly under it, in page
-    order: the text from its summary to the next `<details>` or `</details>`."""
+    """Each summary section's header whole -- its `title`, `N settings · M changed` -- and the
+    settings of the lines directly under it, in page order: the text from its header to the next
+    section's start, nested or not. Rewritten for the summary and editor design, from each
+    section's `<details>` and the boxes under it."""
     found = []
-    for piece in re.split(r"(?=<details)", _sections_only(html))[1:]:
-        summary = re.search(r"<summary>(.*?)</summary>", piece).group(1)
-        body = re.split(r"<details|</details>", piece.split("</summary>", 1)[1])[0]
-        found.append((summary, re.findall(r'<div class="box[^"]*" data-card="(.*?)"', body)))
+    for piece in re.split(r'(?=<div class="ssec")', _summary_only(html))[1:]:
+        title = re.search(r'<h4 title="([^"]*)">', piece).group(1)
+        body = piece.split("</h4>", 1)[1]
+        found.append((title, re.findall(r'<button type="button" class="line[^"]*" '
+                                        r'data-open="(.*?)"', body)))
     return found
 
 
@@ -104,12 +108,12 @@ def test_cards_are_grouped_in_declared_order_each_header_counting():
     assert by["array · 1 setting · 0 changed"] == ["array_size"]
     assert by["Other · 1 setting · 0 changed"] == ["loose"]
     # The subsections are inside their parent, which holds its own settings first.
-    stimuli = html[html.index('data-sec="Stimuli"'):html.index('data-sec="Other"')]
-    assert stimuli.index('data-sec="Stimuli/fixation point"') < stimuli.index(
-        'data-sec="Stimuli/array"')
+    stimuli = html[html.index('data-section="Stimuli"'):html.index('data-section="Other"')]
+    assert stimuli.index('data-section="Stimuli/fixation point"') < stimuli.index(
+        'data-section="Stimuli/array"')
     assert f'data-task="{frame().task}"' in html
-    sections = _sections_only(html)
-    assert sections.count("<details") == sections.count("</details>") == 6
+    summary = _summary_only(html)
+    assert summary.count('<div class="ssec"') == 6 and "<details" not in summary
 
 
 def test_a_changed_setting_counts_in_its_sections_header():

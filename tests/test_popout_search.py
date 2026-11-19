@@ -2027,9 +2027,13 @@ def test_pairings_sit_with_the_colors(task, tmp_path):
     params = web.fragments(frame(params=rows, groups=tuple(GroupRow(*group)
                                                            for group in session.groups)),
                            view())["params"]
+    # The summary's sections (the summary and editor design of 2026-11-19), each line opening
+    # its box (a section's *New color…* line opens no box).
+    summary = params.partition('<div class="legend">')[0]
     sections = re.findall(
-        r'<details class="sec" data-sec="([^"]+)"(.*?)(?=<details class="sec" |$)', params, re.S)
-    boxed = {section: re.findall(r'<div class="box[^"]*" data-card="([^"]+)"', body)
+        r'<div class="ssec" data-section="([^"]+)">(.*?)(?=<div class="ssec" |$)', summary, re.S)
+    boxed = {section: re.findall(
+                 r'<button type="button" class="line(?! newcolor)[^"]*" data-open="([^"]+)"', body)
              for section, body in sections}
     assert boxed["Colors"] == ["odd_color", "distractor_color", "color_luminance",
                                "distractor_fraction", "pairings"], boxed
