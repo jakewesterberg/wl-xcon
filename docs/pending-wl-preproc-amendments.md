@@ -12,7 +12,7 @@ sections below keep their headings as sent. **And one from the pop-out search, o
 **answered 2026-11-14** (wl-preproc's session, by message): accepted, with one rename, the trial line's `realized` now
 `color_realized`. **And one from demo mode, opened and answered 2026-11-14**, the last section.
 
-**Open 2026-11-19 (XC-529):** the console interface rework's one new change kind, `withdrawn`, the last section of this file.
+**Answered 2026-11-19 (XC-529, by message from wl-preproc's session):** the console interface rework's one new change kind, `withdrawn`, accepted as named by the PI: appended after `shaping`, not strobed, `was` equal to `now`, `cid`, `withdrawn` and `staged_by` as written, one row for each setting a withdrawn act covers, all sharing one fresh change id; Apply all adds no shape; a refused withdrawal writes no row. The last section of this file, kept as sent.
 
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
@@ -1257,11 +1257,11 @@ saturation and a luminance a person may move.
 
 ---
 
-# OPEN — the console interface rework: a withdrawn change, and Apply all (new, 2026-11-19)
+# ANSWERED 2026-11-19 — the console interface rework: a withdrawn change, and Apply all (new, 2026-11-19)
 
-> **Built to the names below, unanswered, on 2026-11-19** (the console interface plan's Task 4:
+> **Accepted by wl-preproc 2026-11-19, as named, no renames. Built to the names below on 2026-11-19** (the console interface plan's Task 4:
 > `record.KINDS` gains `withdrawn`, written by `taskd.Session._withdrawn`); renamed here and there if
-> you rename them, and the build's merge waits on your answer.
+> you rename them, (the merge no longer waits on it).
 
 Opened 2026-11-19 on the PI's approved design (`docs/superpowers/specs/2026-11-19-console-interface-design.md`, "The
 record": "wl-preproc is told first, as XC-513 was"), backlog XC-529, **before the shape is written**. One change kind and

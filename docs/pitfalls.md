@@ -30,6 +30,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P23** | **A coordinate read as a distance** | Medium | The angles the engine measures between positions are true visual angle, measured where they are, and what is still per axis is named (STE-27); a mean pixels per degree is used by no drawing, window or check by name — see expanded note |
 | **P24** | **A condition true as a state begins, read as an edge** | Medium | A guard derived from a signal judged in every state says what holds as its state begins, not only what changed on its frame; a test setup that steers round a behavior asks whether it is meant — see expanded note |
 | **P25** | **A range proof that fails closed once its cap goes** | Medium | A check that proved a setting safe from its declared cap is judged at the values the setting can take, not at the cap: remove the cap and the proof refuses (or silently passes) everything; test at the values — see expanded note |
+| **P26** | **A page that sends on a timer records half-way values** | Medium | A console control sends nothing until its box's Apply: a value typed or stepped is a draft the box says is *not sent*, and one Apply sends the box's change under one command id, so the record never holds a number a person was still reaching for (the console interface rework, 2026-11-19; the PI: "an apply button in each box") |
 
 ## Expanded notes
 

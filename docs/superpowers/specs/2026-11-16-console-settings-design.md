@@ -13,6 +13,8 @@ revision](2026-11-16-popout-revision-design.md), uses what this one builds.
 > time left); **a light's saturation scales its CAM16-UCS chroma at a fixed hue** (COL-39), each line writing the
 > light's `light_xy`; the DKL default contrast stays the set's mean radius (the PI, 2026-11-18).
 
+> **Its page was reworked 2026-11-19** on the same branch: each setting a box with its own Apply, groups and percents, one bar, find and pins. Where this design describes the cards, their send path or the page's layout, [`2026-11-19-console-interface-design.md`](2026-11-19-console-interface-design.md) is the record; the settings, limits, forms and colors here stand.
+
 ## 1. Why
 
 The PI played the pop-out search with the mouse as the eye (demo mode). He liked it, and asked for four changes to
