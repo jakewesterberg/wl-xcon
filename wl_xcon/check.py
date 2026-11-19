@@ -573,6 +573,12 @@ def _whole_faults(task: Task) -> list[Finding]:
     return findings
 
 
+#: **Why a group may not hold a reward size** (`bad-group`; the console interface design's "Decided
+#: by us": a reward size keeps its own Apply, never in an Apply all or a withdraw; the controller's
+#: ruling on its plan's Task 7), in the words the page's drafts bar says it in.
+REWARD_ALONE = "a reward size is sent alone, by its own Apply"
+
+
 def _group_faults(task: Task) -> list[Finding]:
     """`bad-group` for what a task's groups (`Task.groups`; the console interface design's goal 8)
     name that the task cannot box: a setting it does not declare; one in two groups, since a
@@ -597,8 +603,8 @@ def _group_faults(task: Task) -> list[Finding]:
         for name in group.settings:
             if name in ceilings:
                 findings.append(Finding("bad-group", (
-                    f"group {group.name!r} holds {name!r}, a welfare-bounded setting: a reward "
-                    f"size is never applied with others, so it keeps a box of its own")))
+                    f"group {group.name!r} holds {name!r}, a welfare-bounded setting: "
+                    f"{REWARD_ALONE}")))
             elif name not in declared:
                 findings.append(Finding("bad-group", (
                     f"group {group.name!r} names {name!r}, which the task does not declare")))

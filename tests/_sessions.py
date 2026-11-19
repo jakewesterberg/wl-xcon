@@ -111,6 +111,27 @@ def whole_point_task(folder: Path) -> Path:
     return path
 
 
+def grouped_task(folder: Path) -> Path:
+    """**A task with a group and a percent setting** (the console interface rework's Task 7),
+    written into `folder` as `grouped.py`: the reference detection task with its two holds in one
+    group, `Holds`, read as a sentence, and a fraction `hit_bar` its box shows as a percent, with a
+    plain name. Engine test material, run only in the simulator: the pop-out search's own groups
+    and percents are declared with the PI in wl-xtasks."""
+    text = Path("tasks/fixation_detection.py").read_text()
+    old = '        Param("fix_hold", unit="s", low=0.0, high=10.0, start=0.3, why=HOLD_WHY_10),'
+    assert text.count(old) == 1, old
+    text = text.replace(old, old + (
+        '\n        Param("hit_bar", unit="fraction", low=0.0, high=1.0, start=0.8, percent=True,'
+        ' label="Bar to pass"),'))
+    text += ("\n\nimport dataclasses as _dataclasses\nfrom wl_xcon.task import Group\n"
+             "TASK = _dataclasses.replace(TASK, groups=(Group(\"Holds\", (\"fix_hold\", "
+             "\"target_hold\"), \"Hold {fix_hold} on the cross, then {target_hold} on the "
+             "target\"),))\n")
+    path = Path(folder) / "grouped.py"
+    path.write_text(text)
+    return path
+
+
 def malformed_task(folder: Path) -> Path:
     """A task whose declaration `values` could not compare against, written into `folder`
     as `malformed.py`: the reference task with `fix_hold`'s lower bound typed as text.

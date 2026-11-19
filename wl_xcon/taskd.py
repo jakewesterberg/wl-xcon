@@ -99,7 +99,7 @@ from wl_xcon.task import (
     Plan, SaccadeTo, Scaled, Show, Staircase,
     Task, Trial, actions_of, at_hardest, color_choices, limit_reason, position_of, set_light,
     size_at, size_settings, sized_places, staircase_verdict, section_of, step_of, CEILINGS,
-    OTHER_STEP, UNIT_STEPS,
+    OTHER, OTHER_STEP, UNIT_STEPS,
 )
 from wl_xcon.task import (
     BY_CONDITIONS, EASIER, EXPECTED, FRESH, HARDER, NOT_DIFFICULTY, SAME, SHAPES, SHAPING,
@@ -4048,6 +4048,23 @@ class Session:
         which the switch's *full task* plays; `False` between runs."""
         return (self.phase == "running" and self._played is not None
                 and self._played.full is not None)
+
+    @property
+    def groups(self) -> tuple:
+        """**The task's groups, for a console** (`task.Group`; `link.GroupRow`; telemetry schema
+        23; the console interface rework's Task 7): each as `(name, settings, sentence, section)`
+        -- its title, its settings in the order it declares them, its sentence or `None` where it
+        declares none, and the section its first setting sits in (`task.section_of`), which every
+        one of them shares (`check`'s `bad-group`). The task's declaration, so between runs too; `()`
+        before a task is loaded. Read between trials."""
+        params = self._params()
+        task = self._task
+        if task is None:
+            return ()
+        return tuple(
+            (group.name, group.settings, group.sentence or None,
+             section_of(params[group.settings[0]]) if group.settings[0] in params else OTHER)
+            for group in task.groups)
 
     def _move(self, command, index: int, step: str) -> None:
         """**A person moves the run on to its next block, or back one** (`link.NextBlock`,

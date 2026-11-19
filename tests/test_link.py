@@ -250,6 +250,8 @@ def _session_with(
         # run with no training to switch.
         shaping="",
         full_task=False,
+        # `Session.groups` (schema 23, the console interface rework's Task 7): a task with none.
+        groups=(),
     )
 
 
@@ -4235,6 +4237,64 @@ def test_a_row_carries_what_a_box_needs_over_the_wire():
     assert SCHEMA == 23
     with pytest.raises(SchemaMismatch, match="carried schema 22 and this console reads schema 23"):
         decode(encode(replace(sent, schema=22)))
+
+
+def test_a_frame_lists_the_tasks_groups(tmp_path):
+    """Schema 23 (the console interface rework's Task 7; the design's goal 8, the PI: "One box
+    after Timing"): a frame names each group the task declares -- its title, its settings in the
+    order it declares them, its sentence, and the section its settings share, where its box sits
+    -- read off the session between runs as in one (the task's declaration), and crossing the wire
+    whole; a task with none lists none; each field malformed is a malformed frame, never read."""
+    import _sessions
+    from wl_xcon.dio import Simulated as Card
+    from wl_xcon.link import GroupRow
+    from wl_xcon.taskd import Session, SessionSpec
+
+    spec = SessionSpec(
+        task=str(_sessions.grouped_task(tmp_path)), allocation="tasks/allocation.py",
+        root=tmp_path, session_id="2027-01-14_01", subject="A", trials=1, frame_period=1 / 240,
+        seed=1, values={}, bounds=_sessions.bounds(), already_delivered_today=0.0,
+        deployment=Deployment.RIG_FIXED, geometry=DIRECT, session_kind="training",
+        calibration=SRGB)
+    session = Session(spec, card=Card(), pump=Pump())
+    holds = GroupRow("Holds", ("fix_hold", "target_hold"),
+                     "Hold {fix_hold} on the cross, then {target_hold} on the target", "Timing")
+    assert session.groups == ((holds.name, holds.settings, holds.sentence, holds.section),)
+    rows = {row[0]: ParamRow.of(*row) for row in session.parameters}
+    assert (rows["fix_hold"].group, rows["target_hold"].group, rows["hit_bar"].group) == (
+        "Holds", "Holds", None)
+    assert (rows["hit_bar"].percent, rows["hit_bar"].label) == (True, "Bar to pass")
+    stand_in = _session_with(delivered_ml=1.0, already_today=None)
+    stand_in.groups = session.groups
+    framed = Telemetry.of(stand_in, Tally(), _scheduler(), index=0)
+    assert framed.groups == (holds,)
+
+    restored = decode(encode(framed))
+
+    assert restored == framed and type(restored.groups[0]) is GroupRow
+    assert restored.groups[0].settings == ("fix_hold", "target_hold")
+    assert _telemetry().groups == () and decode(encode(_telemetry())).groups == ()
+    plain = replace(framed, groups=(replace(holds, sentence=None),))
+    assert decode(encode(plain)).groups[0].sentence is None
+
+    def group(change):
+        return lambda data: change(data["groups"][0])
+
+    bad = [
+        (lambda data: data.update(groups={}), "a frame's groups are a list"),
+        (group(lambda g: g.pop("section")), "a group is its name, settings, sentence and section"),
+        (group(lambda g: g.update(extra=1)), "a group is its name, settings, sentence and section"),
+        (group(lambda g: g.update(settings=[])), "a group's settings are one or more names"),
+        (group(lambda g: g.update(settings=["fix_hold", 3])), "a group's settings are one or more"),
+        (group(lambda g: g.update(settings="fix_hold")), "a group's settings are one or more"),
+        (group(lambda g: g.update(sentence=7)), "a name or a reason is a string"),
+        (group(lambda g: g.update(name="")), "a group's name is a word"),
+        (group(lambda g: g.update(section=None)), "a name or a reason is a string"),
+        (lambda data: data.pop("groups"), "KeyError: 'groups'"),
+    ]
+    for change, said in bad:
+        with pytest.raises(FrameError, match=said):
+            decode(_repacked(framed, change))
 
 
 def test_a_box_command_carries_its_cid_beside_it_never_inside_its_value():

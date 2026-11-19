@@ -187,7 +187,7 @@ def test_a_group_names_settings_the_task_has_each_once():
     assert _found(_task(a, b, groups=(Group("Both", ("a",)), Group("Both", ("b",)))),
                   "bad-group") == ["two groups are named 'Both'; a box's title names one"]
     ceiling = ("group 'Pay' holds 'reward_correct', a welfare-bounded setting: a reward size is "
-               "never applied with others, so it keeps a box of its own")
+               "sent alone, by its own Apply")
     assert _found(_task(a, groups=(Group("Pay", ("a", "reward_correct")),)), "bad-group") == [
         ceiling]
     assert _found(_task(a, Param("reward_correct", unit="mL"),

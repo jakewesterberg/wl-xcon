@@ -4986,3 +4986,201 @@ def test_a_box_carries_what_the_script_reads_of_its_verdicts():
     lone = fragments(frame(params=rows, staged=staged[:1]), view())["params"]
     assert 'title="takes this change back before the next trial"' in lone
     assert 'tabindex="0">withdraw</button>' in lone
+
+
+# --- the console interface rework's Task 7: the pairings grid, group boxes, percents, New color -
+
+#: The pop-out's four colors in its pool's order, each with a swatch as the rig sends one.
+_POOL_COLORS = {"blue": "#2476c8", "purple": "#8a5cc2", "red": "#bf5c5c", "green": "#3f9a4a"}
+
+
+def _pool_row(value=66, **fields):
+    """A pool's setting's row as the rig makes it (`taskd.pool_members`): its twelve pairs in the
+    pool's order, each odd color among each other, bits 1 to 2048, `on` as `value` holds them."""
+    from wl_xcon.link import PoolMember
+
+    members = tuple(
+        PoolMember(bit=1 << at, odd=odd, among=among, odd_hex=_POOL_COLORS[odd],
+                   among_hex=_POOL_COLORS[among], on=bool(value >> at & 1))
+        for at, (odd, among) in enumerate(
+            (odd, among) for odd in _POOL_COLORS for among in _POOL_COLORS if among != odd))
+    return ParamRow.of("pairings", "pairings", 1.0, 4095.0, value, False, source="run",
+                       whole=True, step=1.0, section="Colors", members=members, **fields)
+
+
+def test_a_pool_box_draws_its_pairs_as_a_grid():
+    """The design's goal 7 (the PI, 2026-11-19: "4 × 4 grid, add or remove"): the pool's box draws
+    its pairs as a grid -- the odd one's color down, the distractors' across, each with the rig's
+    swatch, the diagonal empty -- a tick for each pair the row lists, ticked as its `on` says,
+    named for a screen reader and carrying its bit, never worked out on the page; two columns wide,
+    its head saying how many pairs the pool holds, and no number field. A staged change says what
+    it leaves the pool with in pairs."""
+    from wl_xcon.link import Staged
+
+    jake = Box("jake")
+    params = fragments(frame(params=(_pool_row(),), staged=(
+        Staged("pairings", 66.0, 2114.0, jake, False, cid="p-1"),)), view())["params"]
+    box = _cards(params)["pairings"]
+
+    assert box.startswith(' staged wide" data-card="pairings"')
+    grid = re.search(r'<table class="pairs" data-pool="pairings".*?</table>', box).group(0)
+    heads = re.findall(r'<th scope="(col|row)"[^>]*>(.*?)</th>', grid)
+    assert [re.sub(r"<[^>]+>", "", said) for scope, said in heads if scope == "col"] == [
+        "odd ↓among →", "blue", "purple", "red", "green"]
+    assert [re.sub(r"<[^>]+>", "", said) for scope, said in heads if scope == "row"] == [
+        "blue", "purple", "red", "green"]
+    for color, hex_ in _POOL_COLORS.items():
+        assert grid.count(f'<span class="chip" style="background:{hex_}"></span>{color}') == 2
+    rows = re.findall(r"<tr><th scope=\"row\">.*?</tr>", grid)
+    assert len(rows) == 4
+    for at, line in enumerate(rows):
+        cells = re.findall(r"<td[^>]*>.*?</td>", line)
+        assert len(cells) == 4 and cells[at] == '<td class="diag"></td>', line
+    ticks = re.findall(r'<input type="checkbox" class="tick" data-bit="(\d+)"( checked)? '
+                       r'aria-label="(\w+ among \w+)"', grid)
+    assert [int(bit) for bit, _, _ in ticks] == [1 << n for n in range(12)]
+    assert [said for _, on, said in ticks if on] == ["blue among red", "red among blue"]
+    assert 'data-param="pairings"' not in box
+    assert '<span class="pv">2 of 12 pairs</span> <span class="to">→ 3 of 12 pairs</span>' in box
+    assert 'data-under="jake (box, unverified) is changing this to 3 of 12 pairs"' in box
+    rest = fragments(frame(params=(_pool_row(),)), view())["params"]
+    assert web.POOL_REST in rest
+
+
+def _group_rows(bar=0.8, window=50):
+    return (
+        ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, bar, False, source="task", step=0.05,
+                    percent=True, label="Bar to move up", group="Move up", section="Rules",
+                    why={"low": "below 0 cannot be", "high": "a fraction is at most 1"}),
+        ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, source="task", step=0.05,
+                    section="Rules"),
+        ParamRow.of("move_up_window", "answers", 1.0, 200.0, window, False, source="task",
+                    whole=True, step=1.0, label="Answers judged", group="Move up",
+                    section="Rules"),
+    )
+
+
+_MOVE_UP = "Move up when at least {move_up_bar} of the last {move_up_window} answers are right"
+
+
+def test_a_groups_sentence_reads_with_its_fields_in_place():
+    """The design's goal 8 (the PI, 2026-11-19: "One box after Timing"; "Move up when at least
+    [80]% of the last [50] answers are right"): a group's settings share one box, titled by the
+    group, standing where its first setting would, its settings drawing no box of their own; its
+    editor is its sentence with each setting's field in its place -- the percent's with its `%`,
+    the count's with no unit, the sentence naming what it counts -- and one Apply; its head shows
+    each value in force; its *more* each setting's plain name, limits and reasons; the section
+    counts the group's settings. A group with no sentence lists each field under its plain name;
+    one naming a ceiling never takes it in (a reward size is sent alone)."""
+    from wl_xcon.link import GroupRow
+
+    group = GroupRow("Move up", ("move_up_bar", "move_up_window"), _MOVE_UP, "Rules")
+    params = fragments(frame(params=_group_rows(), groups=(group,)), view())["params"]
+    cards = _cards(params)
+
+    assert list(cards) == ["Move up", "fix_hold"]
+    box = cards["Move up"]
+    assert box.startswith(' group wide" data-card="Move up">')
+    assert ('<span class="lbl" title="Move up">Move up</span><span class="code" '
+            'title="move_up_bar, move_up_window">move_up_bar, move_up_window</span>') in box
+    sentence = re.search(r'<div class="sentence">(.*?)</div><div class="status">', box).group(1)
+    pieces = re.findall(r'<span class="gs">(.*?)</span>|data-param="(\w+)"[^>]*value="([^"]*)"'
+                        r'|<span class="unit">(.*?)</span>', sentence)
+    assert [part for piece in pieces for part in piece if part] == [
+        "Move up when at least ", "move_up_bar", "80", "%", " of the last ", "move_up_window",
+        "50", " answers are right"]
+    assert 'data-step="5" data-min="0" data-max="100" data-percent="1"' in sentence
+    assert 'data-step="1" data-min="1.0" data-max="200.0" data-whole="1"' in sentence
+    assert ('<span class="now" title="80 % · 50 answers"><span class="pv">80 <span class="unit">%'
+            '</span></span> · <span class="pv">50 <span class="unit">answers</span></span></span>'
+            ) in box
+    assert box.count('data-apply="Move up"') == 1 and "data-apply=\"move_up" not in params
+    assert web.GROUP_REST in box
+    assert '<span class="gn">Bar to move up</span>' in box and '0 to 100 % · a fraction is at most 100%' in box
+    assert re.search(r'<summary>Rules · 3 settings · 0 changed</summary>', params)
+
+    listed = fragments(frame(params=_group_rows(), groups=(replace(group, sentence=None),)),
+                       view())["params"]
+    plain = _cards(listed)["Move up"]
+    assert re.findall(r'<div class="gm"><span class="gl">(.*?)</span>.*?data-param="(\w+)"', plain) == [
+        ("Bar to move up", "move_up_bar"), ("Answers judged", "move_up_window")]
+    assert '<span class="unit">answers</span></span></div>' in plain
+
+    reward = ParamRow.of("reward_correct", "mL", 0.0, 0.4, 0.15, True)
+    paid = fragments(frame(params=_group_rows() + (reward,), groups=(
+        GroupRow("Pay", ("fix_hold", "reward_correct"), None, "Rules"),)), view())["params"]
+    assert list(_cards(paid))[-1] == "reward_correct" and "Pay" in _cards(paid)
+    assert "reward_correct" not in _cards(paid)["Pay"]
+
+
+def test_a_percent_box_says_the_rigs_numbers_in_percent():
+    """The design's call: "a fraction may be shown as a percent ... its steps, limits and the rig's
+    sentences are converted on the page, and the setting, the command and the record keep the
+    fraction": a percent's field, head and limits ×100 with `%`, a float's noise never shown (0.07
+    reads 7, 0.575 reads 57.5, a step of 0.07 steps by 7); a refusal's value and the rig's sentence about it in percent, the
+    fraction's own numbers only; a setting that is no percent left as the rig wrote it."""
+    from wl_xcon.link import Refused
+
+    bar = ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, 0.07, False, step=0.05, percent=True,
+                      why={"low": "below 0 cannot be", "high": "a fraction is at most 1"})
+    why = ("'move_up_bar' at 1.2 is refused, and the previous value stands: past-limit: "
+           "'move_up_bar' at 1.2 fraction is above its 1: a fraction is at most 1 (block 2)")
+    refused = (Refused("move_up_bar", Box("jake"), why, cid="p-3", value=1.2),)
+    box = _cards(fragments(frame(params=(bar,), refusals=refused), view())["params"])["move_up_bar"]
+
+    assert 'data-step="5" data-min="0" data-max="100" data-percent="1" inputmode="decimal" value="7"' in box
+    assert '<span class="pv">7 <span class="unit">%</span></span>' in box
+    assert "refused 120% · past-limit: &#x27;move_up_bar&#x27; at 120% is above its 100%: a fraction is at most 100%" in box
+    assert "(block 2)" in box and "7.000000000000001" not in box
+    assert "last refused: &#x27;move_up_bar&#x27; at 120% is refused" in box
+    noisy = _cards(fragments(frame(params=(replace(bar, value=0.575),)), view())["params"])
+    assert 'value="57.5"' in noisy["move_up_bar"] and "57.49" not in noisy["move_up_bar"]
+    # A step of 0.07 is 7.000000000000001 × 100: its decimals would be fifteen.
+    sevens = _cards(fragments(frame(params=(replace(bar, value=0.14, step=0.07),)),
+                              view())["params"])["move_up_bar"]
+    assert 'data-step="7" ' in sevens and 'value="14"' in sevens and "14.0" not in sevens
+    plain = replace(bar, percent=False, name="hit")
+    said = _cards(fragments(frame(params=(plain,), refusals=(replace(refused[0], name="hit"),)),
+                            view())["params"])["hit"]
+    assert "refused 1.20 · past-limit: &#x27;move_up_bar&#x27; at 1.2 fraction is above its 1" in said
+
+
+def test_one_new_color_panel_per_colors_section():
+    """The design's call: "the new-color panel moves out of each color's box into one *New
+    color…* panel for the Colors section": no color box holds one; each section holding a color
+    box has one, after its boxes, keyed by the section, offering every set its boxes show, the
+    first box's set chosen; a section with none has none."""
+    def color(sets, chosen):
+        return {"sets": {named: {"apex": [0.31, 0.33], "luminance_cd_m2": 15.0, "design": None,
+                                 "hues": {"red": {"xy": [0.46, 0.33], "srgb": "#c76f6a"}}}
+                         for named in sets},
+                "set": chosen, "hue": "red", "approximate": True,
+                "saturation": {"setting": None, "value": 1.0, "cd_m2": 15.0},
+                "luminance": {"setting": None, "value": 15.0, "cd_m2": 15.0, "set_wide": False}}
+
+    rows = (
+        ParamRow.of("odd_color", "appearance", None, None, None, False, source="run",
+                    color=color(("isohue",), "isohue"), section="Colors"),
+        ParamRow.of("distractor_color", "appearance", None, None, None, False, source="run",
+                    color=color(("isohue", "bright"), "bright"), section="Colors"),
+        _pool_row(),
+        ParamRow.of("fix_hold", "s", 0.1, 1.0, 0.3, False, section="Timing"),
+        ParamRow.of("cue_color", "appearance", None, None, None, False, source="run",
+                    color=color(("dim",), "dim"), section="Cues"),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+
+    assert params.count("<details class=\"newc\"") == 2
+    assert re.findall(r'data-newc="([^"]+)"', params) == ["Colors", "Cues"]
+    for card in _cards(params).values():
+        card = card.partition('<details class="newc"')[0]
+        assert "data-newc" not in card and "New color" not in card
+    colors = params.partition('data-sec="Colors"')[2].partition('data-sec="Timing"')[0]
+    # After the section's last box and the end of its boxes' grid.
+    assert ('</details></div></div><details class="newc" data-newc="Colors"><summary>New color…'
+            '</summary>') in colors
+    into = re.search(r'data-newc-into[^>]*>(.*?)</select>', colors).group(1)
+    assert re.findall(r'<option value="([^"]*)"( selected)?', into) == [
+        ("isohue", " selected"), ("bright", ""), ("", "")]
+    timing = re.search(r'<details class="sec" data-sec="Timing" open>.*?</details>', params).group(0)
+    assert "newc" not in timing

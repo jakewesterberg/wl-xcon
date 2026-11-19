@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-530.**
+**Next free ID: XC-532.**
 
 ## Brainstorms queued for the PI
 
@@ -243,6 +243,8 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-526** Measure the demo's drawing at the pop-out's most discs by hand, 36 (`tools/measure_demo_drawing.py`): its 2026-11-14 results drew Crowd's hardest, 12, then the setting's top; since the PI raised the top to 36 (2026-11-19) a demo's heaviest screen is three times the discs and its drawing time unmeasured. Run on a quiet machine and commit the results under `docs/measurements/`. — 2026-11-19, [console settings plan](superpowers/plans/2026-11-16-console-settings.md), the PI's review of the wl-xtasks branch — waits on: nothing
 - **XC-527** Let a reward size join Apply all and be withdrawn while it waits: left out of the interface rework, since both new commands sit outside `_command`'s listed lines and a reward size there needs the listed refusal recording repeated and a staged reward taken back, a welfare-listed change for the PI's review. Bring it to him as numbered welfare items if wanted. — 2026-11-19, [console interface design](superpowers/specs/2026-11-19-console-interface-design.md) — waits on: the PI's welfare review
 - **XC-528** Offer the animal's last session's ending values at a run's set-up (the workflow reviewer's idea): show how the task's starts differ from where the last session ended, and let the trainer take them one by one or all; needs a command to read them. Not in the interface rework. — 2026-11-19, [console interface design](superpowers/specs/2026-11-19-console-interface-design.md) — waits on: the PI
+- **XC-530** Offer a grouped setting's drawn side and its draw's live numbers in a group's box: `web._group_box` shows each setting's one field and leaves out the fixed/drawn switch and the range numbers, since the box's one Apply sends its fields' values; no task groups a drawn setting yet. — 2026-11-19, [console interface plan, Task 7](superpowers/plans/2026-11-19-console-interface.md#task-7-pairings-as-a-grid-group-boxes-percents-and-one-new-color-panel) — waits on: a task that groups a drawn setting
+- **XC-531** Refuse at load a group whose title is a setting's code name (`bad-group`): the page keys a group's box by its title (`data-card`), as it keys a setting's box by its name, so the two would be one box to its script; nothing refuses it today. — 2026-11-19, [console interface plan, Task 7](superpowers/plans/2026-11-19-console-interface.md#task-7-pairings-as-a-grid-group-boxes-percents-and-one-new-color-panel) — waits on: nothing
 
 ## Debt
 

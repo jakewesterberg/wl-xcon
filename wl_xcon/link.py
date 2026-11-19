@@ -291,8 +291,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: page-made command id it answers** (`Staged.cid`, `Refused.cid`), a staged change its warnings
 #: (`Staged.warnings`) and a refusal the value refused (`Refused.value`). And on the wire a box's
 #: command's `cid` (a command, not a frame: no schema of its own), beside its fields, never inside a
-#: value (`_cid`, never `_setting`). The build's later tasks add their fields to 23 before it is
-#: released. A reader of 22 refuses 23 and 23 refuses 22, by name, for all three shapes.
+#: value (`_cid`, never `_setting`). **And the task's groups** (`Telemetry.groups`, each a
+#: `GroupRow`; the rework's Task 7): each group's title, its settings in order, its sentence and its
+#: section, which the page draws one box from. The build's later tasks add their fields to 23 before
+#: it is released. A reader of 22 refuses 23 and 23 refuses 22, by name, for all three shapes.
 SCHEMA = 23
 
 #: **The most choices a row carries as words** (`ParamRow.choices`; schema 23): a box shows a
@@ -943,6 +945,21 @@ class Pooled:
 
 
 @dataclass(frozen=True, slots=True)
+class GroupRow:
+    """**A group of settings that share one box and one Apply** (schema 23; `Telemetry.groups`;
+    `task.Group`; the console interface design's goal 8, the PI: "One box after Timing"), from
+    `taskd.Session.groups`: `name`, the box's title; `settings`, the names it holds, in the order
+    the group declares them; `sentence`, the one its box reads as, a `{name}` place for each of its
+    settings (`string.Formatter`'s), or `None` where it declares none; and `section`, the one its
+    settings share (`check`'s `bad-group`), where its box sits. Its Apply sends one `ApplyMany`."""
+
+    name: str
+    settings: tuple
+    sentence: str | None
+    section: str
+
+
+@dataclass(frozen=True, slots=True)
 class Question:
     """A far mark a console owes an answer on (P4d-2b spec §6.2): which mark, for which
     session, the instant it was typed as, `welfare`'s sentence, and the answers --
@@ -1472,6 +1489,11 @@ class Telemetry:
     #: a full task** (`task.Plan.full`), the switch's *full task* grayed where it does not.
     shaping: str = ""
     full_task: bool = False
+    #: **The task's groups** (schema 23; the console interface rework's Task 7; `taskd.Session
+    #: .groups`), each a `GroupRow`, in the order the task declares them: the page draws each
+    #: group's settings as one box with one Apply. `()` by default, a task with none, and before a
+    #: task is loaded.
+    groups: tuple = ()
 
     @classmethod
     def of(cls, session, tally, scheduler, index: int) -> "Telemetry":
@@ -1717,6 +1739,9 @@ class Telemetry:
             # The console settings build's Task 10 (schema 22): the training switch.
             shaping=session.shaping,
             full_task=session.full_task,
+            # The console interface rework's Task 7 (schema 23): the task's groups, read as a plain
+            # attribute, as the session's other fields are.
+            groups=tuple(GroupRow(*row) for row in session.groups),
         )
 
 
@@ -2180,6 +2205,10 @@ def _telemetry_out(telemetry: Telemetry) -> dict:
         # The training switch (schema 22; the console settings build's Task 10).
         "shaping": telemetry.shaping,
         "full_task": telemetry.full_task,
+        # The task's groups (schema 23; the console interface rework's Task 7).
+        "groups": [{"name": group.name, "settings": list(group.settings),
+                    "sentence": group.sentence, "section": group.section}
+                   for group in telemetry.groups],
     }
 
 
@@ -2503,6 +2532,35 @@ def _bars_in(data: dict | None) -> Bars | None:
                    "wrong": _counted(data["wrong"]), "left_out": _counted(data["left_out"])})
 
 
+#: The fields of a group on the wire (`GroupRow`; schema 23), every one, nothing more.
+_GROUP_FIELDS = frozenset({"name", "settings", "sentence", "section"})
+
+
+def _groups_in(data: object) -> tuple:
+    """**The task's groups off the wire** (`Telemetry.groups`; schema 23): a list of groups, each
+    a mapping of exactly `_GROUP_FIELDS` -- its title and section words, its settings a list of one
+    or more names, its sentence a word or `None` -- else a malformed frame (`TypeError`, which
+    `decode` makes a `FrameError`): the page builds a box's fields from them."""
+    if not isinstance(data, list):
+        raise TypeError(f"a frame's groups are a list, not {data!r}")
+    groups = []
+    for group in data:
+        if not isinstance(group, dict) or set(group) != _GROUP_FIELDS:
+            raise TypeError(f"a group is its name, settings, sentence and section, not {group!r}")
+        settings = group["settings"]
+        if (not isinstance(settings, list) or not settings
+                or not all(isinstance(name, str) and name for name in settings)):
+            raise TypeError(f"a group's settings are one or more names, not {settings!r}")
+        sentence = group["sentence"]
+        if sentence is not None:
+            _word_of(sentence)
+        if not _word_of(group["name"]):
+            raise TypeError("a group's name is a word, not empty")
+        groups.append(GroupRow(name=group["name"], settings=tuple(settings), sentence=sentence,
+                               section=_word_of(group["section"])))
+    return tuple(groups)
+
+
 def _pooled_in(data: dict | None) -> Pooled | None:
     """The trainer's panel's pool off the wire (schema 20), each field read by name."""
     if data is None:
@@ -2627,6 +2685,7 @@ def _telemetry_from(data: dict) -> Telemetry:
         demo=_flag(data["demo"]),
         shaping=_word_of(data["shaping"]),
         full_task=_flag(data["full_task"]),
+        groups=_groups_in(data["groups"]),
     )
 
 

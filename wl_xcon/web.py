@@ -45,6 +45,7 @@ import html
 import dataclasses
 import math
 import re
+import string
 import time
 from dataclasses import dataclass
 from decimal import Decimal
@@ -1771,6 +1772,9 @@ def _becomes(change, row=None) -> str:
     value. Escaped (`_e`), ready for the page. Given its setting's `row`, a number is shown as its
     box shows it (`_figure`: a whole setting's with no decimals); the feed's, without, as `_num`."""
     shown = _num if row is None else (lambda value: _figure(row, value))
+    if row is not None and row.members is not None:
+        # A pool's value is its pairings' numbers summed: said as how many it holds (`_pooled`).
+        shown = lambda value: _pooled(row, value)  # noqa: E731
     if change.hands_back:
         back = ("its draw" if change.to == "draw"
                 else "the run's " + _e(shown(change.now)) if change.to == "run" and
@@ -1892,7 +1896,7 @@ def _range(row) -> str:
     if row.low is None and row.high is None:
         return "no limit"
     ends = ("open" if end is None else _figure(row, end) for end in (row.low, row.high))
-    said = f"{_e(next(ends))} to {_e(next(ends))} {_e(row.unit)}"
+    said = f"{_e(next(ends))} to {_e(next(ends))} {_e(_unit_of(row))}"
     # **Why each limit stands, in one line** (`ParamRow.why`; the console settings design's §4:
     # "each card says why for any limit that stays"). The standard "below 0 cannot be" is left
     # unsaid beside another reason, which it goes without saying beside (the builder's call): a
@@ -1902,6 +1906,7 @@ def _range(row) -> str:
                                  if reason))
     if len(reasons) > 1 and BELOW_ZERO in reasons:
         reasons.remove(BELOW_ZERO)
+    reasons = [_in_percent(row, reason) for reason in reasons]
     return f"{said} · {_e('; '.join(reasons))}" if reasons else said
 
 
@@ -1911,6 +1916,52 @@ def _step(row) -> float:
     design's call on steps): 1 for a whole setting whatever a hand-made row says. A display
     choice, not a rule about values: `Session.set` and `_impossible` judge whatever reached them."""
     return 1.0 if row.whole else row.step
+
+
+def _hundred(value: float) -> float:
+    """**A fraction as its percent** (`ParamRow.percent`; the console interface design's call: "a
+    fraction may be shown as a percent"), with a float's noise taken off at twelve significant
+    digits: 0.07 is 7, never 7.000000000000001, and 0.575 is 57.5, never 57.49999999999999. Display
+    arithmetic only: the setting, the command and the record keep the fraction."""
+    return float(f"{value * 100:.12g}")
+
+
+def _shown_step(row) -> float:
+    """A box's step as its field steps (`_step`), ×100 for a percent (`_hundred`): 0.05 is 5."""
+    return _hundred(_step(row)) if row.percent else _step(row)
+
+
+def _unit_of(row) -> str:
+    """The unit a box shows beside its numbers: `%` for a percent, else its setting's own."""
+    return "%" if row.percent else row.unit
+
+
+#: A number as the rig writes one in a sentence (`f"{value:g}"`), not inside a name or a longer
+#: number, and the word ` fraction` after it where the sentence gives its unit (`_in_percent`).
+_SAID_NUMBER = re.compile(r"(?<![\w.])(-?\d+(?:\.\d+)?(?:e[-+]?\d+)?)(?!\w|\.\d)( fraction\b)?")
+
+
+def _in_percent(row, said: str, *values: object) -> str:
+    """**The rig's sentence about a percent setting, in percent** (the console interface design's
+    call: "the rig's sentences are converted on the page"): each number in it that is the
+    setting's own -- its value, its lowest or highest, or one of `values` (the value a refusal
+    refused) -- or that the sentence gives in its unit (`1.2 fraction`), as `_hundred` shows it
+    with `%`, its ` fraction` dropped: "'move_up_bar' at 120% is above its 100%". A sentence of any
+    other setting is as the rig wrote it. Plain words in, plain words out, escaped where used."""
+    if not row.percent:
+        return said
+    own = set()
+    for value in (row.value, row.low, row.high, *values):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            own.add(float(value))
+
+    def shown(found: re.Match) -> str:
+        number = float(found.group(1))
+        if found.group(2) is None and number not in own:
+            return found.group(0)
+        return f"{_hundred(number):g}%"
+
+    return _SAID_NUMBER.sub(shown, said)
 
 
 def _places(step: float) -> int:
@@ -1938,8 +1989,11 @@ def _figure(row, value: object) -> str:
     number = float(value)
     if not math.isfinite(number):
         return str(value)
+    if row.percent:
+        # A fraction shown ×100 (`ParamRow.percent`), its step's decimals the percent's: 0.8 is 80.
+        number = _hundred(number)
     own = f"{number:.{_OWN_PLACES}f}".rstrip("0").partition(".")[2]
-    return f"{number:.{max(_places(_step(row)), len(own))}f}"
+    return f"{number:.{max(_places(_shown_step(row)), len(own))}f}"
 
 
 def _unit(said: str) -> str:
@@ -1948,12 +2002,15 @@ def _unit(said: str) -> str:
     return f'<span class="unit">{_e(said)}</span>' if said else ""
 
 
-def _field(row, view: View) -> str:
+def _field(row, view: View, unit: bool = True) -> str:
     """**A box's field** (the console interface design's goal 1): − , the value, +, and its unit
     beside it. A number is shown as `_figure` shows it and carries the step and the declared range
     for the script's − and +, which clamp to it; a whole setting's field steps by 1 and asks for
-    the numeric keyboard (goal 6). A categorical value is a word, with neither. Greyed away from
-    the box."""
+    the numeric keyboard (goal 6). A categorical value is a word, with neither. **A percent**
+    (`ParamRow.percent`; the console interface rework's Task 7) is shown ×100, its step and its
+    range ×100 too (`_hundred`), `%` its unit, and marked `data-percent`: the script sends what is
+    typed as the fraction it is. `unit` false leaves the unit out but a percent's `%`, for a field
+    standing in its group's sentence, which names what it counts. Greyed away from the box."""
     off = _gate(view)
     name = _e(row.name)
     if isinstance(row.value, str):
@@ -1961,15 +2018,18 @@ def _field(row, view: View) -> str:
             f'<span class="fu"><span class="spin"><input class="field mono" data-param="{name}" '
             f'data-kind="word" value="{_e(row.value)}" aria-label="{name}"{off}></span></span>'
         )
-    step = _step(row)
+    step = _shown_step(row)
     value = "" if row.value is None else _figure(row, row.value)
     edges = "".join(
-        f' data-{end}="{_e(edge)}"'
+        f' data-{end}="{_e(f"{_hundred(edge):g}" if row.percent else edge)}"'
         for end, edge in (("min", row.low), ("max", row.high))
         if edge is not None
     )
     keys = "numeric" if row.whole else "decimal"
     whole = ' data-whole="1"' if row.whole else ""
+    if row.percent:
+        whole += ' data-percent="1"'
+    said = _unit(_unit_of(row)) if unit or row.percent else ""
     return (
         f'<span class="fu"><span class="spin">'
         f'<button type="button" class="stp" data-dir="-1" tabindex="-1" '
@@ -1978,7 +2038,7 @@ def _field(row, view: View) -> str:
         f'data-step="{step:g}"{edges}{whole} inputmode="{keys}" value="{_e(value)}" '
         f'aria-label="{name}"{off}>'
         f'<button type="button" class="stp" data-dir="1" tabindex="-1" '
-        f'aria-label="increase {name}"{off}>+</button></span>{_unit(row.unit)}</span>'
+        f'aria-label="increase {name}"{off}>+</button></span>{said}</span>'
     )
 
 
@@ -2241,17 +2301,20 @@ _NEW_COLOR_FIELDS = {
 }
 
 
-def _new_color(row, sets: dict, chosen: str, view: View) -> str:
-    """**A color card's New color panel** (the console settings design's §6; the PI, 2026-11-16:
-    "1,2,or 3. you select an option and then enter the info", "Saved into a color set file"): the
-    method (`colordef.METHODS`, in its words, `colordef.SAID`), its fields, a name, and the set it
-    goes into -- one of the card's, or a new one by its name -- then *preview*, which asks `wlx
-    serve` (`GET /color-preview`) and writes nothing, so any viewer may, and *save as a proposal*,
-    which sends `define_color` (`link.DefineColor`), greyed away from the box. Then where it goes:
+def _new_color(section: str, sets: dict, chosen: str, view: View) -> str:
+    """**The New color… panel of a section of color cards** (the console settings design's §6; the
+    PI, 2026-11-16: "1,2,or 3. you select an option and then enter the info", "Saved into a color
+    set file"; the console interface design's call: "the new-color panel moves out of each color's
+    box into one *New color…* panel for the Colors section"), once per section holding a color
+    card, after its boxes, keyed by the section (`data-newc`): the method (`colordef.METHODS`, in
+    its words, `colordef.SAID`), its fields, a name, and the set it goes into -- one of the
+    section's cards' sets, or a new one by its name -- then *preview*, which asks `wlx serve` (`GET
+    /color-preview`) and writes nothing, so any viewer may, and *save as a proposal*, which sends
+    `define_color` (`link.DefineColor`), greyed away from the box. Then where it goes:
     `NEW_COLOR_SAVED`, naming the set."""
     from wl_xcon.colordef import METHODS, NAME_LIMIT, SAID
 
-    name, off = _e(row.name), _gate(view)
+    name, off = _e(section), _gate(view)
     methods = "".join(f'<option value="{m}">{_e(SAID[m])}</option>' for m in METHODS)
     fields = []
     for method in METHODS:
@@ -2265,7 +2328,7 @@ def _new_color(row, sets: dict, chosen: str, view: View) -> str:
     into = "".join(
         f'<option value="{_e(named)}"{" selected" if named == chosen else ""}>{_e(named)}</option>'
         for named in sets) + '<option value="">a new set</option>'
-    return (f'<details class="newc" data-newc="{name}"><summary>New color</summary>'
+    return (f'<details class="newc" data-newc="{name}"><summary>New color…</summary>'
             f'<label class="rn">by <select class="field" data-newc-method aria-label="{name}: '
             f'new color method">{methods}</select></label>{"".join(fields)}'
             f'<label class="rn">name <input class="field" data-newc-name maxlength="{NAME_LIMIT}" '
@@ -2330,8 +2393,89 @@ def _color_card(row, frame, view: View) -> str:
             f'aria-label="{name}: color set"{off}>{options}</select></label>'
             f'{"".join(groups)}'
             f'<div class="lvls">{_color_level("saturation", color.get("saturation"), frame, view)}'
-            f'{_color_level("luminance", luminance, frame, view, every)}</div>'
-            f'{_new_color(row, sets, chosen, view)}</div>')
+            f'{_color_level("luminance", luminance, frame, view, every)}</div></div>')
+
+
+def _new_colors(rows: list, view: View) -> dict:
+    """**Each section's one New color… panel** (`_new_color`), by section, for every section that
+    holds a color card (`ParamRow.color` with its sets): the sets its cards show, in the order they
+    first show them, the first card's set chosen."""
+    panels: dict = {}
+    for section, row in rows:
+        color = row.color
+        if not isinstance(color, dict) or not isinstance(color.get("sets"), dict) or not color["sets"]:
+            continue
+        sets, chosen = panels.setdefault(section, ({}, [None]))
+        for named, entry in color["sets"].items():
+            sets.setdefault(named, entry)
+        if chosen[0] is None:
+            chosen[0] = color.get("set") if color.get("set") in color["sets"] else next(
+                iter(color["sets"]))
+    return {section: _new_color(section, sets, chosen[0], view)
+            for section, (sets, chosen) in panels.items()}
+
+
+#: **What a pool's box says at rest** (the console interface design's goal 7), its status line.
+POOL_REST = "odd color down, distractor across · each trial draws one pair ticked"
+
+
+def _pooled(row, value: object) -> str:
+    """**A pool's value as its box says it**: how many of its pairings it holds (`ParamRow
+    .members`, each a bit of the value: `task.Pool.number`), "2 of 12 pairs"; the value as written
+    where it names no pool of them (no whole number from 1, or a bit past its pairings)."""
+    total = len(row.members)
+    whole = _whole(value)
+    if whole is None or not 1 <= whole < 1 << total:
+        return _figure(row, value)
+    held = sum(1 for member in row.members if whole & member.bit)
+    return f"{held} of {total} pair{'' if total == 1 else 's'}"
+
+
+def _pairings(row, view: View) -> str:
+    """**A pool's grid** (`ParamRow.members`; the console interface design's goal 7; the PI,
+    2026-11-19: "4 × 4 grid, add or remove"): the odd one's color down, the distractors' across,
+    each color with its swatch (`PoolMember.odd_hex`, `among_hex`, the rig's, written only where
+    it is a `#rrggbb`), a tick for each pair the pool offers, ticked where the value holds it
+    (`on`), named "blue among red" for a screen reader, carrying its number (`data-bit`); the
+    diagonal empty, a color never among itself, and a cell empty where the pool offers no such
+    pair. Ticks are a draft of the box: its Apply sends one `set` of the pool's number, the ticked
+    pairs' bits summed (the script's `poolSum`), which is what is recorded; adding and removing
+    pairs both go live. The bits and swatches are the rig's, never worked out here. Greyed away
+    from the box."""
+    name, off = _e(row.name), _gate(view)
+    colors: dict = {}
+    for member in row.members:
+        for named, hex_ in ((member.odd, member.odd_hex), (member.among, member.among_hex)):
+            if not colors.get(named):
+                colors[named] = _swatch(hex_)
+    pairs = {(member.odd, member.among): member for member in row.members}
+
+    def color(named: str) -> str:
+        hex_ = colors[named]
+        chip = (f'<span class="chip" style="background:{hex_}"></span>' if hex_
+                else '<span class="chip none"></span>')
+        return f"{chip}{_e(named)}"
+
+    head = "".join(f'<th scope="col">{color(named)}</th>' for named in colors)
+    lines = []
+    for odd in colors:
+        cells = []
+        for among in colors:
+            member = pairs.get((odd, among))
+            if odd == among:
+                cells.append('<td class="diag"></td>')
+            elif member is None:
+                cells.append('<td class="none"></td>')
+            else:
+                said = _e(f"{odd} among {among}")
+                cells.append(
+                    f'<td><input type="checkbox" class="tick" data-bit="{member.bit}"'
+                    f'{" checked" if member.on else ""} aria-label="{said}" title="{said}"{off}></td>')
+        lines.append(f'<tr><th scope="row">{color(odd)}</th>{"".join(cells)}</tr>')
+    return (f'<table class="pairs" data-pool="{name}" aria-label="{name}: pairs, odd color down, '
+            f'distractor across"><thead><tr><th scope="col" class="corner">'
+            f'<span>odd ↓</span><span>among →</span></th>{head}</tr></thead>'
+            f'<tbody>{"".join(lines)}</tbody></table>')
 
 
 def _beneath(row, frame) -> str:
@@ -2359,10 +2503,12 @@ def _over(row, place: str, view: View) -> str:
     word = isinstance(row.value, str)
     keys = ' data-kind="word"' if word else (
         ' data-whole="1" inputmode="numeric"' if row.whole else ' inputmode="decimal"')
+    if row.percent and not word:
+        keys += ' data-percent="1"'
     name = _e(row.name)
     return (f'<span class="fu"><input class="field mono over" data-param="{name}"{keys} value="" '
             f'placeholder="{place}" aria-label="{name}: {place}"{_gate(view)}>'
-            f'{"" if word else _unit(row.unit)}</span>')
+            f'{"" if word else _unit(_unit_of(row))}</span>')
 
 
 def _range_editor(row, view: View) -> str:
@@ -2384,7 +2530,7 @@ def _range_editor(row, view: View) -> str:
     return f'<div class="rng">{fields}</div>'
 
 
-def _whence(row, view: View, over: str = "") -> str:
+def _whence(row, view: View, over: str = "", ranges: bool = True) -> str:
     """**Where a card's value comes from, and what a person may do about it** (telemetry schema
     19; the C3 spec §6: "each setting's card says where its value comes from (task, run,
     conditions, a draw and its range, or a person) and which conditions set or draw it"),
@@ -2402,7 +2548,9 @@ def _whence(row, view: View, over: str = "") -> str:
     - on a card a person's draw gives (`source` `form`; the console settings build), what it
       overrides (`over`, from `_beneath`) and *hand back*, which ends the draw.
 
-    Nothing between runs, nor for a ceiling, when the rig sends none."""
+    Nothing between runs, nor for a ceiling, when the rig sends none. `ranges` false leaves out
+    the live numbers' fields, for a group box's *more*, whose one Apply sends its fields' values
+    only (`_group_box`)."""
     parts = []
     if row.source in _SOURCES:
         parts.append(f'<span class="src">{_SOURCES[row.source]}</span>')
@@ -2419,7 +2567,7 @@ def _whence(row, view: View, over: str = "") -> str:
                      f'{", ".join(map(_e, row.conditions))}{more}</span>')
     if row.draw is not None:
         parts.append(f'<span class="src">its draw: {_e(row.draw)}</span>')
-    if row.numbers is not None:
+    if row.numbers is not None and ranges:
         parts.append(_range_editor(row, view))
     if row.source in ("person", "form"):
         parts.append(f'<button type="button" class="btn small" data-cmd="hand_back" '
@@ -2474,13 +2622,21 @@ def _status(row, change, refusal) -> tuple[str, str]:
     if change is not None:
         return "staged", f"waiting for the next trial · {_who(change.by)}"
     if refusal is not None:
-        value = "" if refusal.value is None else f" {_e(_figure(row, refusal.value))}"
-        return "refused", f"refused{value} · {_e(_gist(refusal.why))}"
+        value = "" if refusal.value is None else f" {_e(_refused_value(row, refusal.value))}"
+        return "refused", f"refused{value} · {_e(_gist(_in_percent(row, refusal.why, refusal.value)))}"
     if row.applied is not None:
         if row.warned:
             return "warned", f"in force, with a warning · from trial {_e(row.applied.trial)}"
         return "applied", f"in force from trial {_e(row.applied.trial)}"
+    if row.members is not None:
+        return "", _e(POOL_REST)
     return "", _e("approximate on this screen" if row.color is not None else _limits(row))
+
+
+def _refused_value(row, value: object) -> str:
+    """The value a refusal refused, as its box shows it (`_figure`), a percent's with its `%`."""
+    shown = _figure(row, value)
+    return f"{shown}%" if row.percent and isinstance(value, (int, float)) else shown
 
 
 def _under(row, change) -> str:
@@ -2579,15 +2735,18 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
         # console settings design's §5).
         more.append(f'<span class="src gives">gives {_e(row.gives)}</span>')
     more.append(mark)
-    more.extend(f'<span class="wrn">warning: {_e(warned)}</span>' for warned in row.warned)
+    more.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned))}</span>'
+                for warned in row.warned)
     if refusal is not None:
-        more.append(f'<span class="rfs">last refused: {_e(refusal.why)}</span>')
+        more.append(f'<span class="rfs">last refused: '
+                    f'{_e(_in_percent(row, refusal.why, refusal.value))}</span>')
     if row.switch == "drawn":
         more.append(_profile(row))
     if isinstance(row.color, dict) and row.color.get("sets"):
         more.append(f'<span class="src approx">{_e(COLOR_APPROXIMATE)}</span>')
+    wide = row.color is not None or row.members is not None
     classes = " ".join(word for word in ("box", state, "ceiling" if row.bounded else "",
-                                         "wide" if row.color is not None else "") if word)
+                                         "wide" if wide else "") if word)
     marks = []
     if change is not None and change.cid:
         marks.append(f' data-staged-cid="{_e(change.cid)}"')
@@ -2660,56 +2819,36 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     for change in frame.staged:
         if change.cid:
             acts.setdefault(change.cid, []).append(change.name)
+    # **Each setting's group** (`Telemetry.groups`; the console interface rework's Task 7), by the
+    # first group naming it, a ceiling never (`check`'s `bad-group` refuses one at load): a group's
+    # box stands where its first setting would, and its settings have no box of their own.
+    rows = {row.name: row for row in frame.params}
+    grouped: dict = {}
+    for group in frame.groups:
+        for setting in group.settings:
+            if setting in rows and not rows[setting].bounded:
+                grouped.setdefault(setting, group)
+    drawn: set = set()
+    colored = []
     cards = []
     for row in frame.params:
+        section = row.section or OTHER
+        group = grouped.get(row.name)
+        if group is not None:
+            if group.name in drawn:
+                continue
+            drawn.add(group.name)
+            members = [rows[name] for name in group.settings if grouped.get(name) is group]
+            cards.append((section, sum(1 for member in members if member.changed),
+                          _group_box(group, members, frame, view, staged, acts), len(members)))
+            continue
         change = staged.get(row.name)
         refusal = refused.get(row.name)
-        settable = row.value is None or isinstance(row.value, str) or (
-            isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
-        per_trial = _PER_TRIAL.get(row.source)
-        scaled = (row.switch == "scaled" and row.shape is not None
-                  and row.shape.get("shape") == "scaled")
-        if scaled and row.source == "form":
-            per_trial = _SCALED
-        held_by = _HELD_BY.get(row.source)
-        if held_by is not None:
-            label = (f'<span class="pv">{held_by[0]} {_e(_figure(row, row.value))} '
-                     f'<span class="unit">{_e(row.unit)}</span></span>')
-            entry = _over(row, held_by[1], view) if settable and row.position is None else ""
-        elif per_trial is not None:
-            label = f'<span class="pv">{per_trial[0]}</span>'
-            entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
-        elif row.position is not None:
-            label, entry = f'<span class="pv">{_e(row.position)}</span>', ""
-        elif row.words is not None:
-            # An appearance or a color in the rig's words (`ParamRow.words`; XC-420), no field:
-            # a color setting's is picked on its color card, below.
-            label, entry = f'<span class="pv">{_e(row.words)}</span>', ""
-        else:
-            label = (f'<span class="pv">{_e(_figure(row, row.value))} '
-                     f'<span class="unit">{_e(row.unit)}</span></span>')
-            entry = _field(row, view) if settable else ""
-        if row.switch == "drawn":
-            drawn = row.shape is not None
-            editor = (_switch(row, view, drawn)
-                      + f'<div class="side fixed" data-side="fixed"{" hidden" if drawn else ""}>'
-                      f"{entry}</div>"
-                      + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
-                      f"{_drawn_side(row, view)}</div>")
-        elif row.switch == "scaled":
-            editor = (_switch(row, view, scaled, "scaled")
-                      + f'<div class="side fixed" data-side="fixed"{" hidden" if scaled else ""}>'
-                      f"{entry}</div>"
-                      + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
-                      f"{_scaled_side(row, view)}</div>")
-        elif row.color is not None:
-            # A color setting: its set, its hues as swatches, its two levels (the design's §6).
-            editor = _color_card(row, frame, view)
-        else:
-            editor = entry
         together = tuple(acts.get(change.cid, ())) if change is not None and change.cid else ()
-        cards.append((row.section or OTHER, row.changed,
-                      _box(row, frame, view, label, editor, change, refusal, together)))
+        label, editor = _editor(row, frame, view)
+        cards.append((section, 1 if row.changed else 0,
+                      _box(row, frame, view, label, editor, change, refusal, together), 1))
+        colored.append((section, row))
     # **A withdrawal the rig refused** (`Refused` named `withdraw`, its `cid` the act's; the
     # console interface rework's Task 4), its reason in short, for the script to say on the act's
     # boxes ("not withdrawn · it is already in force from trial 41 ..."): no box is named
@@ -2718,8 +2857,199 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
                        f"</span>" for refusal in frame.refusals
                        if refusal.name == "withdraw" and refusal.cid)
     run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
-    return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run)
+    return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run,
+                      _new_colors(colored, view))
             + f'<div class="wdrs" hidden>{declined}</div>')
+
+
+def _entry(row, view: View, unit: bool = True) -> tuple[str, str]:
+    """**A setting's value in force and its field**, as its box's head and editor show them
+    (`_params`): a value held by the training switch, given by its conditions, its draw, its pool
+    or its scaling in those words with a field to set one value over them (`_over`); a position or
+    an appearance in the rig's words, with none; else the value and its unit, with its field
+    (`_field`; `unit`, as there) where it is a number or a word. Escaped markup, both."""
+    settable = row.value is None or isinstance(row.value, str) or (
+        isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
+    per_trial = _PER_TRIAL.get(row.source)
+    scaled = (row.switch == "scaled" and row.shape is not None
+              and row.shape.get("shape") == "scaled")
+    if scaled and row.source == "form":
+        per_trial = _SCALED
+    held_by = _HELD_BY.get(row.source)
+    if held_by is not None:
+        label = (f'<span class="pv">{held_by[0]} {_e(_figure(row, row.value))} '
+                 f'<span class="unit">{_e(_unit_of(row))}</span></span>')
+        entry = _over(row, held_by[1], view) if settable and row.position is None else ""
+    elif per_trial is not None:
+        label = f'<span class="pv">{per_trial[0]}</span>'
+        entry = _over(row, per_trial[1], view) if settable and row.position is None else ""
+    elif row.position is not None:
+        label, entry = f'<span class="pv">{_e(row.position)}</span>', ""
+    elif row.words is not None:
+        # An appearance or a color in the rig's words (`ParamRow.words`; XC-420), no field:
+        # a color setting's is picked on its color card, below.
+        label, entry = f'<span class="pv">{_e(row.words)}</span>', ""
+    else:
+        label = (f'<span class="pv">{_e(_figure(row, row.value))} '
+                 f'<span class="unit">{_e(_unit_of(row))}</span></span>')
+        entry = _field(row, view, unit) if settable else ""
+    return label, entry
+
+
+def _editor(row, frame, view: View) -> tuple[str, str]:
+    """**A box's head value and its editor** (`_params`): a timing card's switch and its fixed and
+    drawn sides, a size's fixed and scaled sides, a color's set and swatches, a pool's grid of
+    pairs (`_pairings`, its head how many it holds), else its field (`_entry`)."""
+    label, entry = _entry(row, view)
+    if row.members is not None:
+        # A pool's pairings as a grid (the console interface design's goal 7), whatever gives it.
+        return (f'<span class="pv">{_e(_pooled(row, row.value))}</span>',
+                _pairings(row, view))
+    if row.switch == "drawn":
+        drawn = row.shape is not None
+        return label, (_switch(row, view, drawn)
+                       + f'<div class="side fixed" data-side="fixed"{" hidden" if drawn else ""}>'
+                       f"{entry}</div>"
+                       + f'<div class="side drawn" data-side="drawn"{"" if drawn else " hidden"}>'
+                       f"{_drawn_side(row, view)}</div>")
+    if row.switch == "scaled":
+        scaled = row.shape is not None and row.shape.get("shape") == "scaled"
+        return label, (_switch(row, view, scaled, "scaled")
+                       + f'<div class="side fixed" data-side="fixed"{" hidden" if scaled else ""}>'
+                       f"{entry}</div>"
+                       + f'<div class="side scaled" data-side="scaled"{"" if scaled else " hidden"}>'
+                       f"{_scaled_side(row, view)}</div>")
+    if row.color is not None:
+        # A color setting: its set, its hues as swatches, its two levels (the design's §6).
+        return label, _color_card(row, frame, view)
+    return label, entry
+
+
+#: **What a group's box says at rest** (the console interface design's goal 8), its status line.
+GROUP_REST = "applied together, by one Apply"
+
+
+def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -> str:
+    """**A group's one box** (`Telemetry.groups`, a `link.GroupRow`; the console interface design's
+    goal 8; the PI, 2026-11-19: "One box after Timing"), laid out as `_box`'s, its markup the
+    script's too, `data-card` the group's title and `group` among its classes:
+
+    - its head: the title, its settings' code names small, and each one's value in force with what
+      waits for the next trial after an arrow;
+    - its editor: the group's sentence with each setting's field in its place, the unit left to
+      the sentence but a percent's `%` (`_field`'s `unit`) -- "Move up when at least [80] % of the
+      last [50] answers are right" -- or, where it declares none, each setting's field under its
+      plain name;
+    - its status: one line for the whole box -- a change of it waiting, the last refusal of any of
+      its settings (named), the change in force latest, else `GROUP_REST` -- *withdraw* for a change
+      waiting under a command id, which takes back the whole act ("withdraw all 2"), then Discard
+      and Apply. **Its Apply is one act**: the script sends every setting it changed as one
+      `apply_many` under one command id, judged and staged together, or refused whole;
+    - its *more*: each setting's plain name, what it is, its limits and why, where its value comes
+      from and *hand back*, what waits, its warnings and its last refusal whole. A draw's live
+      numbers are not offered here: the box's one Apply sends its fields' values (`_whence`'s
+      `ranges`).
+
+    A ceiling is never in one (`check`'s `bad-group`: "a reward size is sent alone, by its own
+    Apply"); `_params` leaves any a frame names out."""
+    title, off = _e(group.name), _gate(view)
+    by_name = {row.name: row for row in rows}
+    codes = ", ".join(row.name for row in rows)
+    names = (f'<span class="names"><span class="lbl" title="{title}">{title}</span>'
+             f'<span class="code" title="{_e(codes)}">{_e(codes)}</span></span>')
+    entries = {row.name: _entry(row, view, unit=not group.sentence) for row in rows}
+    shown = []
+    for row in rows:
+        change = staged.get(row.name)
+        waits = "" if change is None else f' <span class="to">→ {_becomes(change, row)}</span>'
+        shown.append(f"{entries[row.name][0]}{waits}")
+    now = " · ".join(shown)
+    if group.sentence:
+        pieces = []
+        for literal, field, _, _ in string.Formatter().parse(group.sentence):
+            if literal:
+                pieces.append(f'<span class="gs">{_e(literal)}</span>')
+            if field is not None:
+                pieces.append(entries[field][1] if field in by_name
+                              else f'<span class="gs code">{_e(field)}</span>')
+        editor = f'<div class="sentence">{"".join(pieces)}</div>'
+    else:
+        editor = "".join(f'<div class="gm"><span class="gl">{_e(row.label or row.name)}</span>'
+                         f"{entries[row.name][1]}</div>" for row in rows)
+    changes = [staged[row.name] for row in rows if row.name in staged]
+    change = changes[0] if changes else None
+    refusal = None
+    for one in frame.refusals:
+        if one.name in by_name:
+            refusal = one
+    applied = [row for row in rows if row.applied is not None]
+    last = max(applied, key=lambda row: row.applied.trial) if applied else None
+
+    def line(refused) -> tuple[str, str]:
+        if change is not None:
+            return "staged", f"waiting for the next trial · {_who(change.by)}"
+        if refused is not None:
+            row = by_name[refused.name]
+            value = ("" if refused.value is None
+                     else f" {_e(_refused_value(row, refused.value))}")
+            gist = _gist(_in_percent(row, refused.why, refused.value))
+            return "refused", f"refused {_e(row.label or row.name)}{value} · {_e(gist)}"
+        if last is not None:
+            if last.warned:
+                return "warned", f"in force, with a warning · from trial {_e(last.applied.trial)}"
+            return "applied", f"in force from trial {_e(last.applied.trial)}"
+        return "", _e(GROUP_REST)
+
+    state, said = line(refusal)
+    more = []
+    for row in rows:
+        bits = [f'<span class="gn">{_e(row.label or row.name)}</span>']
+        if row.help:
+            bits.append(f'<span class="what">{_e(row.help)}</span>')
+        bits.append(f'<span class="range">{_range(row)}</span>')
+        bits.append(_whence(row, view, _beneath(row, frame), ranges=False))
+        if row.gives is not None:
+            bits.append(f'<span class="src gives">gives {_e(row.gives)}</span>')
+        waiting = staged.get(row.name)
+        if waiting is not None:
+            bits.append(f'<span class="stg">staged → {_becomes(waiting, row)} by '
+                        f"{_who(waiting.by)}</span>")
+        bits.extend(f'<span class="wrn">warning: {_e(_in_percent(row, warned))}</span>'
+                    for warned in row.warned)
+        if refusal is not None and refusal.name == row.name:
+            bits.append(f'<span class="rfs">last refused: '
+                        f'{_e(_in_percent(row, refusal.why, refusal.value))}</span>')
+        more.append(f'<div class="gmore" data-member="{_e(row.name)}">{"".join(bits)}</div>')
+    marks = []
+    if change is not None and change.cid:
+        marks.append(f' data-staged-cid="{_e(change.cid)}"')
+    if refusal is not None:
+        marks.append(f' data-refusal="{_e(refusal.cid or refusal.why)}"')
+        if refusal.cid:
+            marks.append(f' data-refusal-cid="{_e(refusal.cid)}"')
+    if last is not None:
+        marks.append(f' data-applied="{_e(last.applied.trial)}"')
+    under = next((said for said in (_under(row, staged.get(row.name)) for row in rows) if said), "")
+    if under:
+        marks.append(f' data-under="{_e(under)}"')
+    rest = ""
+    if state == "refused":
+        rest_state, rest_said = line(None)
+        rest = f' data-rest="{_e(_plain(rest_said))}" data-rest-state="{rest_state}"'
+    together = tuple(acts.get(change.cid, ())) if change is not None and change.cid else ()
+    classes = " ".join(word for word in ("box", "group", "wide", state) if word)
+    return (
+        f'<div class="{classes}" data-card="{title}"{"".join(marks)}>'
+        f'<div class="head">{names}<span class="now" title="{_e(_plain(now))}">{now}</span></div>'
+        f'<div class="editor">{editor}</div>'
+        f'<div class="status"><span class="say" title="{_e(_plain(said))}"{rest}>{said}</span>'
+        f'<span class="acts">{_withdraw(change, together, view)}'
+        f'<button type="button" class="btn small" data-discard="{title}" tabindex="0"{off}>'
+        f'Discard</button><button type="button" class="btn small primary" '
+        f'data-apply="{title}" tabindex="0"{off}>Apply</button></span></div>'
+        f'<details class="more"><summary>more</summary><div class="detail">{"".join(more)}</div>'
+        f"</details></div>"
+    )
 
 
 def _training(section: str) -> bool:
@@ -2802,7 +3132,7 @@ def _count(settings: int, changed: int) -> str:
     return f"{settings} setting{'' if settings == 1 else 's'} · {changed} changed"
 
 
-def _sections(task: str, cards: list, run: str = "") -> str:
+def _sections(task: str, cards: list, run: str = "", panels: dict | None = None) -> str:
     """**The cards in their sections** (the console settings design's §7; the PI, 2026-11-16:
     "The task file names it", "As you last left them"): each `(section, changed, html)` under the
     section its row names (`ParamRow.section`; a row naming none, one made by hand, under Other),
@@ -2812,17 +3142,25 @@ def _sections(task: str, cards: list, run: str = "") -> str:
     sent: the page opens each as last left, per `task` (`data-task`), in `localStorage`
     (`applySections`), which the rig never reads. A section with no setting is not made. `run`
     names the run in progress (`data-run`; "" between runs): the script drops every draft when it
-    changes (the console interface design's call: "drafts ... dropped at the run's end")."""
+    changes (the console interface design's call: "drafts ... dropped at the run's end").
+
+    Each card is `(section, changed, html, settings)`: a group's box holds `settings` settings,
+    `changed` of them differing from the task's start, and counts them all (`_group_box`); and
+    `panels` gives a section's one New color… panel, after its boxes (`_new_colors`)."""
+    panels = panels or {}
     tree: dict = {}
-    for named, changed, html in cards:
+    for named, changed, html, settings in cards:
         top, _, sub = named.partition("/")
         node = tree.setdefault(top, {"own": [], "subs": {}})
-        (node["subs"].setdefault(sub, []) if sub else node["own"]).append((changed, html))
+        (node["subs"].setdefault(sub, []) if sub else node["own"]).append(
+            (changed, html, settings))
 
     def block(name: str, own: list, counted: list, inside: str = "") -> str:
-        count = _count(len(counted), sum(1 for changed, _ in counted if changed))
+        count = _count(sum(settings for _, _, settings in counted),
+                       sum(changed for changed, _, _ in counted))
         label = name.rpartition("/")[2]
-        cards = f'<div class="cards">{"".join(html for _, html in own)}</div>' if own else ""
+        cards = (f'<div class="cards">{"".join(html for _, html, _ in own)}</div>{panels.get(name, "")}'
+                 if own else "")
         return (f'<details class="sec" data-sec="{_e(name)}" open>'
                 f"<summary>{_e(label)} · {count}</summary>{cards}{inside}</details>")
 
@@ -3640,13 +3978,33 @@ body.drafted > .wrap { padding-bottom: 56px; }
 .box .clr .lvls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
 .box .clr .lvl .field { width: 4.5em; }
 .box .clr .src { overflow-wrap: anywhere; }
-.box .clr .newc { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
-.box .clr .newc > summary { cursor: pointer; }
-.box .clr .newc .nf { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.box .clr .newc .nf[hidden], .box .clr .newc [data-newset-only][hidden] { display: none; }
-.box .clr .newc .nf .field { width: 4.5em; }
-.box .clr .newc .newc-do { display: flex; flex-wrap: wrap; gap: 6px; }
-.box .clr .newc .newc-out { overflow-wrap: anywhere; }
+.sec > .newc { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; margin-top: 6px; border: 1px solid var(--rule); border-radius: 5px; padding: 5px 7px; background: var(--surface-2); font-size: 12.5px; }
+.sec > .newc > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; width: max-content; max-width: 100%; }
+.newc .rn { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; min-width: 0; max-width: 100%; font-size: 12px; color: var(--muted); }
+.newc .rn .unit { font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+.newc .src { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.newc select.field { width: auto; max-width: 100%; }
+.newc .nf { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.newc .nf[hidden], .newc [data-newset-only][hidden], .newc [data-newc-set][hidden] { display: none; }
+.newc .nf .field { width: 4.5em; }
+.newc .newc-do { display: flex; flex-wrap: wrap; gap: 6px; }
+.newc .newc-out { overflow-wrap: anywhere; }
+.newc .chip, .pairs .chip { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--rule); vertical-align: -2px; margin-right: 4px; }
+.pairs .chip.none { background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 3px, var(--rule) 3px, var(--rule) 4px); }
+.box .pairs { border-collapse: collapse; font-size: 12px; max-width: 100%; table-layout: fixed; }
+.box .pairs th { font-weight: 500; text-align: left; padding: 2px 6px 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box .pairs thead th { text-align: center; padding: 2px 3px; }
+.box .pairs .corner { display: grid; color: var(--muted); font-size: 11px; line-height: 1.2; text-align: left; }
+.box .pairs td { text-align: center; padding: 2px 3px; border: 1px solid var(--rule); }
+.box .pairs td.diag { background: repeating-linear-gradient(45deg, transparent, transparent 3px, var(--rule) 3px, var(--rule) 4px); }
+.box .pairs .tick { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.box.group .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; min-width: 0; font-size: 13px; }
+.box.group .sentence .gs { overflow-wrap: anywhere; min-width: 0; }
+.box.group .gm { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; flex: 1 1 100%; min-width: 0; }
+.box.group .gl { font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
+.box .gmore { display: grid; gap: 2px; min-width: 0; }
+.box .gmore + .gmore { margin-top: 4px; padding-top: 4px; border-top: 1px dotted var(--rule); }
+.box .gmore .gn { font-weight: 600; }
 .fu:has(> .over) { display: flex; flex-wrap: nowrap; width: 100%; }
 .field.over { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; }
 .box select.field, .box .rn select.field { width: auto; max-width: 100%; }
@@ -4631,6 +4989,23 @@ _SCRIPT = """
     var group = pane ? pane.querySelector('[data-fields="' + CSS.escape(shapeOf(pane)) + '"]') : null;
     return group ? group.querySelectorAll("input[data-form]") : [];
   }
+  // **A pool's grid's ticks as the pool's number** (the console interface rework's Task 7): each
+  // ticked pair's bit (`data-bit`, the rig's `PoolMember.bit`) summed, the value a `set` of the
+  // pool sends and the record keeps.
+  function poolSum(grid) {
+    var sum = 0;
+    Array.prototype.forEach.call(grid.querySelectorAll("input.tick[data-bit]"), function (tick) {
+      if (tick.checked) { sum += Number(tick.getAttribute("data-bit")); }
+    });
+    return sum;
+  }
+  // **What a percent field holds, as the fraction it sends** (`data-percent`; the console
+  // interface design's call: "the setting, the command and the record keep the fraction"): the
+  // typed decimal's point moved two places (`80` is read as `80e-2`, so 0.8, never
+  // 0.8000000000000002), else divided by 100.
+  function fromPercent(raw) {
+    return /^[-+]?(\\d+\\.?\\d*|\\.\\d+)$/.test(raw) ? Number(raw + "e-2") : Number(raw) / 100;
+  }
   function stateOf(box) {
     var state = {};
     var side = box.querySelector(".editor [data-switch].on");
@@ -4640,6 +5015,11 @@ _SCRIPT = """
       var raw = input.value.trim();
       state["p:" + input.getAttribute("data-param")] =
         input.getAttribute("data-kind") === "word" ? raw : numberOf(raw);
+    });
+    // A pool's ticks, keyed as the setting's value they send (`draftOf`: one `set`).
+    Array.prototype.forEach.call(box.querySelectorAll(".editor [data-pool]"), function (grid) {
+      if (!shownIn(box, grid)) { return; }
+      state["p:" + grid.getAttribute("data-pool")] = "#" + poolSum(grid);
     });
     if (state.side && state.side !== "fixed") {
       state.shape = shapeOf(paneOf(box, state.side));
@@ -4684,6 +5064,15 @@ _SCRIPT = """
       Array.prototype.forEach.call(box.querySelectorAll(".editor input[data-param]"), function (input) {
         if (input.getAttribute("data-param") === setting && shownIn(box, input)) { field = input; }
       });
+      if (!field) {
+        // A pool's grid: its ticks are one `set` of the pool's number, a pair added or taken
+        // away alike; none ticked is no pool, which the rig refuses (`task.Pool`).
+        var grid = box.querySelector('.editor [data-pool="' + CSS.escape(setting) + '"]');
+        var sum = grid ? poolSum(grid) : 0;
+        if (!sum) { wrong("tick at least one pair"); return; }
+        changes.push({ kind: "set", name: setting, value: sum });
+        return;
+      }
       var raw = field.value.trim();
       if (field.getAttribute("data-kind") === "word") {
         if (raw === "") { wrong(setting + " needs a word"); }
@@ -4693,6 +5082,7 @@ _SCRIPT = """
       var value = Number(raw);
       if (raw === "" || !isFinite(value)) { wrong(setting + " needs a number"); return; }
       if (field.hasAttribute("data-whole") && Math.floor(value) !== value) { wrong(WHOLE); return; }
+      if (field.hasAttribute("data-percent")) { value = fromPercent(raw); }
       changes.push({ kind: "set", name: setting, value: value });
     });
     var drawn = now.side !== undefined && now.side !== "fixed";
@@ -4887,8 +5277,9 @@ _SCRIPT = """
     var found = {};
     Array.prototype.forEach.call(node.querySelectorAll(
         ".editor input[data-param], .editor input[data-form], .editor select[data-shape], " +
-        ".detail > .rng input[data-number]"), function (control) {
+        ".editor input.tick[data-bit], .detail > .rng input[data-number]"), function (control) {
       var key = control.hasAttribute("data-param") ? "p:" + control.getAttribute("data-param")
+        : control.hasAttribute("data-bit") ? "t:" + control.getAttribute("data-bit")
         : control.hasAttribute("data-number") ? "n:" + control.getAttribute("data-number")
         : control.hasAttribute("data-form") ? "f:" + control.closest("[data-fields]").getAttribute("data-fields") +
           "/" + control.getAttribute("data-form")
@@ -4898,6 +5289,7 @@ _SCRIPT = """
     return found;
   }
   function valueOf(control) {
+    if (control.type === "checkbox") { return control.checked ? "1" : ""; }
     var raw = control.value.trim();
     return control.tagName === "SELECT" || control.getAttribute("data-kind") === "word" ? raw
       : control.getAttribute("data-form") === "values" || control.getAttribute("data-form") === "weights"
@@ -4911,6 +5303,7 @@ _SCRIPT = """
       var control = have[key];
       if (!was[key] || !now[key] || valueOf(control) !== valueOf(was[key]) ||
           valueOf(now[key]) === valueOf(was[key])) { return; }
+      if (control.type === "checkbox") { control.checked = now[key].checked; return; }
       control.value = now[key].value;
       if (key === "shape") { showShape(box, control.value); }
     });
@@ -5141,6 +5534,11 @@ _SCRIPT = """
       var sent = out[name];
       var box = cardOf(name);
       if (!box) { delete out[name]; return; }
+      // An act whose withdrawal is out is judged by the withdrawal's answer, above: a frame that
+      // comes before that answer, the act waiting no more, has not applied it (found under the
+      // suite's load in the console interface rework's Task 7: the box then kept what it sent as
+      // a draft, "not sent", where it was withdrawn).
+      if (withdrawing[sent.cid] && !refused[sent.cid]) { return; }
       if (refused[sent.cid]) {
         refusedAt[name] = { cid: sent.cid, state: stateOf(box) };
         delete out[name];
@@ -5279,13 +5677,15 @@ _SCRIPT = """
     }, function () { if (!answered) { failed(el("sent").textContent); } });
   }
   // **Apply** (and Enter in a box's field): the box's draft as one act.
+  // A group's box (the console interface rework's Task 7) is one act whatever it changed: one
+  // `apply_many` under one command id, which its *withdraw* takes back whole.
   function applyBox(name) {
     var box = cardOf(name);
     if (!box || (out[name] && out[name].phase === "sending")) { return; }
     refresh(box);
     var draft = drafts[name];
     if (!draft || draft.error) { return; }
-    sendAct([name], draft.changes, draft.changes.length > 1);
+    sendAct([name], draft.changes, draft.changes.length > 1 || box.classList.contains("group"));
   }
   // **Apply all** (the console interface design's goal 2: "Apply all stages them together, on the
   // same trial"): every box's draft but a reward size's, one `apply_many`.
@@ -5301,6 +5701,9 @@ _SCRIPT = """
     }
     if (input.hasAttribute("data-number")) {
       return 'input[data-number="' + CSS.escape(input.getAttribute("data-number")) + '"]';
+    }
+    if (input.hasAttribute("data-bit")) {
+      return 'input.tick[data-bit="' + CSS.escape(input.getAttribute("data-bit")) + '"]';
     }
     var group = input.closest("[data-fields]");
     if (group && input.hasAttribute("data-form")) {

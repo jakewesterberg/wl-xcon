@@ -3427,13 +3427,15 @@ def test_picking_a_hue_swatch_sends_color(rig):
 
 
 def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
-    """A color card's New color panel (the console settings design's §6; the PI, 2026-11-16: "1,2,or
+    """A section's New color… panel (the console settings design's §6; the PI, 2026-11-16: "1,2,or
     3. you select an option and then enter the info", "Saved into a color set file"): by hue angle,
     290°, named violet, into the card's set, a frame arriving meanwhile; *preview* shows what `wlx
     serve` answers for it (`GET /color-preview`), its swatch and its sentence, and *save as a
     proposal* sends a `define_color` of those numbers as the signed-in member's. The panel says
-    where it goes. Through the wire, in a real browser: run with `WLX_BROWSER=webkit` too, for
-    Safari."""
+    where it goes. Rewritten for the console interface rework's Task 7: the panel was each color
+    card's own, keyed by its setting; it is now its section's one (the design's call), keyed by the
+    section, here Other, the card's row naming none. Through the wire, in a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
     from pathlib import Path
 
     from wl_xcon.link import DefineColor, ParamRow, decode, encode
@@ -3457,7 +3459,7 @@ def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
     page = rig.browser_page()
     _sign_in(page)
     page.click('label[for="t-task"]')
-    panel = '[data-newc="distractor_appearance"]'
+    panel = '[data-newc="Other"]'
     page.click(f"{panel} > summary")
     page.fill(f'{panel} [data-newc-fields="hue_angle"] input[data-newc-num="hue_deg"]', "290")
     page.fill(f"{panel} input[data-newc-name]", "violet")
@@ -3468,7 +3470,7 @@ def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
     _, expected = color_preview(rig.hub.snapshot(on_box=False, stale_after_s=5.0)[0],
                                 {"set": ["isohue"], "method": ["hue_angle"], "hue_deg": ["290"]})
     page.wait_for_function(
-        "said => (document.querySelector('[data-newc=\"distractor_appearance\"] .newc-out') || "
+        "said => (document.querySelector('[data-newc=\"Other\"] .newc-out') || "
         "{}).textContent.trim() === said", arg=expected["said"])
     shown = page.eval_on_selector(f"{panel} .newc-out .chip", "chip => chip.style.background")
     rgb = tuple(int(expected["srgb"][i:i + 2], 16) for i in (1, 3, 5))
@@ -4261,6 +4263,38 @@ def test_withdraw_on_one_box_says_it_takes_back_the_whole_act(rig):
     assert page.input_value(field) == "0.50"
 
 
+def test_a_withdrawal_answered_after_the_next_frame_still_puts_the_box_back(rig):
+    """A withdrawal's answer may come after the frame that shows the act no longer waiting (found
+    under the suite's load in the console interface rework's Task 7, on
+    `test_withdraw_on_one_box_says_it_takes_back_the_whole_act`): that frame has not applied the
+    act, so the box keeps no draft of what it sent, and once the answer comes it goes back to the
+    value in force, saying it was withdrawn. The rig here answers the withdrawal a second late."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Staged, Withdraw
+
+    page = _task6_page(rig)
+    field = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    page.fill(field, "0.5")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    cid = rig.dispatch.seen[-1].cid
+    _offer(rig, 41, params=_task6_rows(),
+           staged=(Staged("fix_hold", 0.3, 0.5, Box("Jake Westerberg"), False, cid=cid),))
+    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    page.evaluate("document.activeElement.blur()")
+
+    rig.dispatch.delay = 1.0
+    page.click(f'{_b("fix_hold")} [data-withdraw="{cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    _offer(rig, 42, params=_task6_rows())
+    _arrived(page, 42)
+    assert _say(page, "fix_hold") != "not sent" and _bar(page) is None
+
+    _says(rig, page, "fix_hold", "withdrawn · it never applied")
+    assert page.input_value(field) == "0.30" and _bar(page) is None
+    assert [type(seen) for seen in rig.dispatch.seen][-1] is Withdraw
+
+
 def test_a_change_under_a_draft_leaves_the_draft_and_says_who(rig):
     """The plan's Review Focus 4: someone else changes a setting under a trainer's draft (another
     console, a staircase, a revert): the draft is untouched, the head shows the new value in force,
@@ -4294,8 +4328,8 @@ def test_a_change_under_a_draft_leaves_the_draft_and_says_who(rig):
 
 def _matrix_rows(trial):
     """The boxes a press is tried on, each with a head the frame of trial 41 changes: a plain
-    field, a whole count's −/+, a timing switch, a color's swatches and a held setting's *hand
-    back*."""
+    field, a whole count's −/+, a timing switch, a pool's ticks (66, then 70: blue among green
+    added), a color's swatches and a held setting's *hand back*."""
     from wl_xcon.link import ParamRow
 
     later = trial > 40
@@ -4315,14 +4349,15 @@ def _matrix_rows(trial):
                     step=0.05, switch="drawn", section="Timing"),
         ParamRow.of("gap", "s", 0.1, 2.0, 0.65 if later else 0.6, False, source="person",
                     conditions=("near",), step=0.05, section="Timing"),
-        look)
+        look, _pool_row(70 if later else 66))
 
 
 _PRESSED = {
     "field": (_b("fix_hold") + ' input[data-param="fix_hold"]', "fix_hold", "0.35 s"),
     "stepper": (_b("set_size") + ' [data-dir="1"]', "set_size", "6 objects"),
     "segment": (_b("wait") + ' [data-switch="drawn"]', "wait", "0.55 s"),
-    "tick": (_b("pairings") + ' input[type="checkbox"]', "pairings", ""),
+    "tick": (_b("pairings") + ' input.tick[aria-label="green among red"]', "pairings",
+             "3 of 12 pairs"),
     "swatch": (_b("distractor_appearance") + ' .hue[data-color="red"]', "distractor_appearance",
                "Disc, darker"),
     "apply": (_b("fix_hold") + " [data-apply]", "fix_hold", "0.35 s"),
@@ -4332,11 +4367,7 @@ _PRESSED = {
 
 
 @pytest.mark.parametrize("control", [
-    "field", "stepper", "segment",
-    pytest.param("tick", marks=pytest.mark.xfail(strict=True, reason=(
-        "waits on the console interface plan's Task 7, the pairings grid: no box has a tick "
-        "until it lands; strict, so its landing fails here until this mark is removed"))),
-    "swatch", "apply", "withdraw", "hand back"])
+    "field", "stepper", "segment", "tick", "swatch", "apply", "withdraw", "hand back"])
 def test_a_press_during_frames_acts_once(rig, control):
     """The plan's Review Focus 1: a frame lands while a trainer presses a box's control -- a field,
     −/+, a segment of the switch, a tick, a swatch, Apply, *withdraw*, *hand back* -- a frame that
@@ -4391,7 +4422,16 @@ def test_a_press_during_frames_acts_once(rig, control):
         assert page.is_visible(f'{_b("wait")} [data-side="drawn"]')
         assert _say(page, "wait") == "cannot send · wait's shortest needs a number"
     elif control == "tick":
+        # The tick pressed stays a draft; the one the frame added follows it, untouched by hand;
+        # its Apply sends the pool's number with both.
         assert sent == []
+        assert page.is_checked(target) and page.is_checked(
+            _b("pairings") + ' input.tick[aria-label="blue among green"]')
+        assert _say(page, "pairings") == "not sent"
+        page.click(f'{_b("pairings")} [data-apply]')
+        rig.wait_for(lambda: len(rig.dispatch.seen) == before + 1)
+        (ticked,) = rig.dispatch.seen[before:]
+        assert (type(ticked), ticked.name, ticked.value) == (SetParameter, "pairings", 70 + 2048)
     elif control == "swatch":
         assert sent == []
         assert page.get_attribute(target, "aria-pressed") == "true"
@@ -4530,3 +4570,206 @@ def test_a_box_the_find_box_hides_stays_hidden_while_its_act_is_out(rig):
 
     assert _say(page, "response_deadline") == "sending…"
     assert not page.is_visible(_b("response_deadline")) and page.is_visible(_b("fix_hold"))
+
+
+# --- the console interface rework's Task 7: the pairings grid, group boxes and percents ---------
+
+#: The pop-out's four colors in its pool's order, each with a swatch as the rig sends one.
+_POOL_COLORS = {"blue": "#2476c8", "purple": "#8a5cc2", "red": "#bf5c5c", "green": "#3f9a4a"}
+
+
+def _pool_row(value=66, **fields):
+    """A pool's setting's row as the rig makes it (`taskd.pool_members`): its twelve pairs in the
+    pool's order -- blue among purple 1, blue among red 2 ... green among red 2048 -- `on` as
+    `value` holds them, in the Colors section."""
+    from wl_xcon.link import ParamRow, PoolMember
+
+    pairs = [(odd, among) for odd in _POOL_COLORS for among in _POOL_COLORS if among != odd]
+    members = tuple(
+        PoolMember(bit=1 << at, odd=odd, among=among, odd_hex=_POOL_COLORS[odd],
+                   among_hex=_POOL_COLORS[among], on=bool(value >> at & 1))
+        for at, (odd, among) in enumerate(pairs))
+    return ParamRow.of("pairings", "pairings", 1.0, 4095.0, value, False, source="run",
+                       whole=True, step=1.0, section="Colors", members=members, **fields)
+
+
+def _tick(name: str) -> str:
+    return f'{_b("pairings")} input.tick[aria-label="{name}"]'
+
+
+def test_pairings_are_a_grid_of_twelve_ticks(rig):
+    """The design's goal 7 (the PI, 2026-11-19: "what are pairings?"; "4 × 4 grid, add or
+    remove"): the pool's 66 shows as a grid of twelve ticks, blue among red and red among blue
+    ticked, the diagonal empty; ticking green among red is a draft, nothing sent, and its Apply
+    sends one `set` of the pool's number, 66 + 2048, as the record keeps it; a tick put back is no
+    draft; unticking sends less, a pair taken away live as one is added. None ticked cannot be
+    sent."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, SetParameter, Staged
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig, params=_task6_rows() + (_pool_row(),))
+
+    ticks = page.eval_on_selector_all(
+        f'{_b("pairings")} input.tick', "ticks => ticks.map((t) => [t.getAttribute('aria-label'),"
+        " Number(t.getAttribute('data-bit')), t.checked])")
+    assert len(ticks) == 12 and [bit for _, bit, _ in ticks] == [1 << n for n in range(12)]
+    assert [said for said, _, on in ticks if on] == ["blue among red", "red among blue"]
+    assert page.eval_on_selector_all(f'{_b("pairings")} td.diag',
+                                     "cells => cells.map((c) => c.children.length)") == [0] * 4
+    assert _head(page, "pairings") == "2 of 12 pairs"
+    assert "wide" in _classes(page, "pairings")
+
+    page.click(_tick("green among red"))
+    assert _say(page, "pairings") == "not sent" and rig.dispatch.seen == []
+    assert _bar(page) == "1 edit not sent: pairings"
+    page.click(_tick("green among red"))
+    assert _say(page, "pairings") != "not sent" and _bar(page) is None
+    page.click(_tick("green among red"))
+    page.click(f'{_b("pairings")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+    time.sleep(0.3)  # housekeeping: room for a wrong second send to arrive
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.value) == (SetParameter, "pairings", 66 + 2048)
+
+    _offer(rig, 41, params=_task6_rows() + (_pool_row(),),
+           staged=(Staged("pairings", 66.0, 2114.0, jake, False, cid=sent.cid),))
+    _says(rig, page, "pairings", "waiting for the next trial · you")
+    assert _head(page, "pairings") == "2 of 12 pairs → 3 of 12 pairs"
+    _offer(rig, 42, params=_task6_rows() + (_pool_row(2114, applied=Applied(42, str(jake))),))
+    _says(rig, page, "pairings", "in force from trial 42")
+    assert page.is_checked(_tick("green among red"))
+
+    page.click(_tick("blue among red"))
+    page.click(_tick("red among blue"))
+    page.click(_tick("green among red"))
+    assert _say(page, "pairings") == "cannot send · tick at least one pair"
+    page.click(_tick("green among red"))
+    page.click(f'{_b("pairings")} [data-apply]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert (rig.dispatch.seen[-1].name, rig.dispatch.seen[-1].value) == ("pairings", 2048)
+
+
+def _group_rows(bar=0.8, window=50, **over):
+    from wl_xcon.link import ParamRow
+
+    rows = {
+        "move_up_bar": ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, bar, False,
+                                   source="task", step=0.05, percent=True, label="Bar to move up",
+                                   group="Move up", section="Rules"),
+        "move_up_window": ParamRow.of("move_up_window", "answers", 1.0, 200.0, window, False,
+                                      source="task", whole=True, step=1.0, label="Answers judged",
+                                      group="Move up", section="Rules"),
+    }
+    for name, fields in over.items():
+        rows[name] = dataclasses.replace(rows[name], **fields)
+    return _task6_rows() + tuple(rows.values())
+
+
+def _move_up():
+    from wl_xcon.link import GroupRow
+
+    return (GroupRow("Move up", ("move_up_bar", "move_up_window"),
+                     "Move up when at least {move_up_bar} of the last {move_up_window} answers "
+                     "are right", "Rules"),)
+
+
+def test_a_group_box_applies_its_settings_together(rig):
+    """The design's goal 8 and its call "withdraw takes back the whole act": a group's box is one
+    box with one Apply -- its sentence with each field in place -- and that Apply sends one
+    `apply_many` of the settings it changed under one command id, staged together or refused
+    whole; its box says *sending…*, then *waiting · you*, and *withdraw all 2* takes the whole act
+    back by that id. A group with one field changed still sends one `apply_many`. Its draft is
+    named by the group in the drafts bar, and Apply all carries it."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import ApplyMany, SetParameter, Staged, Withdraw
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig, params=_group_rows(), groups=_move_up())
+    box = _b("Move up")
+    assert page.eval_on_selector_all(
+        f"{box} .editor .sentence > *",
+        "parts => parts.map((p) => p.matches('.gs') ? p.textContent : '[' +"
+        " p.querySelector('input').value + ']' + (p.querySelector('.unit') ?"
+        " p.querySelector('.unit').textContent : ''))"
+    ) == ["Move up when at least ", "[80]%", " of the last ", "[50]", " answers are right"]
+    assert page.locator('#params .box[data-card="move_up_bar"]').count() == 0
+
+    page.fill(f'{box} input[data-param="move_up_bar"]', "90")
+    page.click(f'{box} input[data-param="move_up_window"] ~ [data-dir="1"]')
+    assert _say(page, "Move up") == "not sent" and rig.dispatch.seen == []
+    assert _bar(page) == "1 edit not sent: Move up"
+    page.click(f"{box} [data-apply]")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    time.sleep(0.3)  # housekeeping: room for a wrong second send to arrive
+
+    (sent,) = rig.dispatch.seen
+    assert type(sent) is ApplyMany and sent.cid
+    assert [(type(change), change.name, change.value) for change in sent.changes] == [
+        (SetParameter, "move_up_bar", 0.9), (SetParameter, "move_up_window", 51.0)]
+    assert _say(page, "Move up") == "sending…"
+    staged = (Staged("move_up_bar", 0.8, 0.9, jake, False, cid=sent.cid),
+              Staged("move_up_window", 50.0, 51.0, jake, False, cid=sent.cid))
+    _offer(rig, 41, params=_group_rows(), groups=_move_up(), staged=staged)
+    _says(rig, page, "Move up", "waiting for the next trial · you")
+    assert page.text_content(f"{box} [data-withdraw]") == "withdraw all 2"
+    assert _head(page, "Move up") == "80 % → 90 · 50 answers → 51"
+    page.click(f'{box} [data-withdraw="{sent.cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
+
+    _offer(rig, 42, params=_group_rows(), groups=_move_up())
+    _says(rig, page, "Move up", "withdrawn · it never applied")
+    page.fill(f'{box} input[data-param="move_up_window"]', "60")
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    assert _bar(page) == "2 edits not sent: fix_hold, Move up"
+    page.click(f"{box} [data-apply]")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    alone = rig.dispatch.seen[-1]
+    assert type(alone) is ApplyMany and [(c.name, c.value) for c in alone.changes] == [
+        ("move_up_window", 60.0)]
+    _offer(rig, 43, params=_group_rows(), groups=_move_up(), staged=(
+        Staged("move_up_window", 50.0, 60.0, jake, False, cid=alone.cid),))
+    _says(rig, page, "Move up", "waiting for the next trial · you")
+    assert _bar(page) == "1 edit not sent: fix_hold"
+
+
+def test_a_percent_field_shows_80_and_sends_0_8(rig):
+    """The design's call: "a fraction may be shown as a percent ... its steps, limits and the rig's
+    sentences are converted on the page, and the setting, the command and the record keep the
+    fraction": the bar's 0.8 shows as 80 with `%`, steps by 5 and stops at 100; typed back to 80 it
+    is no draft; 80 is sent as 0.8, and 33.3 as 0.333 -- never 0.33299999999999996, the noise of
+    33.3 / 100 -- and the value in force comes back as 33.3."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, SetParameter
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig, params=_group_rows(), groups=())
+    field = f'{_b("move_up_bar")} input[data-param="move_up_bar"]'
+    assert page.input_value(field) == "80" and _head(page, "move_up_bar") == "80 %"
+    assert page.text_content(f'{_b("move_up_bar")} .editor .unit') == "%"
+
+    page.click(f'{_b("move_up_bar")} [data-dir="1"]')
+    assert page.input_value(field) == "85" and _say(page, "move_up_bar") == "not sent"
+    page.click(f'{_b("move_up_bar")} [data-dir="1"]', modifiers=["Shift"])
+    assert page.input_value(field) == "100"
+    page.fill(field, "80")
+    assert _say(page, "move_up_bar") != "not sent" and _bar(page) is None
+    page.fill(field, "90")
+    page.fill(field, "80.0")
+    assert _bar(page) is None, "80.0 is the 80 in force"
+
+    page.fill(field, "33.3")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name) == (SetParameter, "move_up_bar")
+    assert sent.value == 0.333 and repr(sent.value) == "0.333"
+    _offer(rig, 41, params=_group_rows(0.333, move_up_bar={"applied": Applied(41, str(jake))}))
+    _says(rig, page, "move_up_bar", "in force from trial 41")
+    assert page.input_value(field) == "33.3" and _head(page, "move_up_bar") == "33.3 %"
+
+    page.fill(field, "80")
+    page.press(field, "Enter")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert repr(rig.dispatch.seen[-1].value) == "0.8"
