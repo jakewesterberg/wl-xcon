@@ -106,5 +106,20 @@ ALLOCATION: Allocation = replace(
         # early saccade, so a recording times that offset, and a look to empty space has an
         # event of its own. A task's code, here until wl-xtasks publishes its allocation.
         4138: "TIMEOUT_ON",
+        # The pop-out search's revision (its design, 2026-11-16, section 7), told to
+        # wl-preproc before any record shape is written (docs/pending-wl-preproc-amendments.md,
+        # XC-543). A task's codes, here until wl-xtasks publishes its allocation (ADR-0007).
+        # The frame the fixation point's act look is decided, drawn on the next flip,
+        # normal and catch trials alike; the task's reaction time runs from here.
+        4139: "GO_CUE",
+        # A catch's `catch_hold` completes, before OUTCOME_CORRECT_REJECT and REWARD_COMMANDED.
+        4140: "CATCH_FIXATION_HELD",
+        # Gaze leaves the fixation window on a catch after the go, before TIMEOUT_ON.
+        4141: "CATCH_FIXATION_BREAK",
+        # The four special trials' kinds, each on the array's frame, after ARRAY_ON (4103).
+        4142: "SPECIAL_TARGET_ABSENT",
+        4143: "SPECIAL_ODD_PLACE_EMPTY",
+        4144: "SPECIAL_DISTRACTOR_ALONE",
+        4145: "SPECIAL_ODD_ONE_ALONE",
     },
 )

@@ -1348,3 +1348,75 @@ join that never happens.
   value does where it is not a welfare ceiling's.
 - A reward size in either command: not built (XC-527).
 - Any timing claim: nothing here is measured.
+
+---
+
+# OPEN — the pop-out's revision: each trial's kind, whether it stepped, the go, and seven codes (new, 2026-11-19)
+
+Opened 2026-11-19 on the PI's approved design (`docs/superpowers/specs/2026-11-16-popout-revision-design.md`), backlog
+XC-543, **before any of these shapes is written**, as XC-491 and XC-513 were. Read against our source on 2026-11-19
+(`tasks/allocation.py`, `wl_xcon/record.py`, the trial line's `stimuli[]` and `objects[]`). Yours to accept, rename or
+refuse; until your answer we build to these names. To be sent to wl-preproc's session by message, by the controller.
+
+**Codes 4139-4145 are free.** Checked 2026-11-19: our allocation's highest is 4138 (`TIMEOUT_ON`), and your frozen
+`contracts/events.py` (wl-preproc `de004dbf`, read in source, not its README) allocates nothing in 4096-32767 (it names
+the range wl-xtasks', line 25), and holds none of 4139-4145 as a decimal or a hex literal. The codes are a task's, held in
+our `tasks/allocation.py` until wl-xtasks publishes its allocation (ADR-0007); they are told here so a reader may name
+them.
+
+| Code | Name | Strobed |
+|---|---|---|
+| 4139 | `GO_CUE` | the frame the fixation point takes its act look is decided, drawn on the next flip, normal and catch trials alike |
+| 4140 | `CATCH_FIXATION_HELD` | a catch's `catch_hold` completes, before `OUTCOME_CORRECT_REJECT` and `REWARD_COMMANDED` |
+| 4141 | `CATCH_FIXATION_BREAK` | gaze leaves the fixation window on a catch after the go, before `TIMEOUT_ON` |
+| 4142 | `SPECIAL_TARGET_ABSENT` | on the array's frame, after `ARRAY_ON` |
+| 4143 | `SPECIAL_ODD_PLACE_EMPTY` | likewise |
+| 4144 | `SPECIAL_DISTRACTOR_ALONE` | likewise |
+| 4145 | `SPECIAL_ODD_ONE_ALONE` | likewise |
+
+## What changes on our side
+
+**1. Each trial line gains `kind` and `stepped`**, always written.
+- `kind`: `"normal"` or a special kind's name (`"target_absent"`, `"odd_place_empty"`, `"distractor_alone"`,
+  `"odd_one_alone"`) for a task declaring special trials; `null` for one declaring none. The line's `structure` names the
+  structure it played.
+- `stepped`: `true` where the trial's outcome counted on its block's staircase (a success or a failure, TSK-33, on a trial
+  whose value the staircase gave); `false` where it moved nothing on it (a special trial, a value a person held, or an
+  outcome that is neither, an early saccade among them); `null` where the block has none. A level's move is read from the
+  next line's `params`, as today.
+- On a lone kind the line's `set_size` is the stage's value, which its array does not read; the objects drawn are its
+  `stimuli` entry's.
+
+**2. The start row gains `specials`**: `{"target_absent": {"share": "target_absent_percent", "structure":
+"target_absent"}, ...}` in declared order, or `null`. Each trial's percentages are in its `params`.
+
+**3. An array entry of `stimuli[]` gains `found_by`** (`"look"`, `"cue"` or `"none"`), and **each `objects[]` entry gains
+`drawn`**, false for a place left empty (beside XC-513's `size_deg` and `window_deg`). An array found by `"none"` has no
+target; its `target` is the index declared, the place an odd one would hold.
+
+**4. The fixation point's two looks** add no key. They are settings in `params`: `fix_look` and `fix_act_look`,
+appearances in REC-27's form; `fix_color` and `fix_act_color`, color-set lights with XC-513's `saturation`. The go is the
+`fix` entry of kind `"update"`, `changed: ["looks"]`, at the go's frame.
+
+**5. `go_delay`** is a setting in `params`, and drawn, in `drawn` as any form (XC-513).
+
+**6. The go and reaction time.** The task's reaction time runs from `GO_CUE` to `SACCADE_ONSET` (4098), no longer from
+`ARRAY_ON` (4103); with `go_delay` 0 the two are on one frame. Where a reader derives one, it starts at `GO_CUE`.
+
+**7. Two outcomes this work now reaches**, both already in the frozen layer: `correct_reject`, a catch held;
+`false_alarm`, a catch broken (reasons 4123, 4124).
+
+**8. Told, not asked:** a state whose wait is 0 now lasts no frame, so a trial with a zero `timeout` ends on the frame of
+its error, one frame sooner than before.
+
+## The ask
+
+1. Accept the names and shapes above, or rename them before we write them (the codes' names included).
+2. Say whether your reader needs anything else of `kind`, `stepped`, `specials`, `found_by` or `drawn`.
+
+## What is deliberately not asked for
+
+- The new warning codes (`specials-over-100`, `fixation-hidden-at-go`): values in `warnings.jsonl`'s `code`, not shapes.
+- The new settings' names: values in `params`.
+- Any timing claim: nothing here is measured; the one-frame note in item 8 is a consequence of the engine's rule, not a
+  figure.
