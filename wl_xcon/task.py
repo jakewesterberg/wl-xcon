@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 import math
+import string
 from enum import Enum
 from typing import NamedTuple
 
@@ -173,6 +174,28 @@ class Param:
     #: gives `TIMING` for a setting in seconds, else `OTHER`. A section under `TRAINING_SECTION`
     #: goes to the Training tab.
     section: str = ""
+    #: **Its plain name on the console's box** (the console interface design's goal 5; the PI,
+    #: 2026-11-19, "Plain name, code name small"): the box shows it, its code name small beneath.
+    #: A printable line of `LABEL_LIMIT` characters at most, refused otherwise as the setting is
+    #: built. Empty, the default, names none: the box shows the code name alone.
+    label: str = ""
+    #: **What it is, in one sentence** (the design's goal 5): opened inside its box. A printable
+    #: line of `REASON_LIMIT` characters at most, as `why` is, refused otherwise as it is built.
+    help: str = ""
+    #: **Whether it holds whole numbers only** (the design's goal 6; the PI, 2026-11-19, of a set
+    #: size: "there should not be a decimal option for entry"): its box shows no decimals and steps
+    #: by 1. The task declares it; the console never guesses it from the unit. True or False,
+    #: refused otherwise as it is built; its start, bounds and step are whole where given, judged at
+    #: load (`check`'s `bad-whole`).
+    whole: bool = False
+    #: **How far one press of the box's -/+ moves it** (the design's call on steps): a number above
+    #: 0, refused otherwise as it is built. `None`, the default, takes its unit's (`step_of`).
+    step: "float | None" = None
+    #: **Whether the console shows this fraction as a percent** (the design's call: "a fraction may
+    #: be shown as a percent"): x100 with `%` on the page, so a training bar reads "at least [80]%";
+    #: the setting, its commands and the record keep the fraction. Only on a setting in
+    #: `"fraction"`, refused otherwise as it is built.
+    percent: bool = False
 
     def __post_init__(self) -> None:
         parts = self.section.split("/") if isinstance(self.section, str) else []
@@ -192,6 +215,39 @@ class Param:
             raise ValueError(
                 f"parameter {self.name!r}: why its limits stand is one printable line of "
                 f"{REASON_LIMIT} characters at most, not {self.why!r}"
+            )
+        if not _one_line(self.label, LABEL_LIMIT):
+            raise ValueError(
+                f"parameter {self.name!r}: its plain name (label) is one printable line of "
+                f"{LABEL_LIMIT} characters at most, not {self.label!r}"
+            )
+        if not _one_line(self.help, REASON_LIMIT):
+            raise ValueError(
+                f"parameter {self.name!r}: what it is (help) is one printable line of "
+                f"{REASON_LIMIT} characters at most, not {self.help!r}"
+            )
+        for which in ("whole", "percent"):
+            if not isinstance(getattr(self, which), bool):
+                raise ValueError(
+                    f"parameter {self.name!r}: {which} is True or False, not "
+                    f"{getattr(self, which)!r}"
+                )
+        if self.percent and self.unit != "fraction":
+            raise ValueError(
+                f"parameter {self.name!r}: percent shows a fraction as a percent, and its unit "
+                f"is {self.unit!r}, not 'fraction'"
+            )
+        step = self.step
+        if step is not None and (
+            isinstance(step, bool)
+            or not isinstance(step, (int, float))
+            or (isinstance(step, int) and _past_float(step))
+            or not math.isfinite(step)
+            or step <= 0
+        ):
+            raise ValueError(
+                f"parameter {self.name!r}: its step is a number above 0 that a float holds, or "
+                f"None for its unit's, not {step!r}"
             )
         # **A bound past a float's range is refused as the setting is built** (XC-423): no float
         # holds it, so every check that reads a bound as one raised on it (`_real` below did, as
@@ -236,6 +292,41 @@ class Param:
 
 #: **The longest a section's name is** (`Param.section`), its `/` included: 60 characters.
 SECTION_LIMIT = 60
+
+#: **The longest a setting's plain name is** (`Param.label`), and a group's title (`Group.name`):
+#: 40 characters, the box's head (the console interface plan's Global Constraints).
+LABEL_LIMIT = 40
+
+#: **How far one press of -/+ moves a setting, by its unit** (the console interface design's call
+#: on steps; the plan's Global Constraints), where the setting declares no step of its own
+#: (`step_of`): a whole setting steps by `WHOLE_STEP`, a unit not listed by `OTHER_STEP`.
+UNIT_STEPS: "dict[str, float]" = {
+    "s": 0.05,
+    "deg": 0.1,
+    "mL": 0.01,
+    "cd/m2": 1.0,
+    "fraction": 0.05,
+    "× disc radius": 0.1,
+    "%": 1.0,
+}
+WHOLE_STEP = 1
+OTHER_STEP = 0.01
+
+
+def step_of(param: Param) -> float:
+    """**How far one press of `param`'s -/+ moves it** (the design's call on steps): the step it
+    declares (`Param.step`), else 1 for a whole setting, else its unit's (`UNIT_STEPS`), else
+    0.01. The console's Shift+click steps ten of these."""
+    if param.step is not None:
+        return param.step
+    if param.whole:
+        return WHOLE_STEP
+    return UNIT_STEPS.get(param.unit, OTHER_STEP)
+
+
+def _one_line(text: object, limit: int) -> bool:
+    """Whether `text` is printable text on one line of `limit` characters at most."""
+    return isinstance(text, str) and text.isprintable() and len(text) <= limit
 
 #: **The sections a setting naming none falls into** (`section_of`; the console settings design's
 #: §7): `TIMING` where its unit is seconds, `OTHER` for the rest.
@@ -2998,6 +3089,90 @@ class Pool:
 
 
 @dataclass(frozen=True, slots=True)
+class Group:
+    """**Settings that share one box and one Apply** (the console interface design's goal 8; the
+    PI, 2026-11-19, "One box after Timing"): `name` the box's title, `settings` the names of the
+    settings it holds, in the box's order, and, where it reads as one, `sentence`, the box read as
+    words with each setting's field in its place, `{move_up_bar}` (the format parser's places,
+    `{{` a brace): "Move up when at least {move_up_bar} of the last {move_up_window} answers are
+    right". **Its shape is refused as it is built**: a title of one printable line of
+    `LABEL_LIMIT` at most; one setting at least, each named once; a sentence placing each of its
+    settings exactly once, with no format or conversion, its words, the places left out, one
+    printable line of `REASON_LIMIT` at most. What needs the task, at load (`check`'s
+    `bad-group`): each a setting the task declares, in one group only, and never a ceiling."""
+
+    name: str
+    settings: "tuple[str, ...]"
+    sentence: str = ""
+
+    def __post_init__(self) -> None:
+        if not (_one_line(self.name, LABEL_LIMIT) and self.name.strip()):
+            raise ValueError(
+                f"a group's title is one printable line of {LABEL_LIMIT} characters at most, "
+                f"and not empty, not {self.name!r}"
+            )
+        if not (
+            isinstance(self.settings, tuple)
+            and self.settings
+            and all(isinstance(name, str) and name for name in self.settings)
+        ):
+            raise ValueError(
+                f"group {self.name!r} names its settings as a tuple of their names, one at least, "
+                f"not {self.settings!r}"
+            )
+        for name in self.settings:
+            if self.settings.count(name) > 1:
+                raise ValueError(f"group {self.name!r} names {name!r} twice; a box holds it once")
+        if self.sentence == "":
+            return
+        if not isinstance(self.sentence, str):
+            raise ValueError(
+                f"group {self.name!r}: its sentence's words are one printable line of "
+                f"{REASON_LIMIT} characters at most, not {self.sentence!r}"
+            )
+        try:
+            parts = list(string.Formatter().parse(self.sentence))
+        except ValueError as unread:
+            raise ValueError(
+                f"group {self.name!r}: its sentence is not read as words and places ({unread}); "
+                f"a place is a setting's name in braces, and a brace itself is written twice"
+            ) from None
+        words = "".join(literal for literal, _, _, _ in parts)
+        if not _one_line(words, REASON_LIMIT):
+            raise ValueError(
+                f"group {self.name!r}: its sentence's words are one printable line of "
+                f"{REASON_LIMIT} characters at most, its places left out, not {words!r}"
+            )
+        placed: list[str] = []
+        for _, place, spec, conversion in parts:
+            if place is None:
+                continue
+            if place not in self.settings:
+                raise ValueError(
+                    f"group {self.name!r}: its sentence has a place for {place!r}, which is not "
+                    f"one of its settings ({', '.join(self.settings)})"
+                )
+            if place in placed:
+                raise ValueError(
+                    f"group {self.name!r}: its sentence has a place for {place!r} twice; each "
+                    f"setting's field sits in it once"
+                )
+            if spec or conversion:
+                raise ValueError(
+                    f"group {self.name!r}: its sentence's place for {place!r} carries a format or "
+                    f"a conversion; a place is the setting's name alone, its box showing the "
+                    f"field"
+                )
+            placed.append(place)
+        for name in self.settings:
+            if name not in placed:
+                raise ValueError(
+                    f"group {self.name!r}: its sentence has no place for {name!r}; a sentence "
+                    f"places each of its settings once"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class Task:
     """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one the
     plain run plays and a condition naming no structure plays, its plans by name (§13.1; engine
@@ -3031,6 +3206,10 @@ class Task:
     #: nor gives the setting by its conditions. Empty, nothing drawn. Its shape is refused as it is
     #: built; what each draw declares, at load (`check.check_task`).
     draws: "dict[str, Distribution]" = field(default_factory=dict)
+    #: **Its groups of settings that share one box and one Apply** (`Group`; the console interface
+    #: design's goal 8). Empty, none: each setting has a box of its own. A tuple of `Group`s,
+    #: refused otherwise as it is built; what each names, at load (`check`'s `bad-group`).
+    groups: "tuple[Group, ...]" = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.structures, dict) or not self.structures:
@@ -3078,6 +3257,12 @@ class Task:
                     f"draw {name!r} is a Distribution (Uniform, Weighted, TruncatedNormal, "
                     f"Listed or NonAging), not {type(drawn).__name__}"
                 )
+        if not (isinstance(self.groups, tuple)
+                and all(isinstance(group, Group) for group in self.groups)):
+            raise ValueError(
+                f"a task's groups are a tuple of Groups, each a box's settings, not "
+                f"{self.groups!r}"
+            )
 
     @property
     def trial(self) -> Trial:

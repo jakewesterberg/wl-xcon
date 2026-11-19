@@ -546,6 +546,26 @@ highest (its state ends at a fixed 10 s, or 3 s for the target's), a set size's 
 standard 0 and 1; every size, window, place, ring, wait for fixation and rotation is open, and a
 draw of one gives its own `low` and `high` (`bad-draw` otherwise).
 
+**What a setting's box shows, declared by the task, since the console interface rework
+(2026-11-19).** A `Param` may give a plain name, `label`, at most `task.LABEL_LIMIT` (40)
+characters, and one sentence of what it is, `help`, at most `task.REASON_LIMIT` (120), each one
+printable line (the design's goal 5; the PI, "Plain name, code name small"); declare itself
+`whole`, its box showing no decimals and stepping by 1, its start, lowest, highest and step whole
+where given or refused at load, `bad-whole` (goal 6; the task declares it, the console never
+guesses it from the unit); a `step` above 0, else its unit's (`task.step_of`: `task.UNIT_STEPS`,
+s 0.05, deg 0.1, mL 0.01, cd/m2 1, fraction 0.05, × disc radius 0.1, % 1; a whole setting 1; any
+other unit 0.01); and, on a fraction, `percent`, shown ×100 with `%` while the setting, its
+commands and the record keep the fraction. A task's `groups` (`task.Group`: a title of at most 40
+characters, its settings' names, each once, and optionally a sentence placing each of them once as
+`{name}`, read by the format parser, its words at most 120 characters) are settings that share one
+box and one Apply (goal 8); each names a setting the task declares, sits in one group only, and is
+never a ceiling, `reward_correct` or any entry the task rewards through, since a reward size is
+never applied with others (`bad-group`, at load). Each malformed value is refused as the setting or
+group is built; each field is at a default that changes nothing (`declarations.FORMAT` unraised),
+and each is part of the task's content hash. The reference tasks declare their set sizes whole and
+nothing else; wl-xtasks' tasks, curated with the PI, carry the names, sentences and groups. Whether
+a value sent live is whole is judged where a change is judged, never in `Session.set`.
+
 **Sizes scaled by eccentricity, and object windows as a ratio, since the console settings build
 (2026-11-18).** A setting a look draws its `size` by (`task.size_settings`: a `Disc`'s, `Square`'s,
 `Cross`'s or `Polygon`'s, an array's looks and a look setting's choices among them) may be scaled on

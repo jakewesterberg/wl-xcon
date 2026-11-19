@@ -333,7 +333,7 @@ def search_by_choices(folder: Path, setting: str) -> Path:
     `search.py` (the review of XC-415's fix, M2, its input). Engine test material, run only in the
     simulator."""
     old, new = {
-        "set_size": ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY)',
+        "set_size": ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY, whole=True)',
                      'Param("set_size", unit="objects", choices=(4, 8))'),
         "array_eccentricity": ('Param("array_eccentricity", unit="deg", low=0.0, start=8.0)',
                                'Param("array_eccentricity", unit="deg", choices=(6.0, 8.0))'),

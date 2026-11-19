@@ -817,7 +817,7 @@ def test_a_value_offered_after_a_pending_range_is_judged_with_its_extremes(tmp_p
     path = tmp_path / "wide_search.py"
     text = Path("tasks/visual_search.py").read_text()
     for old, new in (
-            ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY)',
+            ('Param("set_size", unit="objects", low=1, high=12, start=4, why=SET_SIZE_WHY, whole=True)',
              'Param("set_size", unit="objects", low=2, high=20, why="a stand-in for its places")'),
             ('Param("array_eccentricity", unit="deg", low=0.0, start=8.0)',
              'Param("array_eccentricity", unit="deg", low=0.0, high=14.0)')):

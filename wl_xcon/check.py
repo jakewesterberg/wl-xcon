@@ -241,6 +241,8 @@ def check_task(
         findings
         + _structure_faults(task)
         + _unexplained_limits(task)
+        + _whole_faults(task)
+        + _group_faults(task)
         + _ambiguous_color_choices(task)
         + _meaning_faults(task)
         + _reaction_time_faults(task)
@@ -453,9 +455,12 @@ def beyond_range(
         # a light a value newly asks for can be one the task's clip warning already says, word
         # for word (Task 10's review, I1).
         if (_among(finding, before) or not (finding.blocking or finding.is_warning)
-                or finding.code == UNEXPLAINED_LIMIT):
+                or finding.code in (UNEXPLAINED_LIMIT, BAD_WHOLE)):
             # A limit with no reason is the declaration's, said at load, never the value's: the
-            # widened range only moves the bound it names.
+            # widened range only moves the bound it names. So is a whole setting's bound that is
+            # not whole: widened to a value, it would name a bound the task never declared, and
+            # whether a value is whole is the live path's to judge (the console interface plan's
+            # Task 3), never `Session.set`'s.
             continue
         detail = f"with {said}, outside its declared range: {finding.detail}"
         new = [subject for subject in finding.subjects if (finding.code, subject) not in known]
@@ -536,6 +541,70 @@ def _unexplained_limits(task: Task) -> list[Finding]:
             f"past it refused (the PI, 2026-11-16, \"Hard limits only where impossible\"); give "
             f"its reason in one line (`why`), or take it away"),
             blocking=False, accepted_in=SESSION_KINDS, subjects=(f"setting {param.name!r}",)))
+    return findings
+
+
+#: **A whole setting declaring a number that is not whole** (the console interface design's goal
+#: 6; the PI, 2026-11-19): its start, lowest, highest or step, refused at load, naming each.
+BAD_WHOLE = "bad-whole"
+
+
+def _whole_faults(task: Task) -> list[Finding]:
+    """`BAD_WHOLE` for each setting declared whole (`Param.whole`) whose start, lowest, highest or
+    step, where given, is not a whole number (`4.0` is): its box steps by whole numbers from its
+    start, within its bounds, and could not show a start of 4.5 without a decimal. A bound that is
+    no finite number is left to the checks that read it (`_unexplained_limits`, the pre-flight)."""
+    findings: list[Finding] = []
+    for param in task.params:
+        if not param.whole:
+            continue
+        given = (("start", param.start), ("lowest", param.low), ("highest", param.high),
+                 ("step", param.step))
+        said = [f"its {which}, {value!r}" for which, value in given
+                if _finite(value) and not float(value).is_integer()]
+        if not said:
+            continue
+        listed = said[0] if len(said) == 1 else f"{', '.join(said[:-1])} and {said[-1]}"
+        findings.append(Finding(BAD_WHOLE, (
+            f"{param.name!r} is declared whole, and {listed}, "
+            f"{'is not a whole number' if len(said) == 1 else 'are not whole numbers'}")))
+    return findings
+
+
+def _group_faults(task: Task) -> list[Finding]:
+    """`bad-group` for what a task's groups (`Task.groups`; the console interface design's goal 8)
+    name that the task cannot box: a setting it does not declare; one in two groups, since a
+    setting sits in one box; two groups of one title; and **a ceiling** -- a welfare-bounded
+    setting (`declarations.BOUNDED`, `reward_correct` today) or any bounded-config entry the task
+    rewards through, whatever its declarations -- since a reward size is never applied with
+    others (the design's call; the plan's Global Constraints; XC-527): it keeps its own Apply.
+    Each blocking. A group's own shape is refused as it is built (`task.Group`)."""
+    from wl_xcon.declarations import BOUNDED, rewarded_through
+
+    declared = {param.name for param in task.params}
+    ceilings = set(BOUNDED) | rewarded_through(task)
+    findings: list[Finding] = []
+    titles: set[str] = set()
+    boxed: dict[str, str] = {}
+    for group in task.groups:
+        if group.name in titles:
+            findings.append(Finding("bad-group", (
+                f"two groups are named {group.name!r}; a box's title names one")))
+        titles.add(group.name)
+        for name in group.settings:
+            if name in ceilings:
+                findings.append(Finding("bad-group", (
+                    f"group {group.name!r} holds {name!r}, a welfare-bounded setting: a reward "
+                    f"size is never applied with others, so it keeps a box of its own")))
+            elif name not in declared:
+                findings.append(Finding("bad-group", (
+                    f"group {group.name!r} names {name!r}, which the task does not declare")))
+            elif name in boxed:
+                findings.append(Finding("bad-group", (
+                    f"setting {name!r} is in group {boxed[name]!r} and in group "
+                    f"{group.name!r}; a setting sits in one box")))
+            else:
+                boxed[name] = group.name
     return findings
 
 
