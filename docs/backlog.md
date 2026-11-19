@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-529.**
+**Next free ID: XC-530.**
 
 ## Brainstorms queued for the PI
 
@@ -351,6 +351,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 ## Waiting on another repository
 
+- **XC-529** wl-preproc: accept the change kind `withdrawn` (appended after `shaping`, not strobed, one row for each setting a withdrawn act covers, with the console's command id `cid`) before the console's withdraw command writes it; Apply all adds no shape. — 2026-11-19, [pending-wl-preproc-amendments.md, "the console interface rework"](pending-wl-preproc-amendments.md#open--the-console-interface-rework-a-withdrawn-change-and-apply-all-new-2026-11-19) — waits on: the controller sending it, then wl-preproc's answer
 - **XC-093** wl-preproc: build the `bcam` sidecar's version 2 for primary-triggered cameras (accepted 2026-10-11: it may name the primary camera as the trigger and must carry `digital_line` and `frame_rate_hz`; a dropped frame is then placed by the camera's own frame counter), when P9 needs it; tell it when. — 2026-09-27, [P9 spec §7](superpowers/specs/2026-09-27-P9-camera-system-design.md#7-outside-this-repository-asks-not-assumptions) — waits on: P9, then our word to wl-preproc
 - **XC-094** wl-preproc will carry the `pupil − CR1` fallback as a second `raw_definition` (accepted 2026-10-11), designed once XC-006 settles the switching rule and the second map; tell it then. — 2026-09-27, [S5 §1](superpowers/specs/2026-08-31-S5-eye-tracking-design.md#1-most-of-the-calibration-is-already-decided-and-not-by-us) — waits on: XC-006
 - **XC-099** wl-works: treat the task PC as a lab host (`GET /health`, `POST /jobs`, `export-session`, the session-summary contract); wl.works answered the build order on 2026-10-11: the lab-host client is its Plan 10's stage 10a-1, in the fifth build of its order, so code against a fake (its handover `HANDOVER-wl-expcontroller.md`, lines 519-532), and the same day it accepted the lab-host protocol and wrote that "the rig publishes no jobs" (its lab-host spec `docs/superpowers/specs/2026-10-11-what-wl-works-gives-a-lab-host-and-a-workstation-design.md` §1.3, lines 156-160; its protocol copy `docs/ops/lab-host-protocol.md`, Appendix B, line 120: "`actions` is empty"; read at its `main` `b3c1b933`). — 2026-08-31, [pending-wl-works-amendments.md](pending-wl-works-amendments.md#open--wl-works-gains-a-second-lab-host-and-it-speaks-the-protocol-it-already-has) — waits on: wl.works building 10a-1 (answered yes 2026-08-31; the build order answered 2026-10-11, the fifth build in its order)

@@ -12,6 +12,8 @@ sections below keep their headings as sent. **And one from the pop-out search, o
 **answered 2026-11-14** (wl-preproc's session, by message): accepted, with one rename, the trial line's `realized` now
 `color_realized`. **And one from demo mode, opened and answered 2026-11-14**, the last section.
 
+**Open 2026-11-19 (XC-529):** the console interface rework's one new change kind, `withdrawn`, the last section of this file.
+
 **Updated 2026-10-11.** Of the four asks opened in August, **all four are done**; each is marked below
 with wl-preproc's evidence, and the headings are left as they were. What is open now is XC-288's ask
 (XC-321), the asks of engine spec §21 and the older backlog items, all delivered 2026-10-11 and listed
@@ -1252,3 +1254,93 @@ saturation and a luminance a person may move.
 - The new warning codes: they are values in `warnings.jsonl`'s `code`, not shapes.
 - Sections and limit reasons: the task's declaration, which the record hashes as before.
 - Any timing claim: `form`'s mean and `size_deg` are arithmetic on declared numbers.
+
+---
+
+# OPEN — the console interface rework: a withdrawn change, and Apply all (new, 2026-11-19)
+
+Opened 2026-11-19 on the PI's approved design (`docs/superpowers/specs/2026-11-19-console-interface-design.md`, "The
+record": "wl-preproc is told first, as XC-513 was"), backlog XC-529, **before the shape is written**. One change kind and
+nothing else, read against our source on 2026-11-19 (`wl_xcon/record.py`'s `KINDS`, `STROBED` and `change()`,
+`taskd.Session._staged`, `_pending`, `_apply_staged`, `_apply_pending`, `_given_by`). Yours to accept, rename or refuse;
+until your answer we build to these names.
+
+## What changes on our side
+
+The console gains **withdraw**: after a person's Apply (a card's, a group box's or Apply all) and until the next trial
+starts, the change is waiting, and the person may take it back. A group box's Apply and an Apply all are each one act,
+judged together, so a withdrawal takes back the whole of it. **A reward size is left out of both** (Apply all and
+withdraw; XC-527), so no welfare ceiling is in a withdrawn act.
+
+**When a change's row is written, which decides the shape.** A change is *staged* when the person sends it
+(`Session._staged`, with `_pending` for a hand-back, a range and a form) and is *applied* at the next boundary,
+between trials, by `_apply_staged`, which in one pass gives each its change id, strobes `PARAM_CHANGED`, takes its
+`sequence` and writes its row (`SessionRecord.change`). Nothing is written or strobed while it waits. So a change
+withdrawn while it waits **has no row, no `change` id and no strobe**: the record would say nothing of it, nor of who
+proposed it. And a change that has applied cannot be withdrawn (the console offers withdraw only until the boundary; a
+withdraw that arrives after it finds nothing waiting and is answered as refused, writing no row). That is why the
+withdrawal cannot name a change id: it names the id the console's page made for the command (`cid`), which the rig
+holds with the waiting change.
+
+**1. Change kind `withdrawn`**, appended after `shaping` (`KINDS` is appended only):
+
+```json
+{"change": 14, "kind": "withdrawn", "name": "ring_radius", "was": 6.0, "now": 6.0,
+ "by": {"...": "an Actor, as every row's"}, "at": 1763558712.4, "at_local": "2026-11-19T08:25:12.4-05:00",
+ "trial_number": 31, "run": 1, "meaning": null, "offered": [], "odds": null, "event_code": null,
+ "cid": "c-9f3a2b7e41",
+ "withdrawn": {"kind": "set", "now": 8.0},
+ "staged_by": {"...": "an Actor, or null"}}
+```
+
+- **One row for each setting the withdrawn act covers**, as the log writes one row for each setting an act moves, all
+  rows of one withdrawal sharing one `change` id (a revert's rows do). An Apply all of three settings, withdrawn, is
+  three rows, one `change` and one `cid`. A reader needs no list of the covered names beside them: they are the `name`s
+  of the rows of that `change`.
+- **`change`** is a fresh id from the same counter as every act's, taken when the withdrawal is made. It is not the
+  withdrawn act's (it never had one). The ids stay in the order the rows are written.
+- **`cid`**: the command id the console's page made for the Apply the person is taking back, a string of at most 64
+  printable characters. Opaque to you; it is there so a person reading the record can tell which Apply it was.
+- **`name`**: the setting, never empty. **`meaning`** null, **`offered`** `[]` and **`odds`** null, as any row of a kind
+  that moves no task setting writes them.
+- **`was` and `now` are equal**: the value the setting held and still holds, written by the rule every row's `was`
+  follows (`taskd.Session._given_by`): null where a draw, a staircase, a pool or the conditions give the setting, since no
+  single value was held. **Why equal rather than the waiting value in `now`**: nothing moved, and a reader who follows a
+  setting by the `now` of its rows reads the right value after a withdrawal with no special case.
+- **`withdrawn`**, the kind's own field: `{"kind": <the kind the row would have been: set, hand_back, range or
+  form>, "now": <what it would have written as `now`>}`, so the record says what was taken back. For a `set` it is the
+  value; for a `hand_back` it is null; for a `range` and a `form` it is the draw as written by `variation.recorded`.
+- **`by` and `at`**: who withdrew, and the instant, on the session's anchored clock, written as every row's (`at`
+  number and `at_local`). **`staged_by`**: who sent the change taken back, an Actor map or null, since otherwise no
+  row anywhere says who proposed it. (We hold the person's name for it, not the instant it was sent, so there is no
+  `staged_at`.)
+- **`trial_number`**: the first trial the withdrawn change would have applied to (the next trial to start), as an
+  applied row's; **`run`** the run it happened in.
+- **It does not strobe, and carries no `sequence`.** It changes nothing on screen and nothing a recording could align
+  to, and the strobe of the change it takes back never went out, since `_apply_staged` strobes as it applies. So
+  `STROBED` is unchanged: the n-th row of a strobed kind still joins the n-th `PARAM_CHANGE`, and a withdrawal sits
+  between those rows without disturbing the count. **`event_code` is null**, as for a `shaping` row; your clock fit
+  times it by `at`.
+
+**2. Apply all adds no shape, and nothing is asked for it.** Each setting it applies is its own row of its own act,
+as today, one `change` id, one strobe and one `sequence` each, written in the one `_apply_staged` pass at one boundary.
+We considered a marker on those rows saying they were applied together and found no reader of it: the one thing it
+would join, a withdrawal to the rows it took back, cannot exist, because a withdrawn act has no applied rows and an
+applied one cannot be withdrawn. The rows' `trial_number` and `at` already say they applied together, and a person who
+wants to know what one Apply did reads the rows between two trials. A marker would be a field every row carried for a
+join that never happens.
+
+## The ask
+
+1. Accept the name and shape above (kind `withdrawn`, appended after `shaping`; not strobed; `was` equal to `now`;
+   `cid`, `withdrawn` and `staged_by`; one row for each covered setting), or rename them before we write them.
+2. Say whether your reader needs anything else of a `withdrawn` row. Until you read it, it is published as written and
+   noted as a kind it does not yet know, as `suggested`, `declined`, `form` and `shaping` were.
+
+## What is deliberately not asked for
+
+- Any shape for Apply all or a group box's Apply (above): their rows are the rows of today.
+- A refused withdraw (one that finds nothing waiting) writes no row: it answers the console as refused, as a refused
+  value does where it is not a welfare ceiling's.
+- A reward size in either command: not built (XC-527).
+- Any timing claim: nothing here is measured.
