@@ -2071,7 +2071,9 @@ def test_away_from_the_box_the_run_controls_are_greyed_with_the_sentence():
 def test_the_control_bar_offers_the_task_the_trials_and_the_preflight_as_the_mockup_draws_them():
     """The mockup's toolbar (`task-sel`, `pf-pill`), with the run's trial count beside the
     task (the b3a-2 plan, decision 6): the select's options are a fragment, the count is
-    static, and it starts at `wlx run --trials`'s default."""
+    static, and it starts at `wlx run --trials`'s default. Since the console interface rework's
+    Task 8 the run's buttons (`controls`) stand in the one bar that stays in view, before the
+    session's details behind *session*, where the next run's task, plan and pre-flight are."""
     document = page(fragments(_between(), view()), stale_after_s=30.0, nonce="n0nce", can_write=True)
 
     assert '<label class="tsel" for="task-sel"><span class="k">Task</span><select id="task-sel" aria-label="task">' in document
@@ -2080,7 +2082,8 @@ def test_the_control_bar_offers_the_task_the_trials_and_the_preflight_as_the_moc
         f'autocomplete="off" aria-label="trials">'
     ) in document
     assert RUN_TRIALS == 1000
-    assert document.index('id="task-sel"') < document.index('id="pf-pill"') < document.index('id="controls"')
+    assert document.index('id="controls"') < document.index('id="session"') < document.index(
+        'id="task-sel"') < document.index('id="pf-pill"')
     assert "<h2>Pre-flight</h2>" in document and "<h2>Session</h2>" in document
     assert document.index('id="pf-panel"') < document.index('id="setup"')
 
@@ -2816,8 +2819,9 @@ def test_the_sign_in_script_uses_pkce_and_keeps_its_tokens_in_session_storage_on
     assert 'credentials: "omit"' in _SCRIPT
     assert "sessionStorage" in _SCRIPT and "Authorization" in _SCRIPT
     # The box's name keeps its `localStorage` (two uses), and so do the sections' last-left state
-    # (two more, the console settings design's §7); the sign-in never touches it.
-    assert _SCRIPT.count("localStorage") == 4
+    # (two more, the console settings design's §7), the pins and the demo keys' first visit (two
+    # each, the console interface rework's Task 8); the sign-in never touches it.
+    assert _SCRIPT.count("localStorage") == 8
     assert "console.log" not in _SCRIPT
     # The authorization code leaves the address bar before anything else is done with it.
     assert _SCRIPT.index("history.replaceState") < _SCRIPT.index("tokenRequest({")
@@ -4844,7 +4848,10 @@ def test_a_box_keeps_its_reasons_behind_more():
     box = _box(params, "fix_hold")
     more = box.zone("more")
     assert more.tag == "details" and "open" not in more.attrs
-    assert _said(more.children[0]) == "more" and more.children[0].tag == "summary"
+    # A ⋯ in the box's head since the console interface rework's Task 8, its word its label.
+    summary = more.children[0]
+    assert (summary.tag, _said(summary), summary.attrs["aria-label"]) == (
+        "summary", "⋯", web.MORE_SAID)
     inside = _said(more)
     outside = " ".join(_said(box.zone(z)) for z in ("head", "editor", "status"))
     for said in (_said(_Tree(web._range(row)).root), "held by a person",
@@ -5080,7 +5087,9 @@ def test_a_groups_sentence_reads_with_its_fields_in_place():
 
     assert list(cards) == ["Move up", "fix_hold"]
     box = cards["Move up"]
-    assert box.startswith(' group wide" data-card="Move up">')
+    # `data-echo`: its fields show what its head would, so its head says it only while it differs
+    # (the console interface rework's Task 8).
+    assert box.startswith(' group wide" data-card="Move up" data-echo>')
     assert ('<span class="lbl" title="Move up">Move up</span><span class="code" '
             'title="move_up_bar, move_up_window">move_up_bar, move_up_window</span>') in box
     sentence = re.search(r'<div class="sentence">(.*?)</div><div class="status">', box).group(1)
@@ -5184,3 +5193,131 @@ def test_one_new_color_panel_per_colors_section():
         ("isohue", " selected"), ("bright", ""), ("", "")]
     timing = re.search(r'<details class="sec" data-sec="Timing" open>.*?</details>', params).group(0)
     assert "newc" not in timing
+
+
+
+# --- the console interface rework's Task 8: the page around the boxes ---------------------------
+
+
+def test_the_bar_holds_the_runs_numbers_and_buttons_and_the_session_is_behind_a_button():
+    """The design's call: "the top of the page becomes one bar that stays in view: state, trial,
+    correct, fluid, cage time and the run's buttons; the session's details behind a *session*
+    button". The bar's numbers are the strip's own (`_level`, `_back_to_cage`), its title the cage
+    time's note; before any frame it holds none; the session's details -- who, the strip, the next
+    run's task, plan and pre-flight, a scheduled stop -- stand behind *session*; the stop's confirm
+    and the mark's note open in the bar; the Training tab has a find box of its own; the demo's
+    keys fold to one line."""
+    parts = fragments(frame(), view())
+    nums = parts["bar-nums"]
+    words = _said(_Tree(nums).root)
+    assert words == "trial 40 correct 30 / 40 75% fluid today 61.25 mL cage by " + words.split(
+        "cage by ")[1]
+    cage = re.search(r'<span class="bn"( title="[^"]*")?><span class="k">cage</span>', nums)
+    assert cage and "out ·" in cage.group(1)
+    assert fragments(None, view())["bar-nums"] == ""
+    assert "unknown" in fragments(frame(fluid_today_ml=None), view())["bar-nums"]
+
+    document = page(parts, stale_after_s=30.0, nonce="n0nce", can_write=True)
+    bar = document[document.index('<header class="topbar glass" id="bar"'):document.index("</header>")]
+    for inside in ('id="state"', 'id="bar-nums"', 'id="controls"', 'id="sent"', 'id="session-btn"',
+                   'id="stop-confirm"', 'id="mark-form"', 'id="stream"'):
+        assert inside in bar, inside
+    session = document[document.index('<section class="session" id="session"'):]
+    session = session[:session.index("</section>")]
+    for inside in ('id="head-id"', 'id="presence"', 'id="strip"', 'id="task-sel"', 'id="plan-sel"',
+                   'id="run-trials"', 'id="pf-pill"', 'id="sched-form"'):
+        assert inside in session, inside
+    assert ".topbar { position: sticky; top: 0;" in _CSS
+    assert ("body:has(#t-task:checked) .session, body:has(#t-training:checked) .session "
+            "{ display: none; }") in _CSS
+    training = _tab(document, "tp-training")
+    assert 'id="tfind"' in training and 'id="pfind"' in _tab(document, "tp-task")
+    assert ('<details class="demo-fold" id="demo-fold"><summary>keys and demo limits</summary>'
+            '<div class="demo-keys" id="demo-keys">') in document
+    assert ('<section class="panel glass pins" id="pinned-pane" aria-label="pinned settings" hidden>'
+            in _tab(document, "tp-runtime"))
+
+
+def test_a_section_counts_its_unsent_drafts():
+    """The console interface rework's Task 8: a section's header counts what in it is not sent,
+    after the rig's counts. What the rig counts is the header's one text -- `N settings · M
+    changed`, a group's settings each once, a parent's taking in its subsections' -- so the page's
+    script puts "· K not sent" after it in a slot of its own (`countDrafts`, from `showBar`, the
+    one place drafts are summed), counting a group's draft by the settings it changes (`unsent`),
+    and after a frame's new counts `settle` says it again. The browser test
+    `test_a_section_and_its_tab_count_the_edits_not_sent` drives it."""
+    from wl_xcon.link import GroupRow
+
+    rows = (ParamRow.of("fix_hold", "s", 0.0, 1.0, 0.3, False, section="Timing", changed=True),
+            ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, 0.8, False, section="Rules",
+                        changed=True),
+            ParamRow.of("move_up_window", "answers", 1.0, 200.0, 50.0, False, section="Rules",
+                        whole=True),
+            ParamRow.of("fix_size", "deg", 0.0, 9.0, 0.5, False, section="Timing/points"))
+    group = GroupRow("Move up", ("move_up_bar", "move_up_window"), None, "Rules")
+    params = fragments(frame(params=rows, groups=(group,)), view())["params"]
+
+    summaries = re.findall(r'<details class="sec" data-sec="([^"]+)" open><summary>([^<]*)</summary>',
+                           params)
+    assert summaries == [("Timing", "Timing · 2 settings · 1 changed"),
+                         ("Timing/points", "points · 1 setting · 0 changed"),
+                         ("Rules", "Rules · 2 settings · 1 changed")]
+    counting = _script_between("function unsent(box)", "  // **Pins**")
+    assert 'box.classList.contains("group") ? Math.max(1, draft.changes.length) : 1' in counting
+    assert 'sayIn(slotIn(summary, "ns"), count)' in counting
+    assert 'sayIn(slotIn(tab, "tns"), total)' in counting
+    assert '" · " + count + " not sent"' in counting
+    assert _script_between("function showBar() {", "var bar = ").strip() == "countDrafts();"
+
+
+def test_a_box_says_its_value_in_its_head_only_where_its_field_does_not():
+    """The ledger's density ruling for the console interface rework's Task 8: "the head shows the
+    value in force only when it differs from the field (a draft or a waiting change), not twice".
+    A box whose field shows its value in force carries `data-echo`, and the page's CSS hides its
+    head's value while it has no draft, no act out and nothing waiting; a box whose head is the
+    only place its value is said -- drawn each trial, held by the training switch, a position, an
+    appearance, a color, a pool, a scaling -- carries none, and its head always says it."""
+    rows = (
+        ParamRow.of("fix_hold", "s", 0.0, 1.0, 0.3, False, source="task"),
+        ParamRow.of("rule", "word", None, None, "hollow", False, source="task"),
+        ParamRow.of("wait", "s", 0.0, 1.0, 0.3, False, source="draw", draw="uniform 0.2 to 0.4"),
+        ParamRow.of("bar", "fraction", 0.0, 1.0, 0.8, False, source="frozen"),
+        replace(ParamRow.of("place", "deg", None, None, None, False), position="10° at 45°"),
+        replace(ParamRow.of("look", "appearance", None, None, None, False), words="hollow ring"),
+        _pool_row(),
+        ParamRow.of("disc_size", "deg", 0.0, 5.0, 1.0, False, source="form", switch="scaled",
+                    shape={"shape": "scaled", "numbers": {"factor": 0.1}, "values": [],
+                           "weights": [], "by": "person"}),
+    )
+    params = fragments(frame(params=rows), view())["params"]
+    cards = _cards(params)
+    echoed = {name for name, card in cards.items()
+              if re.match(r'[^>]*data-card="[^"]*"[^>]*\bdata-echo\b[^>]*>', card)}
+    assert echoed == {"fix_hold", "rule"}
+    assert ('.box[data-echo]:not(.draft):not(.staged):not(.sending) > .head > .now '
+            '{ display: none; }') in _CSS
+    # The head's value is still made for every box: the script and a draft read it.
+    assert all('<span class="now"' in card for card in cards.values())
+
+
+def test_every_box_has_a_pin_and_a_mark_for_more_in_its_head():
+    """The design's goal 9 and the ledger's density ruling for Task 8: every box, a group's too,
+    holds *pin to Runtime* first in its *more* (nothing pinned as served: the page's script keeps
+    the pins), and its *more* opens from a ⋯ in its head's corner, not a line of its own; the pin
+    sends nothing, so no gate grays it."""
+    from wl_xcon.link import GroupRow
+
+    rows = (ParamRow.of("fix_hold", "s", 0.0, 1.0, 0.3, False, section="Rules"),
+            ParamRow.of("move_up_bar", "fraction", 0.0, 1.0, 0.8, False, section="Rules"),
+            ParamRow.of("move_up_window", "answers", 1.0, 200.0, 50.0, False, section="Rules"))
+    group = GroupRow("Move up", ("move_up_bar", "move_up_window"), None, "Rules")
+    params = fragments(frame(params=rows, groups=(group,)), view(can_write=False))["params"]
+
+    for name in ("fix_hold", "Move up"):
+        more = _box(params, name).zone("more")
+        detail = more.children[1]
+        first = detail.children[0]
+        assert (first.tag, first.attrs["data-pin-toggle"], first.attrs["aria-pressed"],
+                _said(first)) == ("button", name, "false", "pin to Runtime"), name
+        assert "disabled" not in first.attrs, name
+    assert ".box > .more > summary { position: absolute; top: 1px; right: 2px;" in _CSS

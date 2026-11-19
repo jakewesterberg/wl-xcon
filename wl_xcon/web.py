@@ -135,6 +135,7 @@ class SignIn:
 FRAGMENT_IDS = (
     "demo-tag",
     "state",
+    "bar-nums",
     "head-id",
     "presence",
     "strip",
@@ -286,6 +287,15 @@ REWARD_ONLY_PAUSED = "a manual reward is given only while the session is paused:
 #: `link.REFUSAL_HISTORY` (50) of them, so an act of more could lose some boxes' own reasons. Below
 #: `link.APPLY_LIMIT` (64), which the rig takes. The page's script reads it from `<body>`.
 APPLY_ALL_LIMIT = 50
+
+#: **The page around the boxes** (the console interface rework's Task 8), its words: the *session*
+#: button's title, the find box's, Runtime's Pinned strip's line, and the demo screen's folded keys
+#: (the design's call: "fold to one line ("keys and demo limits"), open on the first visit only").
+SESSION_SAID = ("the session's details: who, which run and block, the animal's fluid and time out, "
+                "the next run's task and plan, a scheduled stop")
+FIND_SAID = "find a setting or section"
+PINNED_SAID = "boxes you pinned from the settings tabs; each works as there, one draft between them"
+DEMO_FOLD_SAID = "keys and demo limits"
 #: The trials the plain run is offered with: `wlx run --trials`'s default (`cli`), the flat run
 #: of N trials, one block (the b3a-2 plan, decision 6). A run of one of its task's plans has its
 #: plan's lengths, and the box is hidden while a plan is chosen (engine build C2b). A starting
@@ -417,6 +427,33 @@ def _head(frame: Telemetry | None) -> str:
         f'<span><span class="k">{name}</span><span class="v"{attr}>{value}</span></span>'
         for name, value, attr in cells
     )
+
+
+def _bar_nums(frame: Telemetry | None) -> str:
+    """**The top bar's numbers** (the console interface design's call: "the top of the page
+    becomes one bar that stays in view: state, trial, correct, fluid, cage time and the run's
+    buttons"; the layout review's finding 4): the trial, the session's right answers over its
+    trials as the strip's first line counts them (`_level`), the fluid given today, and when the
+    animal is due back in its cage (`_back_to_cage`) -- each the strip's own figure, so the bar and
+    the strip behind *session* never disagree. Nothing before a session: the pill says so."""
+    if frame is None:
+        return ""
+    _, right, percent, _, _ = _level("session", frame.performance.session, "")
+    fluid = ('<span class="nm">unknown</span>' if frame.fluid_today_ml is None
+             else f'{frame.fluid_today_ml:.2f}<span class="u"> mL</span>')
+    _, cage, _, note, tone = _back_to_cage(frame)
+    cells = (
+        ("trial", _e(frame.trial_index), "", ""),
+        ("correct", f"{right} {percent}".strip(), "", ""),
+        ("fluid today", fluid, "", ""),
+        ("cage", cage, tone, note),
+    )
+    out = []
+    for label, value, tone, note in cells:
+        classes = "bn " + tone if tone else "bn"
+        title = f' title="{note}"' if note else ""
+        out.append(f'<span class="{classes}"{title}><span class="k">{label}</span> <b>{value}</b></span>')
+    return " ".join(out)
 
 
 def _presence(view: View) -> str:
@@ -2725,7 +2762,7 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
         else f'<span class="stg">staged{"" if lead is None else " " + lead} → '
         f"{_becomes(change, row)} by {_who(change.by)}</span>"
     )
-    more = []
+    more = [_pin(name)]
     if row.help:
         more.append(f'<span class="what">{_e(row.help)}</span>')
     more.append(f'<span class="range">{_range(row)}</span>')
@@ -2759,6 +2796,8 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
     under = _under(row, change)
     if under:
         marks.append(f' data-under="{_e(under)}"')
+    if _echoes(row):
+        marks.append(" data-echo")
     rest = ""
     if state == "refused":
         rest_state, rest_said = _status(row, change, None)
@@ -2773,8 +2812,8 @@ def _box(row, frame, view: View, value: str, editor: str, change, refusal,
         f'<button type="button" class="btn small" data-discard="{name}" tabindex="0"{off}>'
         f'Discard</button><button type="button" class="btn small primary" '
         f'data-apply="{name}" tabindex="0"{off}>Apply</button></span></div>'
-        f'<details class="more"><summary>more</summary><div class="detail">{"".join(more)}</div>'
-        f"</details></div>"
+        f'<details class="more"><summary aria-label="{_e(MORE_SAID)}" title="{_e(MORE_SAID)}">⋯'
+        f'</summary><div class="detail">{"".join(more)}</div></details></div>'
     )
 
 
@@ -2860,6 +2899,37 @@ def _params(frame: Telemetry | None, view: View, training: bool = False) -> str:
     return (_sections(frame.task, [card for card in cards if _training(card[0]) == training], run,
                       _new_colors(colored, view))
             + f'<div class="wdrs" hidden>{declined}</div>')
+
+
+def _echoes(row) -> bool:
+    """**Whether a box's field shows the value its head would** (the ledger's density ruling for
+    the console interface rework's Task 8: "the head shows the value in force only when it differs
+    from the field (a draft or a waiting change, e.g. "2.0 → 1.5"), not twice"): a number or a word
+    in a field of its own, as `_entry`'s last branch draws it -- not a value held by the training
+    switch, given each trial, a position, an appearance, a color or a pool, whose head is the only
+    place the value in force is said. Its box carries `data-echo`, and the page's CSS hides the
+    head's value at rest while it does."""
+    settable = row.value is None or isinstance(row.value, str) or (
+        isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
+    scaled = (row.switch == "scaled" and row.shape is not None
+              and row.shape.get("shape") == "scaled")
+    return (settable and row.members is None and row.color is None and not scaled
+            and _HELD_BY.get(row.source) is None and _PER_TRIAL.get(row.source) is None
+            and row.position is None and row.words is None)
+
+
+#: **What a box's *more* says on its ⋯** (the ledger's density ruling for Task 8: "*more* becomes a
+#: ⋯ in the box's head, not its own line"), for a screen reader and a pointer's tooltip.
+MORE_SAID = "more: what it is, its limits and why, where its value comes from"
+
+
+def _pin(name: str) -> str:
+    """**A box's pin**, `name` its `data-card` as escaped there (the console interface design's goal 9; the PI, 2026-11-19: "Yes, you choose
+    only"), the first thing in its *more*: it puts a working copy of the box in Runtime's Pinned
+    strip, or takes it away, kept per task in this browser (the page's script); nothing is
+    pinned until a person pins it. It sends nothing, so no gate grays it."""
+    return (f'<button type="button" class="btn small pin" data-pin-toggle="{name}" '
+            f'aria-pressed="false">pin to Runtime</button>')
 
 
 def _entry(row, view: View, unit: bool = True) -> tuple[str, str]:
@@ -3001,7 +3071,7 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
         return "", _e(GROUP_REST)
 
     state, said = line(refusal)
-    more = []
+    more = [_pin(title)]
     for row in rows:
         bits = [f'<span class="gn">{_e(row.label or row.name)}</span>']
         if row.help:
@@ -3032,6 +3102,8 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
     under = next((said for said in (_under(row, staged.get(row.name)) for row in rows) if said), "")
     if under:
         marks.append(f' data-under="{_e(under)}"')
+    if all(_echoes(row) for row in rows):
+        marks.append(" data-echo")
     rest = ""
     if state == "refused":
         rest_state, rest_said = line(None)
@@ -3047,8 +3119,8 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
         f'<button type="button" class="btn small" data-discard="{title}" tabindex="0"{off}>'
         f'Discard</button><button type="button" class="btn small primary" '
         f'data-apply="{title}" tabindex="0"{off}>Apply</button></span></div>'
-        f'<details class="more"><summary>more</summary><div class="detail">{"".join(more)}</div>'
-        f"</details></div>"
+        f'<details class="more"><summary aria-label="{_e(MORE_SAID)}" title="{_e(MORE_SAID)}">⋯'
+        f'</summary><div class="detail">{"".join(more)}</div></details></div>'
     )
 
 
@@ -3621,6 +3693,7 @@ def fragments(frame: Telemetry | Idle | None, view: View) -> dict[str, str]:
     return {
         "demo-tag": _demo_tag(frame),
         "state": _state(frame),
+        "bar-nums": _bar_nums(frame),
         "head-id": _head(frame),
         "presence": _presence(view),
         "strip": _strip(frame, view),
@@ -3761,7 +3834,7 @@ _CSS = """
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.4; padding: 12px 16px 28px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.4; padding: 0 12px 28px; }
 .wrap { max-width: 1520px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 h2 { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
@@ -3771,7 +3844,25 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .who-b { font-style: italic; }
 .later { font-size: 11px; color: var(--mock); font-family: var(--cond); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; }
 .glass { background: var(--surface); border: 1px solid var(--edge); border-radius: 8px; box-shadow: var(--shadow); }
-.head { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; padding: 8px 14px; }
+.head { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; padding: 6px 12px; }
+.topbar { position: sticky; top: 0; z-index: 15; display: grid; gap: 4px; padding: 4px 10px; border-top: 0; border-radius: 0 0 8px 8px; }
+.barline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.topbar .logo svg { height: 22px; }
+.topbar .logo .app { padding-left: 8px; }
+.topbar .nums { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; font-size: 13.5px; }
+.topbar .bn { white-space: nowrap; }
+.topbar .bn .k { font-family: var(--cond); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.topbar .bn b { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.topbar .bn .u { color: var(--muted); font-weight: 400; }
+.topbar .bn.warn b { color: var(--warn); } .topbar .bn.crit b { color: var(--crit); }
+.topbar .spacer { flex: 1; }
+.topbar .ctlrow .btn { padding: 3px 10px; font-size: 13px; }
+.topbar .ctlrow .nm { font-size: 12px; }
+.topbar .sent { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session { display: grid; gap: 8px; }
+body:has(#t-task:checked) .session, body:has(#t-training:checked) .session { display: none; }
+body.session-open .session { display: grid !important; }
+body.session-shut .session { display: none !important; }
 .logo { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .logo svg { height: 34px; width: auto; display: block; }
 .logo .app { font-family: var(--cond); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12px; color: var(--muted); border-left: 1px solid var(--rule); padding-left: 10px; }
@@ -3808,7 +3899,8 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .banner.crit { background: var(--crit-soft); border-left: 4px solid var(--crit); }
 .banner.info { background: var(--accent-soft); border-left: 4px solid var(--accent); }
 .banner .tag { font-family: var(--cond); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12px; }
-.shell { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) minmax(260px, 330px); align-items: stretch; }
+.shell { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 250px; align-items: stretch; }
+@media (max-width: 1100px) { .shell { grid-template-columns: minmax(0, 1fr) 200px; } }
 @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); } }
 .main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .main > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -3845,21 +3937,32 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .kv.wrap > .btn { flex-shrink: 1; max-width: 100%; }
 .owe { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
 .params { display: grid; gap: 8px; }
-.secs { display: grid; gap: 8px; }
-.sec { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px 8px; }
-.sec .sec { margin-top: 8px; }
-.sec > summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; }
-.sec[open] > summary { margin-bottom: 6px; }
-.cards { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); align-items: start; }
+.secs { display: grid; gap: 6px; }
+.sec { border: 0; padding: 0; }
+.sec .sec { margin-top: 4px; }
+.sec > summary { cursor: pointer; font-weight: 600; font-size: 12.5px; padding: 1px 0; }
+.sec .sec > summary { font-weight: 500; color: var(--muted); }
+.sec[open] > summary { margin-bottom: 3px; }
+.sec > summary .ns, .tab .tns { color: var(--accent); font-weight: 600; }
+.cards { display: grid; gap: 5px; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); align-items: start; }
 .nofind { display: none !important; }
-#pfind { max-width: 220px; }
-.box { border: 1px solid var(--rule); border-radius: 5px; padding: 5px 7px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-content: start; background: var(--surface-2); min-width: 0; }
+.panel .top.tools { justify-content: flex-start; }
+.top > .field.find { width: 220px; max-width: 100%; font-size: 13px; padding: 2px 6px; }
+.box { position: relative; border: 1px solid var(--rule); border-radius: 5px; padding: 3px 6px 2px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; align-content: start; background: var(--surface-2); min-width: 0; }
 .box.wide { grid-column: span 2; }
 @media (max-width: 520px) { .box.wide { grid-column: auto; } }
 .box:has(> details.more[open]) { grid-column: 1 / -1; background: var(--surface); }
-.box > .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 8px; padding: 0; min-width: 0; }
-.box .names { display: grid; flex: 1 1 7em; min-width: 0; }
-.box .lbl { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box > .head { display: grid; grid-template-columns: minmax(0, max-content) auto minmax(4.5em, 1fr); align-items: center; gap: 0 6px; padding: 0 18px 0 0; min-width: 0; line-height: 16px; }
+.box > .head > *, .box > .head .code, .box > .head .now * { line-height: 16px; }
+.box > .head > .now, .box > .head > .ceil, .box > .head .code { height: 16px; }
+.box .names { display: contents; }
+.box .lbl { grid-column: 1 / -1; font-size: 13px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; min-width: 0; }
+.box .names .code { grid-column: 1; }
+.box > .head > .ceil { grid-column: 2; }
+.box > .head > .now { grid-column: 3; text-align: right; }
+.box[data-echo]:not(.draft):not(.staged):not(.sending) > .head > .now { display: none; }
+.box[data-echo]:not(.draft):not(.staged):not(.sending) > .head { grid-template-columns: minmax(0, 1fr) auto 0; }
+.box > .more:not([open]) { margin-top: -2px; }
 .box .code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .box .code.only { font-size: 12.5px; color: var(--ink); font-weight: 500; }
 .box .ceil { font-family: var(--cond); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--warn); font-weight: 700; }
@@ -3868,7 +3971,8 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .box .now .to { font-family: var(--mono); font-size: 13px; color: var(--accent); }
 .box > .editor { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
 .box > .editor > * { min-width: 0; max-width: 100%; }
-.box > .status { position: relative; display: flex; align-items: center; min-height: 24px; min-width: 0; font-size: 12px; color: var(--muted); }
+.box > .status { position: relative; display: flex; align-items: center; min-height: 22px; min-width: 0; font-size: 12px; color: var(--muted); }
+.box .btn.small { padding: 1px 8px; }
 .box .status .say { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .box .status .acts { position: absolute; right: 0; top: 0; bottom: 0; display: flex; gap: 4px; align-items: center; padding-left: 6px; background: inherit; visibility: hidden; }
 .box.draft .status .acts, .box.sending .status .acts, .box.staged .status .acts:has([data-withdraw]) { position: static; flex: none; visibility: visible; }
@@ -3882,7 +3986,11 @@ h3 { margin: 0; font-family: var(--cond); font-weight: 600; font-size: 11.5px; l
 .box.refused .status .say { color: var(--crit); }
 .box.warned .status .say { color: var(--warn); }
 .box.ceiling:not(.staged):not(.refused) { box-shadow: inset 3px 0 0 var(--warn); }
-.box > .more > summary { cursor: pointer; font-size: 12px; color: var(--muted); width: max-content; }
+.box > .more > summary { position: absolute; top: 1px; right: 2px; list-style: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: 3px; color: var(--muted); }
+.box > .more > summary::-webkit-details-marker { display: none; }
+.box > .more > summary::marker { content: ""; }
+.box > .more > summary:hover, .box > .more[open] > summary { background: var(--surface); color: var(--ink); }
+.box .detail .pin[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .box .detail { display: grid; gap: 3px; margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--rule); font-size: 12.5px; min-width: 0; }
 .box .detail > * { min-width: 0; overflow-wrap: anywhere; }
 .box .detail .what { color: var(--ink); }
@@ -3943,7 +4051,7 @@ body.drafted > .wrap { padding-bottom: 56px; }
 .spin { display: inline-flex; align-items: stretch; }
 .field { width: 6em; border: 1px solid var(--rule); border-radius: 3px; padding: 1px 4px; background: var(--surface); color: inherit; font-size: 12.5px; }
 .field.pending { border-color: var(--accent); }
-.spin .stp { width: 22px; min-height: 24px; border: 1px solid var(--rule); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; font-family: var(--sans); font-size: 14px; line-height: 1; }
+.spin .stp { width: 22px; min-height: 22px; border: 1px solid var(--rule); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; font-family: var(--sans); font-size: 14px; line-height: 1; }
 .spin .stp:first-child { border-radius: 3px 0 0 3px; border-right: 0; }
 .spin .stp:last-child { border-radius: 0 3px 3px 0; border-left: 0; }
 .spin .stp + .field { border-radius: 0; width: 5em; text-align: right; font-size: 14px; font-weight: 600; }
@@ -4051,7 +4159,9 @@ body.stale .strip, body.stale .panels { filter: grayscale(1); opacity: 0.55; }
 .demo-keylist kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; background: var(--surface-2); white-space: nowrap; }
 .demo-limits { margin: 0; padding-left: 16px; font-size: 12px; color: var(--muted); display: grid; gap: 3px; }
 .demo-pane.full { position: fixed; inset: 0; z-index: 25; border-radius: 0; padding: 0; gap: 0; background: #000000; color: #e8eaed; grid-template-rows: minmax(0, 1fr) auto; }
-.demo-pane.full > .top, .demo-pane.full > .demo-keys, .demo-pane.full > #demo-who { display: none; }
+.demo-pane.full > .top, .demo-pane.full > .demo-fold, .demo-pane.full > #demo-who { display: none; }
+.demo-fold > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.demo-fold[open] > summary { margin-bottom: 4px; }
 .demo-pane.full .demo-screen { border-radius: 0; min-height: 0; background: #000000; }
 .demo-pane.full .demo-drawing { position: absolute; inset: 0; }
 .demo-pane.full .demo-drawing svg { width: 100%; height: 100%; }
@@ -4768,37 +4878,47 @@ _SCRIPT = """
   function writeSections(key, kept) {
     try { window.localStorage.setItem(key, JSON.stringify(kept)); } catch (e) { /* kept for this page only */ }
   }
-  // The find box's marks alone, each box found or not and each section holding one or not, the
-  // sections left open or closed as they are: for boxes put back between frames (`settle`), where
-  // opening the sections as last kept would undo a click a store that throws could not keep.
-  function applyFind() {
-    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
-      var find = root.closest("#params") && el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
-      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
-        var label = card.querySelector(".head .lbl");
-        var name = (card.getAttribute("data-card") + " " + (label ? label.textContent : "")).toLowerCase();
-        card.classList.toggle("nofind", find !== "" && name.indexOf(find) === -1);
-      });
-      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
-        section.classList.toggle("nofind", find !== "" && section.querySelector(".box:not(.nofind)") === null);
-      });
+  // **The find box, on both settings tabs** (the console interface design's goal 5; the ledger's
+  // find ruling for the rework's Task 8): a box is found by its code name, its plain name, a
+  // group's settings' code names and plain names, or the name of a section it stands in -- a
+  // parent's name finds its subsections' boxes too -- each section holding none hidden. The marks
+  // alone, the sections left open or closed as they are (`applyFind`): for boxes put back between
+  // frames (`settle`), where opening the sections as last kept would undo a click a store that
+  // throws could not keep.
+  function findIn(root) {
+    var box = root.closest("#params") ? el("pfind") : root.closest("#training-params") ? el("tfind") : null;
+    return box ? box.value.trim().toLowerCase() : "";
+  }
+  function findText(card) {
+    var said = [card.getAttribute("data-card") || ""];
+    Array.prototype.forEach.call(card.querySelectorAll(
+        ":scope > .head .lbl, :scope > .head .code, :scope > details.more .gmore > .gn"), function (node) {
+      said.push(node.textContent);
     });
+    return said.join(" ").toLowerCase();
+  }
+  function markFind(root) {
+    var find = findIn(root);
+    Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
+      var section = card.closest("details.sec");
+      var where = section ? (section.getAttribute("data-sec") || "").toLowerCase() : "";
+      card.classList.toggle("nofind", find !== "" && findText(card).indexOf(find) === -1 &&
+                                      where.indexOf(find) === -1);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
+      section.classList.toggle("nofind", find !== "" && section.querySelector(".box:not(.nofind)") === null);
+    });
+    return find;
+  }
+  function applyFind() {
+    Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), markFind);
   }
   function applySections() {
     Array.prototype.forEach.call(document.querySelectorAll(inCards(".secs")), function (root) {
       var kept = readSections(sectionsKey(root));
-      var find = root.closest("#params") && el("pfind") ? el("pfind").value.trim().toLowerCase() : "";
-      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (card) {
-        // A box is found by its code name or its plain name (the console interface design's
-        // goal 5).
-        var label = card.querySelector(".head .lbl");
-        var name = (card.getAttribute("data-card") + " " + (label ? label.textContent : "")).toLowerCase();
-        var found = find === "" || name.indexOf(find) !== -1;
-        card.classList.toggle("nofind", !found);
-      });
+      var find = markFind(root);
       Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
         var matches = section.querySelector(".box:not(.nofind)") !== null;
-        section.classList.toggle("nofind", find !== "" && !matches);
         section.open = find !== "" ? matches : kept[section.getAttribute("data-sec")] !== true;
       });
     });
@@ -4814,7 +4934,9 @@ _SCRIPT = """
     else { delete kept[section.getAttribute("data-sec")]; }
     writeSections(key, kept);
   }
-  if (el("pfind")) { el("pfind").addEventListener("input", applySections); }
+  ["pfind", "tfind"].forEach(function (id) {
+    if (el(id)) { el(id).addEventListener("input", applySections); }
+  });
   applySections();
   // **A box's *more* a person opened** (the console interface design's goal 1: "everything else
   // opens inside the box on a click"), by setting, kept open across the frames that replace the
@@ -5213,8 +5335,13 @@ _SCRIPT = """
       delete since[name];
     }
     var sending = Boolean(out[name] && out[name].phase === "sending");
-    // The rig's state from the frame; the find box's marks follow in `settle` (`applyFind`).
-    if (fresh) { box.className = fresh.className; }
+    // The rig's state from the frame, the find box's mark kept (a box brought up to date between
+    // two `settle`s -- an act sent, a step -- stays found or not as the find box left it).
+    if (fresh) {
+      var unfound = box.classList.contains("nofind");
+      box.className = fresh.className;
+      if (unfound) { box.classList.add("nofind"); }
+    }
     var said = lineOf(box, draft);
     var say = box.querySelector(":scope > .status > .say");
     var given = fresh ? fresh.querySelector(":scope > .status > .say") : null;
@@ -5240,6 +5367,7 @@ _SCRIPT = """
     box.classList.toggle("cannot", Boolean(draft && draft.error) && !sending);
     hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
     hold(box.querySelector("[data-discard]"), !draft || sending);
+    mirrorOne(name);
   }
   // **A box that keeps its editor**: one with a draft, its act out, or a field or select focused
   // in it (the controls review's §3, rule 2); a button focused is not one, Chromium focusing
@@ -5247,8 +5375,10 @@ _SCRIPT = """
   function dirty(box) {
     var name = nameOf(box);
     var focused = document.activeElement;
+    var copy = focused ? pinOf(focused) : null;
     return Boolean(drafts[name] || out[name] ||
-      (focused && box.contains(focused) && focused.matches && focused.matches("input, select")));
+      (focused && (box.contains(focused) || (copy && copy.getAttribute("data-pin") === name)) &&
+       focused.matches && focused.matches("input, select")));
   }
   // A refusal as first seen on a box, and whether a change of the setting has been accepted since
   // (the design's goal 4: "a refusal is cleared by a later accepted change of that setting"): a
@@ -5433,6 +5563,7 @@ _SCRIPT = """
         var other = secs.querySelector('details.sec[data-sec="' + CSS.escape(section.getAttribute("data-sec")) + '"]');
         var summary = section.querySelector(":scope > summary");
         var said = other.querySelector(":scope > summary").textContent;
+        // The rig's counts; what is not sent is said after them again by `settle` (`countDrafts`).
         if (summary.textContent !== said) { summary.textContent = said; }
       });
       var oldRefused = root.querySelector(":scope > .wdrs");
@@ -5574,6 +5705,7 @@ _SCRIPT = """
     restoreNewColors();
     applySignIn();
     showBar();
+    mirrorPins();
   }
   // **The drafts bar** (the console interface design's goal 2): "N edits not sent: names ·
   // Discard all · Apply all", in the order the boxes stand. A reward size is sent alone, by its
@@ -5607,6 +5739,7 @@ _SCRIPT = """
     return { every: every, named: named, alone: alone, changes: changes, why: why };
   }
   function showBar() {
+    countDrafts();
     var bar = el("drafts");
     if (!bar) { return; }
     var all = gathered();
@@ -5775,6 +5908,274 @@ _SCRIPT = """
       judge();
       settle();
     }, function () { if (!answered) { failed(el("sent").textContent); } });
+  }
+  // **What is not sent, counted where a person looks** (the console interface rework's Task 8):
+  // each section's header after the rig's counts ("Timing · 7 settings · 2 changed · 1 not sent", a
+  // group's settings each counted once, as the rig's counts take them, a parent's taking in its
+  // subsections'), and each settings tab's label while a box on it holds a draft.
+  function unsent(box) {
+    var draft = drafts[nameOf(box)];
+    if (!draft) { return 0; }
+    return box.classList.contains("group") ? Math.max(1, draft.changes.length) : 1;
+  }
+  function slotIn(holder, kind) {
+    var slot = holder.querySelector(":scope > ." + kind);
+    if (!slot) {
+      slot = document.createElement("span");
+      slot.className = kind;
+      holder.appendChild(slot);
+    }
+    return slot;
+  }
+  function sayIn(slot, count) {
+    var said = count ? " · " + count + " not sent" : "";
+    if (slot.textContent !== said) { slot.textContent = said; }
+  }
+  function countDrafts() {
+    [["params", "t-task"], ["training-params", "t-training"]].forEach(function (pair) {
+      var root = el(pair[0]);
+      var tab = document.querySelector('label.tab[for="' + pair[1] + '"]');
+      if (!root || !tab) { return; }
+      Array.prototype.forEach.call(root.querySelectorAll("details.sec"), function (section) {
+        var summary = section.querySelector(":scope > summary");
+        var count = 0;
+        Array.prototype.forEach.call(section.querySelectorAll(".box"), function (box) { count += unsent(box); });
+        if (summary) { sayIn(slotIn(summary, "ns"), count); }
+      });
+      var total = 0;
+      Array.prototype.forEach.call(root.querySelectorAll(".box"), function (box) { total += unsent(box); });
+      sayIn(slotIn(tab, "tns"), total);
+    });
+  }
+  // **Pins** (the console interface design's goal 9; the PI, 2026-11-19: "Yes, you choose only"): a
+  // box's *pin to Runtime*, in its *more*, puts a working copy of it in Runtime's Pinned strip,
+  // kept per task in this browser's storage under `wlx.pins.<task>` -- the names pinned, in the
+  // order pinned -- every access inside `try`, so a store that throws keeps them for this page
+  // alone; nothing is pinned until a person pins it. **A copy is its original's mirror, never a
+  // second box** (the ledger's pin ruling: "one draft per setting, never two diverging copies"):
+  // it carries `data-pin` where its original carries `data-card`, outside the roots every box
+  // lookup reads (`CARDS`, `cardOf`), so a setting keeps one box, one draft and one act. What a
+  // person does in a copy -- typing, a tick, a segment, a swatch, −/+, Apply, Discard, Esc, Enter,
+  // *withdraw*, *hand back* -- is done to its original (`pinOf`, `twinOf`), and the copy is
+  // brought up to it node by node (`morph`), its own *more* left open or closed, so a press in it
+  // lands on a node no frame replaced.
+  var PINS_KEY = "wlx.pins.";
+  var pinsHeld = {};
+  var TWINS = "input, select, textarea, button";
+  function pinTask() {
+    var secs = document.querySelector(inCards(".secs"));
+    return secs ? secs.getAttribute("data-task") || "" : "";
+  }
+  function readPins(task) {
+    if (!pinsHeld[task]) {
+      var list = [];
+      try {
+        var raw = window.localStorage.getItem(PINS_KEY + task);
+        var kept = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(kept)) {
+          list = kept.filter(function (name) { return typeof name === "string"; });
+        }
+      } catch (e) { list = []; }
+      pinsHeld[task] = list;
+    }
+    return pinsHeld[task].slice();
+  }
+  function writePins(task, list) {
+    pinsHeld[task] = list.slice();
+    try { window.localStorage.setItem(PINS_KEY + task, JSON.stringify(list)); } catch (e) { /* kept for this page only */ }
+  }
+  function togglePin(name) {
+    var task = pinTask();
+    var list = readPins(task);
+    var at = list.indexOf(name);
+    if (at === -1) { list.push(name); } else { list.splice(at, 1); }
+    writePins(task, list);
+    mirrorPins(true);
+  }
+  function pinOf(node) {
+    return node && node.closest ? node.closest("#pinned > .box[data-pin]") : null;
+  }
+  // A copy's control's twin in its original: the same place among the box's controls, which the
+  // copy shares with it node for node (`morph`).
+  function twinOf(copy, node) {
+    var original = cardOf(copy.getAttribute("data-pin"));
+    if (!original) { return null; }
+    var mine = copy.querySelectorAll(TWINS);
+    var theirs = original.querySelectorAll(TWINS);
+    var at = Array.prototype.indexOf.call(mine, node);
+    return at === -1 || mine.length !== theirs.length ? null : theirs[at];
+  }
+  function valuesOf(from, to) {
+    var given = from.querySelectorAll("input, select, textarea");
+    var have = to.querySelectorAll("input, select, textarea");
+    if (given.length !== have.length) { return; }
+    Array.prototype.forEach.call(given, function (control, at) {
+      var twin = have[at];
+      if (control.type === "checkbox" || control.type === "radio") {
+        if (twin.checked !== control.checked) { twin.checked = control.checked; }
+      } else if (twin.value !== control.value) { twin.value = control.value; }
+    });
+  }
+  function copyOf(node) {
+    var made = node.cloneNode(true);
+    if (made.nodeType === 1) {
+      made.removeAttribute("id");
+      Array.prototype.forEach.call(made.querySelectorAll("[id]"), function (one) { one.removeAttribute("id"); });
+      valuesOf(node, made);
+    }
+    return made;
+  }
+  // `to` brought up to `from` in place: each node kept where both have the same kind of node in the
+  // same place, its attributes and text set, else its children made again; a copy's `data-card`
+  // never taken, nor a `<details>`'s `open`, nor an id; and the values of the controls set last.
+  function morph(from, to, top) {
+    if (from.nodeType !== 1) {
+      if (to.data !== from.data) { to.data = from.data; }
+      return;
+    }
+    var keep = function (name) {
+      return name === "id" || (name === "open" && to.tagName === "DETAILS") ||
+        (top && (name === "data-card" || name === "data-pin"));
+    };
+    Array.prototype.slice.call(to.attributes).forEach(function (attr) {
+      if (!keep(attr.name) && !from.hasAttribute(attr.name)) { to.removeAttribute(attr.name); }
+    });
+    Array.prototype.forEach.call(from.attributes, function (attr) {
+      if (!keep(attr.name) && to.getAttribute(attr.name) !== attr.value) { to.setAttribute(attr.name, attr.value); }
+    });
+    var given = from.childNodes;
+    var have = to.childNodes;
+    var same = given.length === have.length && Array.prototype.every.call(given, function (node, at) {
+      return node.nodeType === have[at].nodeType && node.nodeName === have[at].nodeName;
+    });
+    if (same) {
+      Array.prototype.forEach.call(given, function (node, at) { morph(node, have[at], false); });
+    } else {
+      to.replaceChildren.apply(to, Array.prototype.map.call(given, copyOf));
+    }
+    if (top) {
+      // Found or not by the find box of its own tab, the copy is always shown.
+      to.classList.remove("nofind");
+      valuesOf(from, to);
+    }
+  }
+  // `now`: the copy's own press has been done to its original, so its copy is brought up at once,
+  // not at the press's end (it is the node pressed that the hold keeps; `morph` keeps it).
+  function mirrorOne(name, now) {
+    var holder = el("pinned");
+    if (!holder || (pressing() && !now)) { return; }
+    var copy = holder.querySelector(':scope > .box[data-pin="' + CSS.escape(name) + '"]');
+    var original = copy ? cardOf(name) : null;
+    if (copy && original) { morph(original, copy, true); }
+  }
+  // `now`: a pin or an unpin, a deliberate press, shown at once.
+  function mirrorPins(now) {
+    var holder = el("pinned");
+    if (!holder) { return; }
+    var names = readPins(pinTask()).filter(function (name) { return cardOf(name) !== null; });
+    Array.prototype.forEach.call(document.querySelectorAll(inCards("[data-pin-toggle]")), function (button) {
+      var on = names.indexOf(button.getAttribute("data-pin-toggle")) !== -1;
+      var said = on ? "unpin from Runtime" : "pin to Runtime";
+      if (button.textContent !== said) { button.textContent = said; }
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    if (pressing() && !now) { return; }
+    Array.prototype.slice.call(holder.children).forEach(function (copy) {
+      if (names.indexOf(copy.getAttribute("data-pin")) === -1) { copy.remove(); }
+    });
+    names.forEach(function (name, at) {
+      var original = cardOf(name);
+      var copy = holder.querySelector(':scope > .box[data-pin="' + CSS.escape(name) + '"]');
+      if (!copy) {
+        copy = copyOf(original);
+        copy.removeAttribute("data-card");
+        copy.setAttribute("data-pin", name);
+        copy.classList.remove("nofind");
+        var more = copy.querySelector(":scope > details.more");
+        if (more) { more.open = false; }
+      } else { morph(original, copy, true); }
+      if (holder.children[at] !== copy) { holder.insertBefore(copy, holder.children[at] || null); }
+    });
+    el("pinned-pane").hidden = names.length === 0;
+  }
+  if (el("pinned")) {
+    el("pinned").addEventListener("click", function (e) {
+      var copy = pinOf(e.target);
+      if (!copy) { return; }
+      e.stopPropagation();
+      // Its own *more* opens in place; a tick toggles itself and its `input` is passed on.
+      if (e.target.closest("summary")) { return; }
+      var button = e.target.closest("button");
+      var twin = button && copy.contains(button) ? twinOf(copy, button) : null;
+      if (twin) {
+        twin.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey,
+                                                     detail: e.detail }));
+      }
+      mirrorOne(copy.getAttribute("data-pin"), true);
+      mirrorPins();
+    }, true);
+    ["input", "change"].forEach(function (type) {
+      el("pinned").addEventListener(type, function (e) {
+        var copy = pinOf(e.target);
+        if (!copy) { return; }
+        e.stopPropagation();
+        var twin = twinOf(copy, e.target);
+        if (!twin) { return; }
+        if (twin.type === "checkbox" || twin.type === "radio") { twin.checked = e.target.checked; }
+        else { twin.value = e.target.value; }
+        twin.dispatchEvent(new Event(type, { bubbles: true }));
+        mirrorOne(copy.getAttribute("data-pin"), true);
+        mirrorPins();
+      }, true);
+    });
+    el("pinned").addEventListener("keydown", function (e) {
+      var copy = pinOf(e.target);
+      if (!copy || !e.target.matches("input")) { return; }
+      var twin = twinOf(copy, e.target);
+      if (!twin) { return; }
+      e.stopPropagation();
+      fieldKeys(e, twin, e.target);
+      mirrorOne(copy.getAttribute("data-pin"), true);
+      mirrorPins();
+    }, true);
+  }
+  // **The session's details behind *session*** (the console interface design's call: "the
+  // session's details behind a *session* button"; the layout review's finding 4: "closed on the
+  // settings tabs"): hidden on the Task parameters and Training tabs, shown on the others, where a
+  // run is started and a session opened and ended; the button shows or hides them on the tab shown
+  // until another tab is chosen.
+  function sessionShown() { return getComputedStyle(el("session")).display !== "none"; }
+  function showSession() {
+    el("session-btn").setAttribute("aria-expanded", sessionShown() ? "true" : "false");
+  }
+  el("session-btn").addEventListener("click", function () {
+    var shown = sessionShown();
+    body.classList.toggle("session-open", !shown);
+    body.classList.toggle("session-shut", shown);
+    showSession();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="tab"]'), function (radio) {
+    radio.addEventListener("change", function () {
+      body.classList.remove("session-open", "session-shut");
+      showSession();
+    });
+  });
+  showSession();
+  // **The demo's keys and limits, folded** (the console interface design's call: "fold to one line
+  // ("keys and demo limits"), open on the first visit only"): open the first time this browser
+  // shows a demo screen, remembered under `wlx.demo-keys-seen` the guarded way, every access
+  // inside `try` -- a store that throws makes every visit a first, so the limits are never folded
+  // away from someone who may not have read them -- and folded on each visit after, one click
+  // opening it.
+  var DEMO_SEEN_KEY = "wlx.demo-keys-seen";
+  var demoFolded = false;
+  function foldDemoKeys() {
+    if (demoFolded || el("demo-pane").hidden) { return; }
+    demoFolded = true;
+    var seen = false;
+    try { seen = window.localStorage.getItem(DEMO_SEEN_KEY) === "1"; } catch (e) { seen = false; }
+    el("demo-fold").open = !seen;
+    try { window.localStorage.setItem(DEMO_SEEN_KEY, "1"); } catch (e) { /* every visit is a first */ }
   }
   function swap(id, html) {
     if (id === "params" || id === "training-params") {
@@ -5947,6 +6348,7 @@ _SCRIPT = """
     demo.steerable = Boolean(tag && tag.hasAttribute("data-steerable"));
     el("replica-pane").hidden = demo.on;
     el("demo-pane").hidden = !demo.on;
+    foldDemoKeys();
     if (!demo.steerable) { letGo(false); }
     if (!demo.on) { closeFull(); }
     else if (demo.wantFull) { demo.wantFull = false; openFull(); }
@@ -6323,6 +6725,8 @@ _SCRIPT = """
   function tell(text, tone) {
     var line = el("sent");
     line.textContent = text;
+    // The bar's one line, cut short: its whole in the title, so the bar never grows under a press.
+    line.title = text;
     line.className = "sent " + (tone || "");
     // Task 6's deferred point: the control bar's line is behind the dialog's scrim.
     if (!el("dlg-new").hidden) { el("dn-msg").textContent = text; }
@@ -6657,6 +7061,8 @@ _SCRIPT = """
     if (!e.target.closest) { return; }
     keepSection(e);
     keepMore(e);
+    var pinning = e.target.closest(inCards("[data-pin-toggle]"));
+    if (pinning) { togglePin(pinning.getAttribute("data-pin-toggle")); return; }
     var answering = e.target.closest("[data-answer]");
     if (answering && !answering.disabled) { answerWarning(answering); return; }
     var resuming = e.target.closest("[data-resume]");
@@ -6866,7 +7272,7 @@ _SCRIPT = """
   // never sees, when the ten seconds are up, when the held frame is shown (fix round 3).
   document.addEventListener("pointerdown", function (e) {
     if (e.button === 0 && e.target && e.target.closest &&
-        e.target.closest("#params, #training-params, #moments")) {
+        e.target.closest("#params, #training-params, #moments, #pinned")) {
       pressedAt = performance.now();
       setTimeout(release, PRESS_MS + 50);
     }
@@ -6899,16 +7305,15 @@ _SCRIPT = """
   // **The keys in a box's field** (the controls review's F7): Enter is Apply; Esc is Discard, and
   // a second Esc, with no draft, leaves the field; ↑ and ↓ step it, Shift ten steps; and a whole
   // setting's field takes no decimal point or comma (the console interface design's goal 6).
-  document.addEventListener("keydown", function (e) {
-    var field = e.target;
-    if (!field || !field.matches || !field.matches(inCards(".box input")) || field.closest("[data-newc]")) {
-      return;
-    }
-    var name = nameOf(field.closest(".box"));
+  // `field` is the box's own field the keys act on; `typed`, the one typed in -- the same, or its
+  // pinned copy's (`pinKeys`), which keeps the focus.
+  function fieldKeys(e, field, typed) {
+    var box = field.closest(".box");
+    var name = nameOf(box);
     if (e.key === "Enter") { e.preventDefault(); applyBox(name); }
     else if (e.key === "Escape") {
       e.preventDefault();
-      if (drafts[name]) { discard(name, field); } else { field.blur(); }
+      if (drafts[name]) { discard(name, typed === field ? field : null); } else { typed.blur(); }
     }
     else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && field.hasAttribute("data-step")) {
       e.preventDefault();
@@ -6917,9 +7322,16 @@ _SCRIPT = """
     else if (field.hasAttribute("data-whole") && (e.key === "." || e.key === ",") &&
              !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
-      noted(field.closest(".box"), WHOLE);
-      refresh(field.closest(".box"));
+      noted(box, WHOLE);
+      refresh(box);
     }
+  }
+  document.addEventListener("keydown", function (e) {
+    var field = e.target;
+    if (!field || !field.matches || !field.matches(inCards(".box input")) || field.closest("[data-newc]")) {
+      return;
+    }
+    fieldKeys(e, field, field);
   });
   // **Closing the page with drafts asks once** (the console interface design's call): the
   // browser's own question; nothing else keeps a draft past a reload.
@@ -7092,10 +7504,15 @@ def page(
     """
     p = {key: parts[key] for key in FRAGMENT_IDS}
     demo = bool(p["demo-tag"])
+    # **Who the controls act as** (the console interface rework's Task 8): what can be done about
+    # it stands in the bar -- read-only, with *sign in* where there is one -- and who is signed in,
+    # or the box's name, with the session's details behind *session* (`who_session`).
+    who_session = ""
     if can_write:
         off = ""
         attrs = ""
-        who = (
+        who = ""
+        who_session = (
             '<span class="who">name <b id="who">not given yet</b> <button class="btn small" '
             'id="rename" type="button">change</button></span>'
         )
@@ -7117,9 +7534,11 @@ def page(
         else:
             who = (
                 '<span class="who" id="mode"><span class="so">read-only · <button class="btn small '
-                'primary" id="signin" type="button">sign in with wl.works</button></span><span '
-                'class="si">controls act as <b id="member"></b> · <button class="btn small" '
-                'id="signout" type="button">not you? sign out</button></span></span>'
+                'primary" id="signin" type="button">sign in with wl.works</button></span></span>'
+            )
+            who_session = (
+                '<span class="who"><span class="si">controls act as <b id="member"></b> · <button '
+                'class="btn small" id="signout" type="button">not you? sign out</button></span></span>'
             )
     else:
         why = CONTROLS_ELSEWHERE if https_page else CONTROLS_AT_THE_BOX
@@ -7151,33 +7570,41 @@ def page(
 </head>
 <body data-stale-after="{stale_after_s:g}" data-can-write="{int(can_write)}" data-apply-all-limit="{APPLY_ALL_LIMIT}" data-can-gaze="{int(can_gaze)}" data-gaze-every-ms="{GAZE_EVERY_MS}"{attrs}>
 <div class="wrap">
-  <header class="head glass">
-    <span class="logo">{_LOGO}<span class="app">xcon</span></span>
-    <span id="demo-tag">{p['demo-tag']}</span>
-    <span id="state">{p['state']}</span>
-    <div class="id" id="head-id">{p['head-id']}</div>
-    <span class="spacer"></span>
-    <span class="presence" id="presence">{p['presence']}</span>
-    <button class="xbtn" id="close" type="button" aria-label="close this page's stream" title="close this page's stream · the session keeps running on the box"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+  <header class="topbar glass" id="bar" aria-label="the run">
+    <div class="barline">
+      <span class="logo">{_LOGO}<span class="app">xcon</span></span>
+      <span id="demo-tag">{p['demo-tag']}</span>
+      <span id="state">{p['state']}</span>
+      <span class="nums" id="bar-nums">{p['bar-nums']}</span>
+      <div class="ctlrow" id="controls">{p['controls']}</div>
+      {who}
+      <span class="sent" id="sent" role="status"></span>
+      <button class="btn small" id="session-btn" type="button" aria-controls="session" aria-expanded="false" title="{_e(SESSION_SAID)}">session ▾</button>
+      <button class="xbtn" id="close" type="button" aria-label="close this page's stream" title="close this page's stream · the session keeps running on the box"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="banner" id="stream" role="status" hidden></div>
+    <div class="inline crit" id="stop-confirm" role="alertdialog" aria-label="confirm stop" hidden><span>stop at a trial boundary, after any commands already sent?</span><button class="btn danger" id="stop-yes" type="button">stop</button><button class="btn" id="stop-no" type="button">cancel</button></div>
+    <div class="inline info" id="mark-form" role="dialog" aria-label="mark note" hidden><span>mark sent · note</span><input id="mark-note" maxlength="500" autocomplete="off" placeholder="Enter attaches it · Esc leaves the mark bare" aria-label="mark note"></div>
   </header>
-  <div class="strip glass" role="region" aria-label="animal" id="strip">{p['strip']}</div>
-  <div class="banner" id="stream" role="status" hidden></div>{off_line}
+  <section class="session" id="session" aria-label="the session">
+    <div class="head glass">
+      <div class="id" id="head-id">{p['head-id']}</div>
+      <span class="spacer"></span>
+      {who_session}
+      <span class="presence" id="presence">{p['presence']}</span>
+    </div>
+    <div class="strip glass" role="region" aria-label="animal" id="strip">{p['strip']}</div>
+    <div class="controlbar glass" aria-label="the next run">
+      <label class="tsel" for="task-sel"><span class="k">Task</span><select id="task-sel" aria-label="task"{off}>{p['task-sel']}</select></label>
+      <label class="tsel" for="plan-sel"><span class="k">Plan</span><select id="plan-sel" aria-label="plan"{off}>{p['plan-sel']}</select></label>
+      <label class="tsel" for="run-trials"><span class="k">Trials</span><input class="field mono" id="run-trials" value="{RUN_TRIALS}" inputmode="numeric" autocomplete="off" aria-label="trials"{off}></label>
+      <span id="pf-pill">{p['pf-pill']}</span>
+      <span class="spacer"></span>
+      <div class="inline" id="sched-form"><span>scheduled stop</span><select id="sched-kind" aria-label="stop when"{off}><option value="clock">at HH:MM</option><option value="trials">after N more presentations, drummed tries included</option><option value="fluid">after mL this session</option></select><input id="sched-value" autocomplete="off" aria-label="stop at"{off}><button class="btn small" id="sched-set" type="button"{off}>set</button></div>
+    </div>
+  </section>{off_line}
   <div class="banners" id="banners">{p['banners']}</div>
   <div class="inline info" id="amend-form" role="dialog" aria-label="amend the departure" hidden><span>amend the departure · the corrected time</span><input id="amend-to" autocomplete="off" placeholder="HH:MM, or 2027-01-13T22:40" aria-label="the corrected departure"{off}><span>why</span><input id="amend-why" maxlength="500" autocomplete="off" aria-label="why it is amended"{off}><span class="nm">your name is recorded with it</span><button class="btn small primary" id="amend-yes" type="button"{off}>send amendment</button><button class="btn small" id="amend-no" type="button">cancel</button></div>
-  <section class="controlbar glass" aria-label="controls">
-    <label class="tsel" for="task-sel"><span class="k">Task</span><select id="task-sel" aria-label="task"{off}>{p['task-sel']}</select></label>
-    <label class="tsel" for="plan-sel"><span class="k">Plan</span><select id="plan-sel" aria-label="plan"{off}>{p['plan-sel']}</select></label>
-    <label class="tsel" for="run-trials"><span class="k">Trials</span><input class="field mono" id="run-trials" value="{RUN_TRIALS}" inputmode="numeric" autocomplete="off" aria-label="trials"{off}></label>
-    <span id="pf-pill">{p['pf-pill']}</span>
-    <span class="sep" aria-hidden="true"></span>
-    <div class="ctlrow" id="controls">{p['controls']}</div>
-    <span class="spacer"></span>
-    {who}
-    <span class="sent" id="sent" role="status"></span>
-  </section>
-  <div class="inline crit" id="stop-confirm" role="alertdialog" aria-label="confirm stop" hidden><span>stop at a trial boundary, after any commands already sent?</span><button class="btn danger" id="stop-yes" type="button">stop</button><button class="btn" id="stop-no" type="button">cancel</button></div>
-  <div class="inline info" id="mark-form" role="dialog" aria-label="mark note" hidden><span>mark sent · note</span><input id="mark-note" maxlength="500" autocomplete="off" placeholder="Enter attaches it · Esc leaves the mark bare" aria-label="mark note"></div>
-  <div class="inline" id="sched-form"><span>scheduled stop</span><select id="sched-kind" aria-label="stop when"{off}><option value="clock">at HH:MM</option><option value="trials">after N more presentations, drummed tries included</option><option value="fluid">after mL this session</option></select><input id="sched-value" autocomplete="off" aria-label="stop at"{off}><button class="btn small" id="sched-set" type="button"{off}>set</button></div>
   <div class="shell">
     <div class="main">
       <input type="radio" name="tab" id="t-runtime" checked>
@@ -7196,6 +7623,7 @@ def page(
       </div>
       <div class="panels">
         <div class="tabpanel" id="tp-runtime">
+          <section class="panel glass pins" id="pinned-pane" aria-label="pinned settings" hidden><div class="top"><h2>Pinned</h2><span class="sub">{_e(PINNED_SAID)}</span></div><div class="cards" id="pinned"></div></section>
           <section class="panel glass"><div class="top"><h2>Trials</h2></div><div id="rt-trials">{p['rt-trials']}</div></section>
           <section class="panel glass"><div class="top"><h2>This run</h2></div><div id="rt-work">{p['rt-work']}</div></section>
           <div class="panel glass" id="rt-shaping">{p['rt-shaping']}</div>
@@ -7208,14 +7636,14 @@ def page(
             <div class="stack"><section class="panel glass"><div class="top"><h2>Changes</h2></div><div class="feed" id="rt-changes">{p['rt-changes']}</div></section></div>
           </div>
         </div>
-        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top"><h2>Task parameters</h2><span class="sub">staged until the next trial</span><input type="search" class="field" id="pfind" placeholder="find a setting" aria-label="find a setting"></div><div class="params" id="params">{p['params']}</div></section>
+        <div class="tabpanel" id="tp-task"><section class="panel glass"><div class="top tools"><input type="search" class="field find" id="pfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="sub">each box sends nothing until its Apply · staged until the next trial</span></div><div class="params" id="params">{p['params']}</div></section>
           <section class="panel glass"><div class="top"><h2>Moments of this run</h2>
             <span class="sub">a revert takes the task's settings and drawn ranges back to one</span>
             </div><div id="moments">{p['moments']}</div></section></div>
         <div class="tabpanel" id="tp-training">
           <section class="panel glass"><div class="top"><h2>Training</h2><span class="sub">on, frozen or the full task, staged until the next trial</span></div><div id="shaping">{p['shaping']}</div></section>
           <section class="panel glass train" id="rt-train" aria-label="training">{p['rt-train']}</section>
-          <section class="panel glass"><div class="top"><h2>Training settings</h2><span class="sub">staged until the next trial</span></div><div class="params" id="training-params">{p['training-params']}</div></section>
+          <section class="panel glass"><div class="top tools"><h2>Training settings</h2><input type="search" class="field find" id="tfind" placeholder="{_e(FIND_SAID)}" aria-label="{_e(FIND_SAID)}"><span class="sub">staged until the next trial</span></div><div class="params" id="training-params">{p['training-params']}</div></section>
         </div>
         <div class="tabpanel" id="tp-setup">
           <section class="panel glass" id="pf-panel"><div class="top"><h2>Pre-flight</h2><span id="pf-sum">{p['pf-sum']}</span></div><div id="preflight">{p['preflight']}</div></section>
@@ -7238,7 +7666,7 @@ def page(
           <span class="demo-dot" id="demo-dot" hidden></span>
         </div>
         <div class="demo-bar"><span id="demo-under">{p['demo-under']}</span><span class="sent" id="demo-steer" role="status"></span><span class="sub demo-esc">Esc closes the full window</span></div>
-        {steers}<div class="demo-keys" id="demo-keys">{demo_keys(())}</div>
+        {steers}<details class="demo-fold" id="demo-fold"><summary>{_e(DEMO_FOLD_SAID)}</summary><div class="demo-keys" id="demo-keys">{demo_keys(())}</div></details>
       </section>
       <section class="panel glass"><div class="top"><h2>Subject display</h2></div><div class="screen">subject display · no source yet</div></section>
       <div class="duo">

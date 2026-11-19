@@ -2309,7 +2309,7 @@ def test_a_range_typed_as_the_same_number_does_not_hold_the_cards(rig):
     page.mouse.click(2, 2)
     rig.hub.offer(decode(encode(frame(params=_range_rows(0.4)))))
 
-    rig.wait_for(lambda: "0.40" in page.inner_text("#params"))
+    rig.wait_for(lambda: "0.40" in page.text_content("#params"))
     assert "draft" not in _classes(page, "wait") and _bar(page) is None
 
 
@@ -2362,7 +2362,7 @@ def test_a_press_is_not_lost_when_a_frame_lands_between_the_mouse_down_and_up(ri
     page.mouse.down()
     offer(41, 3.0, first)
     _arrived(page, 41)
-    assert "2.00" in page.inner_text("#params")  # held under the press
+    assert "2.00" in page.text_content("#params")  # held under the press
     page.mouse.up()
     rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
 
@@ -2411,15 +2411,15 @@ def test_an_older_held_frame_never_replaces_a_newer_one_after_a_press_expires(ri
     page.mouse.down()
     _offer(rig, 41, params=_gain_rows(3.0), moments=(_moment(4, "gain 2.00 to 3.00"), first))
     _arrived(page, 41)
-    assert "2.00" in page.inner_text("#params") and "gain 2.00" not in page.inner_text("#moments")
+    assert "2.00" in page.text_content("#params") and "gain 2.00" not in page.inner_text("#moments")
     page.evaluate("window.__t += 10001")
     _offer(rig, 42, params=_gain_rows(4.0), moments=(second, first))
-    rig.wait_for(lambda: "4.00" in page.inner_text("#params"))
+    rig.wait_for(lambda: "4.00" in page.text_content("#params"))
     # The focus-out's release runs on a timer of 0 ms; this returns once a later one has run.
     page.evaluate("() => { document.dispatchEvent(new Event('focusout'));"
                   " return new Promise(function (done) { setTimeout(done, 50); }); }")
 
-    assert "4.00" in page.inner_text("#params") and "3.00" not in page.inner_text("#params")
+    assert "4.00" in page.text_content("#params") and "3.00" not in page.text_content("#params")
     assert "gain 3.00 to 4.00" in page.inner_text("#moments")
 
 
@@ -2439,17 +2439,17 @@ def test_a_press_the_page_never_sees_end_shows_the_held_frame(rig):
     page.mouse.down()
     _offer(rig, 41, params=_gain_rows(3.0))
     _arrived(page, 41)
-    assert "2.00" in page.inner_text("#params")
+    assert "2.00" in page.text_content("#params")
     page.evaluate("window.dispatchEvent(new Event('blur'))")
-    rig.wait_for(lambda: "3.00" in page.inner_text("#params"), seconds=4)
+    rig.wait_for(lambda: "3.00" in page.text_content("#params"), seconds=4)
     page.mouse.up()
 
     page.hover('[data-cmd="hand_back"][data-name="fix_hold"]')
     page.mouse.down()
     _offer(rig, 42, params=_gain_rows(4.0))
     _arrived(page, 42)
-    assert "3.00" in page.inner_text("#params")
-    rig.wait_for(lambda: "4.00" in page.inner_text("#params"), seconds=14)
+    assert "3.00" in page.text_content("#params")
+    rig.wait_for(lambda: "4.00" in page.text_content("#params"), seconds=14)
 
 
 def test_a_correction_typed_while_a_range_press_is_out_stays_to_be_sent(rig):
@@ -2532,15 +2532,15 @@ def test_a_press_a_menu_or_a_drag_takes_over_or_no_primary_press_leaves_the_card
     _offer(rig, 41, params=_gain_rows(3.0))
     _arrived(page, 41)
     if ending == "contextmenu":
-        assert "2.00" in page.inner_text("#params")  # held under the press
+        assert "2.00" in page.text_content("#params")  # held under the press
         page.evaluate("(b) => document.querySelector(b).dispatchEvent(new MouseEvent("
                       "'contextmenu', {bubbles: true, cancelable: true}))", button)
     elif ending == "dragstart":
-        assert "2.00" in page.inner_text("#params")  # held under the press
+        assert "2.00" in page.text_content("#params")  # held under the press
         page.evaluate("(b) => document.querySelector(b).dispatchEvent(new Event("
                       "'dragstart', {bubbles: true}))", button)
 
-    rig.wait_for(lambda: "3.00" in page.inner_text("#params"), seconds=4)
+    rig.wait_for(lambda: "3.00" in page.text_content("#params"), seconds=4)
     page.mouse.up(button="middle" if ending == "middle" else "left")
 
 
@@ -3637,10 +3637,10 @@ def test_a_press_on_a_training_card_is_not_lost_when_a_frame_lands_under_it(rig)
     page.mouse.down()
     _offer(rig, 41, params=_training_rows(3.0))
     _arrived(page, 41)
-    assert "2.00" in page.inner_text("#training-params")  # held under the press
+    assert "2.00" in page.text_content("#training-params")  # held under the press
     page.mouse.up()
     rig.wait_for(lambda: len(rig.dispatch.seen) == 1)
-    rig.wait_for(lambda: "3.00" in page.inner_text("#training-params"))
+    rig.wait_for(lambda: "3.00" in page.text_content("#training-params"))
 
     (sent,) = rig.dispatch.seen
     assert (type(sent), sent.name, sent.by.name) == (HandBack, "move_up_bar", "Jake Westerberg")
@@ -3833,14 +3833,11 @@ def test_an_open_more_stays_open_across_a_frame(rig):
                          ".box[data-card=\"timeout\"] > details.more').open]") == [True, False]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "waits on the console interface plan's Task 8, the one bar that stays in view: the header, "
-    "the animal strip, the control band and the scheduled stop take about 450 px above the tabs "
-    "until it lands; strict, so its landing fails here until this mark is removed"))
 def test_the_first_setting_starts_within_260px_at_1280x800(rig, tmp_path):
     """The design's "How it is judged done": "the first setting within the first 260 px at 1280 ×
     800" (the layout review's finding 4: about 500 px went before it). Measured from the top of
-    the page, unscrolled, on the Task parameters tab."""
+    the page, unscrolled, on the Task parameters tab: the one bar that stays in view (the console
+    interface rework's Task 8) put the session's details behind *session*, so the tabs follow it."""
     from wl_xcon.link import decode, encode
 
     rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
@@ -4565,7 +4562,11 @@ def test_a_box_the_find_box_hides_stays_hidden_while_its_act_is_out(rig):
     page.fill("#pfind", "fix_")
     assert not page.is_visible(_b("response_deadline")) and page.is_visible(_b("fix_hold"))
     rig.dispatch.delay = 2.0
-    page.click("#drafts-apply")
+    # Pressed and read in one turn of the page's script (the console interface rework's Task 8): a
+    # box brought up to date as its act is sent keeps its mark, whatever answers or frames follow.
+    assert page.evaluate("(() => { document.getElementById('drafts-apply').click(); return "
+                         "document.querySelector('#params .box[data-card=\"response_deadline\"]')"
+                         ".classList.contains('nofind'); })()")
     rig.wait_for(lambda: rig.dispatch.seen)
 
     assert _say(page, "response_deadline") == "sending…"
@@ -4773,3 +4774,358 @@ def test_a_percent_field_shows_80_and_sends_0_8(rig):
     page.press(field, "Enter")
     rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
     assert repr(rig.dispatch.seen[-1].value) == "0.8"
+
+
+# --- the console interface rework's Task 8: the page around the boxes ---------------------------
+#
+# One bar that stays in view, the find box on both settings tabs, what is not sent counted where a
+# person looks, pins to Runtime, the demo's keys folded, and the density that brings the page to
+# the mock-up the PI approved (`ui-review/shots/layout/mockup.html`). Through the wire, in a real
+# browser: each runs in Chromium in the suite and in WebKit (`WLX_BROWSER=webkit`), for Safari, by
+# the builder.
+
+def _rect(page, selector: str) -> dict:
+    return page.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect();"
+                         " return {top: r.top, bottom: r.bottom, left: r.left, right: r.right,"
+                         " height: r.height}; }", selector)
+
+
+def test_the_top_bar_stays_in_view_while_settings_scroll(rig, tmp_path):
+    """The design's call: "the top of the page becomes one bar that stays in view: state, trial,
+    correct, fluid, cage time and the run's buttons; the session's details behind a *session*
+    button" (the layout review's finding 4: *stop run*, *give reward* and the trial count scrolled
+    away). At 1280 × 800 on the Task parameters tab, scrolled to its foot, the bar is still at the
+    top of the window with the trial, the right answers, the fluid and the cage time, and the run's
+    buttons in it; *stop run* there opens its confirm in view and sends nothing; the session's
+    details are behind *session* on the settings tabs and shown on Runtime."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path, trial_index=9))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    assert page.is_visible("#head-id") and page.get_attribute("#session-btn", "aria-expanded") == "true"
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params .box", state="visible")
+    assert not page.is_visible("#head-id"), "the session's details are behind *session* here"
+    assert page.get_attribute("#session-btn", "aria-expanded") == "false"
+
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    assert page.evaluate("window.scrollY") > LAPTOP_H / 2, "the settings scroll"
+    bar = _rect(page, "#bar")
+    assert abs(bar["top"]) < 1 and bar["bottom"] < 100, bar
+    said = " ".join(page.text_content("#bar-nums").split())
+    for word in ("trial 9", "correct", "fluid today", "cage"):
+        assert word in said, (word, said)
+    for cmd in ("pause", "mark", "reward", "stop"):
+        button = _rect(page, f'#bar [data-cmd="{cmd}"]')
+        assert bar["top"] <= button["top"] and button["bottom"] <= bar["bottom"], cmd
+    last = page.evaluate("Array.from(document.querySelectorAll('#params .box')).pop()"
+                         ".getBoundingClientRect().bottom")
+    assert last <= LAPTOP_H + 1, "the last box is scrolled up under the bar"
+
+    page.click('#bar [data-cmd="stop"]')
+    confirm = _rect(page, "#stop-confirm")
+    assert page.is_visible("#stop-confirm") and 0 <= confirm["top"] and confirm["bottom"] <= LAPTOP_H
+    page.click("#stop-no")
+    page.click("#session-btn")
+    assert page.is_visible("#head-id") and page.is_visible("#task-sel")
+    assert page.get_attribute("#session-btn", "aria-expanded") == "true"
+    page.click("#session-btn")
+    assert not page.is_visible("#head-id")
+    page.click('label[for="t-runtime"]')
+    assert page.is_visible("#head-id"), "shown on Runtime"
+    assert rig.dispatch.seen == []
+
+
+def _found(page, root: str = "#params") -> list:
+    return page.eval_on_selector_all(
+        f"{root} .box:not(.nofind)", "boxes => boxes.filter((b) => b.offsetParent !== null)"
+        ".map((b) => b.getAttribute('data-card'))")
+
+
+def test_find_matches_a_plain_name_a_code_name_and_a_section(rig):
+    """The design's goal 5 ("the find box matches both, and section names") and the ledger's find
+    ruling for Task 8: on both settings tabs, the find box finds a box by its plain name, its code
+    name, or the name of a section it stands in -- a parent's finding its subsections' boxes -- and
+    a group's box by its title and by each of its settings' plain and code names; each tab's box
+    finds on its own tab alone; cleared, every box is shown again."""
+    from wl_xcon.link import ParamRow
+
+    rows = _group_rows() + (
+        ParamRow.of("fix_window", "deg", 0.0, 9.0, 2.0, False, label="Fixation window",
+                    section="Gaze windows"),
+        ParamRow.of("fix_size", "deg", 0.0, 9.0, 0.5, False, section="Stimuli/fixation point"),
+        ParamRow.of("move_back_bar", "fraction", 0.0, 1.0, 0.5, False, label="Bar to move back",
+                    section="Training"),
+        ParamRow.of("crowd_step", "objects", 1.0, 10.0, 1.0, False, whole=True, step=1.0,
+                    section="Training/staircases"),
+    )
+    rows = tuple(dataclasses.replace(row, label="Fixation hold") if row.name == "fix_hold" else row
+                 for row in rows)
+    page = _task6_page(rig, params=rows, groups=_move_up())
+    every = _found(page)
+    assert {"fix_hold", "Move up", "fix_window", "fix_size", "set_size"} <= set(every)
+
+    for typed, found in (("fixation hold", ["fix_hold"]), ("FIX_WIN", ["fix_window"]),
+                         ("stimuli", ["set_size", "fix_size"]),
+                         ("fixation point", ["fix_size"]), ("gaze", ["fix_window"]),
+                         ("move up", ["Move up"]), ("answers judged", ["Move up"]),
+                         ("move_up_window", ["Move up"]), ("rules", ["Move up"])):
+        page.fill("#pfind", typed)
+        assert _found(page) == found, typed
+    page.click('label[for="t-training"]')
+    assert set(_found(page, "#training-params")) == {"move_back_bar", "crowd_step"}, (
+        "the Task parameters tab's find box finds there alone")
+    for typed, found in (("bar to move back", ["move_back_bar"]), ("crowd_st", ["crowd_step"]),
+                         ("staircases", ["crowd_step"]),
+                         ("training", ["move_back_bar", "crowd_step"])):
+        page.fill("#tfind", typed)
+        assert _found(page, "#training-params") == found, typed
+    page.fill("#tfind", "")
+    page.click('label[for="t-task"]')
+    page.fill("#pfind", "")
+    assert _found(page) == every
+
+
+def test_a_section_and_its_tab_count_the_edits_not_sent(rig):
+    """The console interface rework's Task 8: each section's header counts what in it is not sent
+    after the rig's counts ("Timing · 2 settings · 0 changed · 1 not sent"), a group's settings
+    each once and a parent taking in its subsections, and each settings tab's label says how many
+    while any exists; a frame keeps them, and Discard all clears them, leaving the rig's counts
+    as they were."""
+    from wl_xcon.link import ParamRow
+
+    rows = _group_rows() + (
+        ParamRow.of("crowd_step", "objects", 1.0, 10.0, 1.0, False, whole=True, step=1.0,
+                    section="Training/staircases"),)
+    page = _task6_page(rig, params=rows, groups=_move_up())
+
+    def header(name, root="#params"):
+        return " ".join(page.text_content(
+            f'{root} details.sec[data-sec="{name}"] > summary').split())
+
+    def tab(which):
+        return " ".join(page.text_content(f'label[for="{which}"]').split())
+
+    assert (header("Timing"), tab("t-task")) == ("Timing · 2 settings · 0 changed", "Task parameters")
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    assert header("Timing") == "Timing · 2 settings · 0 changed · 1 not sent"
+    assert tab("t-task") == "Task parameters · 1 not sent"
+    page.fill(f'{_b("response_deadline")} input[data-param="response_deadline"]', "0.8")
+    page.fill(f'{_b("Move up")} input[data-param="move_up_bar"]', "90")
+    page.fill(f'{_b("Move up")} input[data-param="move_up_window"]', "51")
+    assert header("Timing") == "Timing · 2 settings · 0 changed · 2 not sent"
+    assert header("Rules") == "Rules · 2 settings · 0 changed · 2 not sent"
+    assert header("Stimuli") == "Stimuli · 1 setting · 0 changed"
+    assert tab("t-task") == "Task parameters · 4 not sent"
+    page.click('label[for="t-training"]')
+    page.fill(f'{_b("crowd_step", "#training-params")} input[data-param="crowd_step"]', "2")
+    assert header("Training", "#training-params") == "Training · 1 setting · 0 changed · 1 not sent"
+    assert header("Training/staircases", "#training-params") == (
+        "staircases · 1 setting · 0 changed · 1 not sent")
+    assert tab("t-training") == "Training · 1 not sent"
+    _offer(rig, 41, params=rows, groups=_move_up())
+    _arrived(page, 41)
+    page.click('label[for="t-task"]')
+    assert header("Timing") == "Timing · 2 settings · 0 changed · 2 not sent"
+    page.click(f'{_b("fix_hold")} [data-discard]')
+    assert header("Timing") == "Timing · 2 settings · 0 changed · 1 not sent"
+
+    page.click("#drafts-discard")
+    assert (header("Timing"), header("Rules"), tab("t-task"), tab("t-training")) == (
+        "Timing · 2 settings · 0 changed", "Rules · 2 settings · 0 changed", "Task parameters",
+        "Training")
+    assert rig.dispatch.seen == []
+
+
+def test_a_box_keeps_its_height_as_its_status_changes(rig):
+    """The design's anti-goal ("a box whose height jumps as its status changes, moving Apply under
+    the pointer") under the ledger's density ruling for Task 8: the head says the value in force
+    only while it differs from the field, and a plain name wraps rather than being cut, so a box
+    must keep its height and its field's place as it goes from rest to *not sent* (its head now
+    saying the value in force), *sending…*, *waiting* (the head saying what waits, *withdraw*
+    offered) and *refused*. At 1280 × 800, a box with the longest plain name and one without."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Refused, Staged
+
+    jake = Box("Jake Westerberg")
+    rows = _task6_rows(fix_hold={"label": "Fixation hold, before the array is shown"})
+    _offer(rig, 40, params=rows)
+    page = rig.browser_page()
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.wait_for_selector(_b("fix_hold"), state="visible")
+    rig.dispatch.delay = 0.5  # housekeeping: long enough to measure *sending…*
+
+    def measured():
+        return [(round(_rect(page, _b(name))["height"], 1),
+                 round(_rect(page, f'{_b(name)} input[data-param="{name}"]')["top"], 1))
+                for name in ("fix_hold", "response_deadline")]
+
+    rest = measured()
+    for name, value in (("fix_hold", "0.5"), ("response_deadline", "0.8")):
+        page.fill(f'{_b(name)} input[data-param="{name}"]', value)
+    assert _say(page, "fix_hold") == "not sent" and _head(page, "fix_hold") == "0.30 s"
+    assert page.is_visible(f'{_b("fix_hold")} > .head .now')
+    assert measured() == rest, "not sent"
+    page.click(f'{_b("fix_hold")} [data-apply]')
+    page.click(f'{_b("response_deadline")} [data-apply]')
+    _says(rig, page, "fix_hold", "sending…")
+    assert measured() == rest, "sending"
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    first, second = (sent.cid for sent in rig.dispatch.seen)
+    _offer(rig, 41, params=rows,
+           staged=(Staged("fix_hold", 0.3, 0.5, jake, False, cid=first),
+                   Staged("response_deadline", 0.6, 0.8, jake, False, cid=second)))
+    _says(rig, page, "fix_hold", "waiting for the next trial · you")
+    assert _head(page, "fix_hold") == "0.30 s → 0.50"
+    assert measured() == rest, "waiting"
+    applied = _task6_rows(0.5, 0.8, fix_hold={"label": "Fixation hold, before the array is shown"})
+    _offer(rig, 42, params=applied, refusals=(
+        Refused("fix_hold", jake, _LONG_WHY, cid="box-9", value=30.0),
+        Refused("response_deadline", jake, _LONG_WHY, cid="box-8", value=3.0)))
+    _says(rig, page, "fix_hold", "refused", start=True)
+    assert measured() == rest, "refused"
+
+
+#: **`localStorage` blocked**, as a private window or blocked site data leave it: reading the store
+#: itself throws. `sessionStorage`, which holds the sign-in, is left alone.
+_NO_LOCAL_STORE = ("Object.defineProperty(window, 'localStorage', { configurable: true,"
+                   " get() { throw new Error('storage is blocked'); } });")
+
+
+def _pinned(name: str) -> str:
+    return f'#pinned > .box[data-pin="{name}"]'
+
+
+def test_a_pinned_box_works_on_runtime_and_survives_a_reload(rig):
+    """The design's goal 9 (the PI, 2026-11-19: "Yes, you choose only"): nothing is pinned until a
+    person pins it; a box's *pin to Runtime*, in its *more*, puts a copy of it in Runtime's Pinned
+    strip that works as the box does -- typing, −/+, Esc, Apply, *withdraw* -- and shares the
+    box's one draft (the ledger's pin ruling: "one draft per setting, never two diverging
+    copies"), a setting keeping one box by its name; the pin is kept per task across a reload, and
+    *unpin* takes it away."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import SetParameter, Staged, Withdraw
+
+    jake = Box("Jake Westerberg")
+    page = _task6_page(rig)
+    page.click('label[for="t-runtime"]')
+    assert not page.is_visible("#pinned-pane") and page.locator("#pinned .box").count() == 0
+    page.click('label[for="t-task"]')
+    assert page.text_content(f'{_b("fix_hold")} [data-pin-toggle]') == "pin to Runtime"
+    page.click(f'{_b("fix_hold")} > details.more > summary')
+    page.click(f'{_b("fix_hold")} [data-pin-toggle]')
+    assert page.text_content(f'{_b("fix_hold")} [data-pin-toggle]') == "unpin from Runtime"
+    page.click(f'{_b("fix_hold")} > details.more > summary')
+
+    page.fill("#pfind", "set_size")
+    page.click('label[for="t-runtime"]')
+    copy = _pinned("fix_hold")
+    field = f'{copy} input[data-param="fix_hold"]'
+    assert page.is_visible(copy) and page.locator("#pinned .box").count() == 1, (
+        "a copy is shown whatever its tab's find box hides")
+    assert page.locator('[data-card="fix_hold"]').count() == 1, "one box by the setting's name"
+    page.fill(field, "0.5")
+    assert page.text_content(f"{copy} > .status > .say").strip() == "not sent"
+    assert _bar(page) == "1 edit not sent: fix_hold"
+    page.click('label[for="t-task"]')
+    page.fill("#pfind", "")
+    original = f'{_b("fix_hold")} input[data-param="fix_hold"]'
+    assert page.input_value(original) == "0.5" and _say(page, "fix_hold") == "not sent"
+    page.fill(original, "0.55")
+    page.click('label[for="t-runtime"]')
+    assert page.input_value(field) == "0.55", "the copy follows its box's draft"
+    page.press(field, "Escape")
+    assert page.input_value(field) == "0.30"
+    assert page.text_content(f"{copy} > .status > .say").strip() == "0.10 to 1.00"
+    assert _bar(page) is None
+    page.click(f'{copy} [data-dir="1"]')
+    assert page.input_value(field) == "0.35"
+    page.click(f"{copy} [data-apply]")
+    rig.wait_for(lambda: rig.dispatch.seen)
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.value) == (SetParameter, "fix_hold", 0.35)
+    _offer(rig, 41, params=_task6_rows(), staged=(Staged("fix_hold", 0.3, 0.35, jake, False,
+                                                         cid=sent.cid),))
+    _arrived(page, 41)
+    rig.wait_for(lambda: page.text_content(f"{copy} > .status > .say").strip() ==
+                 "waiting for the next trial · you")
+    page.click(f'{copy} [data-withdraw="{sent.cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, sent.cid)
+
+    _offer(rig, 42, params=_task6_rows())
+    page.reload()
+    page.wait_for_selector(SIGNED_IN, timeout=WAIT_S * 1000)
+    page.wait_for_selector(copy, state="visible")
+    assert page.input_value(field) == "0.30"
+    page.click(f"{copy} > details.more > summary")
+    page.click(f"{copy} [data-pin-toggle]")
+    assert not page.is_visible("#pinned-pane") and page.locator("#pinned .box").count() == 0
+    page.reload()
+    page.wait_for_selector("#params .box", state="attached")
+    assert page.locator("#pinned .box").count() == 0
+
+
+def test_a_pin_with_its_store_blocked_lasts_the_page_and_nothing_breaks(rig):
+    """The design's goal 9 with `localStorage` failing (a private window, blocked site data):
+    every access is inside `try`, so a pin still works for as long as the page is shown, nothing
+    is raised into the page, and after a reload nothing is pinned."""
+    page = _task6_page(rig)
+    page.add_init_script(_NO_LOCAL_STORE)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.reload()
+    page.wait_for_selector(SIGNED_IN, timeout=WAIT_S * 1000)
+    page.click('label[for="t-task"]')
+    page.click(f'{_b("set_size")} > details.more > summary')
+    page.click(f'{_b("set_size")} [data-pin-toggle]')
+    page.click('label[for="t-runtime"]')
+    page.click(f'{_pinned("set_size")} [data-dir="1"]')
+    assert page.input_value(f'{_pinned("set_size")} input[data-param="set_size"]') == "5"
+    assert _bar(page) == "1 edit not sent: set_size"
+    page.click("#drafts-discard")
+    page.reload()
+    page.wait_for_selector("#params .box", state="attached")
+    assert page.locator("#pinned .box").count() == 0 and not page.is_visible("#pinned-pane")
+    assert errors == [], errors
+
+
+def test_the_demo_keys_fold_after_the_first_visit(rig):
+    """The design's call: "the demo's key list and caveats fold to one line ("keys and demo
+    limits"), open on the first visit only" (the layout review's finding 4: 1,326 px on every
+    tab). Pages that showed no demo -- two loads of one -- do not use up the first visit; the first demo
+    screen this browser shows has them open, a reload has them folded to their one line, and a
+    click opens them. With the store blocked every visit is a first: open."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(frame())))
+    page = rig.browser_page()
+    for _ in range(2):
+        page.wait_for_selector("#head-id [data-trial]", state="attached")
+        assert not page.is_visible("#demo-pane")
+        page.reload()
+    rig.hub.offer(decode(encode(frame(demo=True, trial_index=41))))
+    page.wait_for_selector("#demo-pane", state="visible")
+    assert page.text_content("#demo-fold > summary") == "keys and demo limits"
+    assert page.evaluate("document.getElementById('demo-fold').open") is True
+    assert page.is_visible("#demo-keys .demo-limits")
+
+    page.reload()
+    page.wait_for_selector("#demo-pane", state="visible")
+    assert page.evaluate("document.getElementById('demo-fold').open") is False
+    assert not page.is_visible("#demo-keys .demo-limits")
+    fold = _rect(page, "#demo-fold")
+    assert fold["height"] < 2 * 20, "one line"
+    page.click("#demo-fold > summary")
+    assert page.is_visible("#demo-keys .demo-limits")
+
+    blocked = rig.browser_page()
+    blocked.add_init_script(_NO_LOCAL_STORE)
+    for _ in range(2):
+        blocked.reload()
+        blocked.wait_for_selector("#demo-pane", state="visible")
+        assert blocked.evaluate("document.getElementById('demo-fold').open") is True
