@@ -96,6 +96,7 @@ from wl_xcon.task import (
     Scaled,
     SequenceBalanced,
     SIZED_LOOKS,
+    SPECIAL_UNIT,
     Show,
     Shuffled,
     Staircase,
@@ -259,6 +260,7 @@ def check_task(
         + _unmade_steps(task)
         + _pool_faults(task)
         + _full_task_faults(task)
+        + _special_faults(task)
         + _impossible_faults(task)
         + _found_by_faults(task)
         + _condition_spellings(task)
@@ -2477,6 +2479,88 @@ def _full_task_faults(task: Task) -> list[Finding]:
             elif pool is not None and name == pool.setting:
                 said += [f"{where}: {sentence}" for _, sentence in unpooled(task, {name: value})]
     return [Finding("bad-full-task", sentence) for sentence in said]
+
+
+#: **A special kind the task cannot play** (`task.Special`; the pop-out revision design's §4),
+#: refused at load: its structure is not one of the task's, or is its default; its share names no
+#: setting the task declares, or one that is not a percentage of trials (`SPECIAL_UNIT`, 0 to 100).
+BAD_SPECIAL = "bad-special"
+
+#: **The special kinds' percentages adding past 100 at the task's starts** (the design's §4: "More
+#: is a load warning naming the sum"), accepted in every kind: each kind is then drawn in
+#: proportion to its percentage and no trial is normal (`taskd.Session._special`; the controller's
+#: call). Judged at the values set by the run's pre-flight (`LAYOUT`, the plan's Task 4).
+SPECIALS_OVER_100 = "specials-over-100"
+
+
+def _range_said(param: Param) -> str:
+    """A setting's unit and limits, as a `bad-special` sentence says them: "in s from 0 to 10"."""
+    low, high = _real_bound(param.low), _real_bound(param.high)
+    if low is not None and high is not None:
+        limits = f"from {low:g} to {high:g}"
+    elif low is not None:
+        limits = f"from {low:g}, with no highest"
+    elif high is not None:
+        limits = f"up to {high:g}, with no lowest"
+    else:
+        limits = "with no limits"
+    return f"in {param.unit} {limits}"
+
+
+def _real_bound(bound: object) -> float | None:
+    """A declared bound as a number, or `None` for none or one that is no real number."""
+    if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(bound):
+        return None
+    return bound
+
+
+def special_share(value: object) -> float:
+    """**A special kind's percentage as its draw reads it** (`taskd.Session._special`; the
+    `specials-over-100` warning): a finite number above 0 as it is, anything else -- no number, a
+    `bool`, below 0 -- 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return 0.0
+    return max(float(value), 0.0)
+
+
+def _special_faults(task: Task) -> list[Finding]:
+    """`BAD_SPECIAL` for each special kind the task cannot play (blocking), and
+    `SPECIALS_OVER_100` where their shares at the task's starts add past 100 (a warning in every
+    kind), naming the sum and each share. A special's own shape is refused as it is built
+    (`task.Special`, `Task.specials`)."""
+    declared = {param.name: param for param in task.params}
+    findings: list[Finding] = []
+    for special in task.specials:
+        named = f"special kind {special.kind!r}"
+        if special.structure not in task.structures:
+            findings.append(Finding(BAD_SPECIAL, (
+                f"{named} plays structure {special.structure!r}, which the task does not have")))
+        elif special.structure == task.default:
+            findings.append(Finding(BAD_SPECIAL, (
+                f"{named} plays structure {special.structure!r}, the task's default: a special "
+                f"trial plays a structure of its own, in place of the default")))
+        name = special.share.name
+        param = declared.get(name)
+        if param is None:
+            findings.append(Finding(BAD_SPECIAL, (
+                f"{named} takes its percentage from {name!r}, which the task does not declare")))
+        elif not (param.unit == SPECIAL_UNIT and _real_bound(param.low) == 0
+                  and _real_bound(param.high) == 100):
+            findings.append(Finding(BAD_SPECIAL, (
+                f"{named} takes its percentage from {name!r}, which is {_range_said(param)}: a "
+                f"percentage of trials is a setting in {SPECIAL_UNIT} from 0 to 100")))
+    shares = [(special, special_share(getattr(declared.get(special.share.name), "start", None)))
+              for special in task.specials]
+    total = sum(share for _, share in shares)
+    if total > 100:
+        each = ", ".join(f"{special.kind} {share:g} from {special.share.name!r}"
+                         for special, share in shares)
+        findings.append(Finding(SPECIALS_OVER_100, (
+            f"the special trials' percentages add to {total:g} at the task's starts ({each}), "
+            f"past 100: each kind is then drawn in proportion to its percentage, and no trial is "
+            f"normal"), blocking=False, accepted_in=SESSION_KINDS,
+            subjects=tuple(f"setting {special.share.name!r}" for special, _ in shares)))
+    return findings
 
 
 def unpooled(task: Task, values: dict) -> "list[tuple[str, str]]":

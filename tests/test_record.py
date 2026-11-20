@@ -225,6 +225,23 @@ def test_a_trial_line_says_where_each_stimulus_was_and_each_eyes_own_where_it_ha
             _is_at(drawn, ox, oy)
 
 
+def test_a_line_always_says_its_trial_kind_and_whether_it_stepped(tmp_path):
+    """The pop-out revision's Task 3, as wl-preproc accepted it on 2026-11-19 (XC-543, renaming
+    `kind` to `trial_kind`): every line carries both keys, so its shape does not move -- the kind
+    and the step as given, and null for each where a writer gives none, as a census does, which
+    runs no task's special trials and no staircase."""
+    record = SessionRecord.open(tmp_path, session_id="2027-01-14_01", subject="A")
+    for index, given in enumerate(({}, {"trial_kind": "normal", "stepped": True},
+                                   {"trial_kind": "target_absent", "stepped": False})):
+        record.trial(index=index, outcome="correct", params={}, run=0,
+                     position=Position.lone(index), fluid_ml=0.0, last_reward_at=None, placed=(),
+                     **given)
+    lines = [json.loads(line)
+             for line in (record.directory / "trials.jsonl").read_text().splitlines()]
+    assert [(line["trial_kind"], line["stepped"]) for line in lines] == [
+        (None, None), ("normal", True), ("target_absent", False)]
+
+
 def test_a_stimulus_with_a_disparity_is_recorded_at_its_cyclopean_position(tmp_path):
     """XC-399 (the review's M2): a disparity shifts each eye's image by -d/2 and +d/2 about the
     stimulus's position (engine spec §5.4); the record writes that position, the eyes' midpoint,

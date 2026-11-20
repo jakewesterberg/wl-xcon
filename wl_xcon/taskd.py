@@ -52,7 +52,7 @@ from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
     IMPOSSIBLE, PAST_LIMIT, _among, _outside, _staircase_levels, _whole_numbers,
     beyond_range, check_task, impossible, laid_out, margin_reaches, start_at, undrawable, unplaced,
-    unpooled, unshowable, unstarted,
+    special_share, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -96,7 +96,7 @@ from wl_xcon.simulate import Census, Subject, Tally, agent
 from wl_xcon.run import LONGEST_TRIAL_S, run_trial
 from wl_xcon.task import (
     COUNTED, OWED, SPENT, UNPAID, ByCriterion, Entered, Exited, ObjectWindows, Outcome, P, Param,
-    Plan, SaccadeTo, Scaled, Show, Staircase,
+    NORMAL, Plan, SaccadeTo, Scaled, Show, Special, Staircase,
     Task, Trial, actions_of, at_hardest, color_choices, limit_reason, position_of, set_light,
     size_at, size_settings, sized_places, staircase_verdict, section_of, step_of, CEILINGS,
     OTHER, OTHER_STEP, UNIT_STEPS,
@@ -912,15 +912,16 @@ class _Climb:
         """The value it gives its setting: the level it is at."""
         return self.staircase.levels[self.level]
 
-    def step(self, outcome: Outcome | None, shown: bool) -> None:
+    def step(self, outcome: Outcome | None, shown: bool) -> bool:
         """**One trial, by how it ended** (`task.staircase_verdict`; TSK-33): a success counts
         toward a step harder and ends a run of failures, a failure counts toward a step easier and
         ends a run of successes, and anything else moves nothing, neither counting nor ending a
         run. **Never past either end**: a step due there leaves the level where it is, and the
-        count starts again."""
+        count starts again. **Returns whether the trial counted on it**, a success or a failure:
+        its line's `stepped` (the pop-out revision's Task 3; XC-543)."""
         verdict = staircase_verdict(outcome, shown)
         if verdict is None:
-            return
+            return False
         if verdict:
             self.right, self.wrong = self.right + 1, 0
             if self.right >= self.staircase.down:
@@ -929,6 +930,7 @@ class _Climb:
             self.right, self.wrong = 0, self.wrong + 1
             if self.wrong >= self.staircase.up:
                 self.level, self.wrong = max(self.level - 1, 0), 0
+        return True
 
     def resume(self, held: object) -> None:
         """**A hand-back** (TSK-32: "a live value on its parameter holds it"; the pop-out search
@@ -1203,17 +1205,21 @@ def went_on(task: Task, last) -> _WentOn | None:
             if seen is not None and now != seen:
                 changed_pool()
             seen = value = now
-        stepped = (climb is not None
-                   and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE)
-        if stepped:
+        giving = (climb is not None
+                  and (row.get("drawn") or {}).get(climb.staircase.setting) == STAIRCASE)
+        if giving:
             level = climb.staircase.nearest(params.get(climb.staircase.setting))
             if level is not None and level != climb.level:
                 climb.level, climb.right, climb.wrong = level, 0, 0
-        # As the run judged it (`_at_hardest`): a line whose setting a person held, by its value.
-        hardest = _at_hardest(climb, None if stepped or climb is None else params)
+        # As the run judged it (`_at_hardest`): a line whose setting a person held, by its value; a
+        # special trial's, by its staircase's level, as any trial it gave.
+        hardest = _at_hardest(climb, None if giving or climb is None else params)
         outcome = None if row["outcome"] == "hang" else Outcome(row["outcome"])
         shown = bool(row.get("shown"))
-        if stepped:
+        # **Only a normal trial steps it** (the PI, 2026-11-16, "Only normal trials move it"): a
+        # line whose `trial_kind` names a special kind stepped nothing; one written before special
+        # trials (no `trial_kind`), or of a task declaring none (null), is normal.
+        if giving and row.get("trial_kind") in (None, NORMAL):
             climb.step(outcome, shown)
         # With the values the line ran at, so its boundary is judged as the run judged it
         # (`_carried`; the re-review 2, M-1: a person's margin, say, not carried to the next run).
@@ -6541,6 +6547,10 @@ class Session:
     _widening: _Suggested | None = field(init=False, default=None, repr=False)
     _pool_was: object = field(init=False, default=None, repr=False)
     _paired: dict[int, tuple] = field(init=False, default_factory=dict, repr=False)
+    #: **Each trial's special kind**, by its number, `None` for a normal trial (`_special`; the
+    #: pop-out revision's Task 3), kept while a repeat of it waits and pruned with `_paired`; empty
+    #: as each run starts.
+    _specials: dict[int, "Special | None"] = field(init=False, default_factory=dict, repr=False)
     #: **A resumed session's last run, as its record left it** (`resume.LastRun`; the pop-out
     #: search build's Task 6), which its first run may go on from (`_going_on`), `None` once that
     #: run has started and for a session never resumed.
@@ -6765,6 +6775,41 @@ class Session:
             share = variation.unit(self._run.seed, draw.number, pool.setting, 0)
             kept = pooled[min(int(share * len(pooled)), len(pooled) - 1)]
         self._paired[draw.number] = kept
+        return kept
+
+    def _special(self, task: Task, draw: Draw) -> "Special | None":
+        """**One trial's special kind, or `None` for a normal trial** (`task.Special`; the pop-out
+        revision design's §4; its plan's Task 3), between trials, never in a frame, beside
+        `_pairing`: **on a repeat, the kind of the trial it repeats** (a drum's try, a trial owed
+        or again at once: the controller's call, "a repeat of a special trial is the same kind"),
+        kept while a repeat of it waits (`_specials`), whatever the shares are now; otherwise **a
+        place drawn from the run's seed, the trial's number and `"special trial"`**
+        (`variation.unit`), apart from the scheduler's generators and every draw's, against the
+        kinds' shares in the run's values (`spec.values`), cumulated in their declared order and
+        divided by 100 -- **or by their sum, where it is past 100**, each kind then drawn in
+        proportion to its percentage and none normal (the controller's call; `specials-over-100`
+        at load) -- a share that is no number counting 0 (`check.special_share`). **Only a trial
+        of the task's default structure can be special** (the controller's call): one whose
+        condition names another structure plays it as named, normal. `None` for a task declaring
+        no special kind."""
+        if not task.specials:
+            return None
+        if draw.repeat_of is not None and draw.repeat_of in self._specials:
+            kept = self._specials[draw.repeat_of]
+        elif draw.condition.structure not in (None, task.default):
+            kept = None
+        else:
+            shares = [special_share(self.spec.values.get(special.share.name))
+                      for special in task.specials]
+            whole = max(100.0, sum(shares))
+            place = variation.unit(self._run.seed, draw.number, "special trial", 0)
+            kept, reached = None, 0.0
+            for special, share in zip(task.specials, shares):
+                reached += share / whole
+                if place < reached:
+                    kept = special
+                    break
+        self._specials[draw.number] = kept
         return kept
 
     def _unwritable(self, task: Task, run: RunSpec, values: dict) -> str | None:
@@ -7597,6 +7642,8 @@ class Session:
         self._shaped, self._rejoin, self._stage_spent = "on", None, 0.0
         # Nor offered to widen its pool, which it has not looked at yet, nor paired a trial.
         self._widening, self._pool_was, self._paired = None, None, {}
+        # Nor drawn a trial's special kind.
+        self._specials = {}
         # Each color set's luminances realized and written in this run (`_realize`).
         self._lights, self._realized_at = color_set_lights(task), set()
         self._reaching = frozenset()
@@ -7694,6 +7741,14 @@ class Session:
             # **Each color set it declares, defined once** (the pop-out search build's final
             # fixes; told to wl-preproc first): every line names a color-set light's set by name.
             color_sets=self._color_sets_at_start(task),
+            # **Each special kind it declares** (the pop-out revision's Task 3; wl-preproc accepted
+            # it, 2026-11-19, XC-543): the setting its percentage is read from and the structure it
+            # plays, by kind; null for a task declaring none. Each trial's percentages are in its
+            # `params`. The row's keys are written sorted, so the declared order the draw
+            # cumulates in (`_special`) is the task's, which `versions` names by its content.
+            specials=(None if not task.specials else {
+                special.kind: {"share": special.share.name, "structure": special.structure}
+                for special in task.specials}),
             # **Which settings are directions** (the plan's science review, M-4): each is an
             # angle written from 0 to 360, so a reader takes circular statistics of it -- a draw
             # from -45 to 45 sits near 0 and near 360, and a plain mean of it reads 180.
@@ -7976,8 +8031,12 @@ class Session:
                 drawn = scheduler.drawn
                 # **The structure its condition names**, or the task's default (engine spec §13.3;
                 # the PI, 2026-10-07: "each condition names its own; interleaving them in a block
-                # is ordinary"); `check_task` refuses a condition naming one the task lacks.
-                structure = condition.structure or task.default
+                # is ordinary"); `check_task` refuses a condition naming one the task lacks. **A
+                # special trial plays its kind's** (`_special`; the pop-out revision's Task 3),
+                # drawn here, between trials, for a trial of the default structure.
+                special = self._special(task, drawn)
+                structure = (special.structure if special is not None
+                             else condition.structure or task.default)
                 trial = task.structures[structure]
                 # **What it draws**, here between trials (engine build C3's spec §2; its call 10):
                 # each setting its block's draws or its condition's own range give, but one a
@@ -7993,14 +8052,14 @@ class Session:
                 full = self._played.full if scheduler.full else None
                 if full is None:
                     climb = self._climbing()
-                    stepping = (climb is not None and climb.staircase.setting not in self._edited
-                                and climb.staircase.setting not in self._forms)
+                    giving = (climb is not None and climb.staircase.setting not in self._edited
+                              and climb.staircase.setting not in self._forms)
                 else:
                     # **The full task** (`task.FullTask`; the console settings design's §8): its
                     # values where a condition's own would sit, under a person's value and draw,
                     # and its block's staircase held at its hardest level, each named `FULL` on
                     # the line; no staircase runs, so none steps.
-                    climb, stepping = None, False
+                    climb, giving = None, False
                     for name, value in full.values.items():
                         if name not in self._edited and name not in self._forms:
                             taken[name], sources[name] = value, FULL
@@ -8010,9 +8069,13 @@ class Session:
                             and staircase.setting not in full.values):
                         taken[staircase.setting] = self._hardest(staircase)
                         sources[staircase.setting] = FULL
-                if stepping:
+                if giving:
                     taken[climb.staircase.setting] = climb.value
                     sources[climb.staircase.setting] = STAIRCASE
+                # **The staircase gives a special trial its value and steps only on a normal
+                # one** (the PI, 2026-11-16, "Only normal trials move it"; the design's §4): the
+                # staircase keeps tracking search itself [@levitt1971transformed].
+                stepping = giving and special is None
                 # **Its pairing** (`task.Pool`; the pop-out search build's Task 5; the PI, "A pool
                 # of four"), here between trials: one of the pairings the pool holds now, each as
                 # likely, a repeat the pairing of the trial it repeats, into the odd one's look
@@ -8055,7 +8118,9 @@ class Session:
                 # counts, whoever set it there"; `_at_hardest`); a block with none always is. A
                 # confirmed progression's bar to move up counts only such answers
                 # (`Scheduler.suggestion`).
-                hardest = _at_hardest(climb, None if stepping else values)
+                # A special trial at the staircase's last level counts toward moving up, as any
+                # trial there does (the design's §4, "like any other trial"; the controller's call).
+                hardest = _at_hardest(climb, None if giving else values)
                 # **Its color sets at the luminances it draws them at**, realized here, between
                 # trials; a luminance new to the run is written on its line (`_realize`).
                 realized_now = self._realize(values) if self._lights else None
@@ -8156,11 +8221,15 @@ class Session:
                 written = len(scheduler.shortfalls)
                 counted = scheduler.record(condition.name, result.outcome, shown=shown,
                                            eased=bool(eased), hardest=hardest)
+                # **Whether it counted on its block's staircase**, its line's `stepped` (XC-543):
+                # `None` where no staircase runs.
+                stepped = None if climb is None else False
                 if stepping and not scheduler.frozen:
                     # **Stepped by how the trial ended** (`task.staircase_verdict`; TSK-33),
                     # between trials, for the next: one whose value a person held moves nothing,
-                    # and none while training is frozen (the console settings design's §8).
-                    climb.step(result.outcome, shown)
+                    # nor a special trial, and none while training is frozen (the console settings
+                    # design's §8).
+                    stepped = climb.step(result.outcome, shown)
                 # **What the rig suggests** under a confirmed progression (the pop-out search
                 # build): made, or withdrawn as its bar stops holding (`Scheduler.holds`),
                 # between trials.
@@ -8172,6 +8241,8 @@ class Session:
                     del self._kept[number]
                 for number in [number for number in self._paired if number not in waiting]:
                     del self._paired[number]
+                for number in [number for number in self._specials if number not in waiting]:
+                    del self._specials[number]
                 if result.outcome is None:
                     # **A warning on the changes feed** (the engine C2a plan, its science review's
                     # D4): five minutes with no outcome is a loop that failed or an animal that
@@ -8218,6 +8289,11 @@ class Session:
                     block=scheduler.block.name,
                     condition=condition.name,
                     structure=structure,
+                    # Its special kind's name, `"normal"`, or null for a task declaring none, and
+                    # whether it stepped its staircase (wl-preproc's answer, 2026-11-19, XC-543).
+                    trial_kind=(None if not task.specials
+                                else NORMAL if special is None else special.kind),
+                    stepped=stepped,
                     overridden=tuple(overridden),
                     # What it drew and from where, what a person held, and what of that kept
                     # it out of moving up (engine build C3).

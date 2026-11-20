@@ -489,6 +489,7 @@ def render_task(task: Task, allocation_names: dict[int, str] | None = None) -> s
     lines += _counting(task)
     lines += _draws(task)
     lines += _pool(task)
+    lines += _specials(task)
     lines += _plans(task)
     for name in (task.default, *(other for other in task.structures if other != task.default)):
         heading = f"## Structure `{name}`"
@@ -533,6 +534,34 @@ def _pool(task: Task) -> list[str]:
             f"the bars afresh, the staircase staying where it is. {starts}", "",
             "| Number | Pairing | The odd one's look | The distractors' look |",
             "|---|---|---|---|", *rows, ""]
+
+
+def _specials(task: Task) -> list[str]:
+    """**The task's kinds of special trial** (`task.Special`; the pop-out revision's Task 3): each
+    kind, the setting its percentage of trials is read from and what that starts at, and the
+    structure it plays, with how a trial is drawn special, so a reviewer of the task file reads
+    here what its catches and probes are. Nothing where the task declares none."""
+    if not task.specials:
+        return []
+    declared = {param.name: param for param in task.params}
+
+    def start(name: str) -> str:
+        value = getattr(declared.get(name), "start", None)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return "no start"
+        return f"{value:g}%"
+
+    rows = [f"| {_cell(special.kind)} | `{special.share.name}` | {start(special.share.name)} "
+            f"| `{special.structure}` |" for special in task.specials]
+    return ["### Special trials", "",
+            f"Each trial of the default structure, `{task.default}`, is drawn special or normal "
+            f"between trials from the run's seed, each kind at its percentage, in the order "
+            f"below; past 100 in all, each in proportion and none normal. A special trial plays "
+            f"its kind's structure with its stage's values, its staircase's value and its "
+            f"pairing, and counts in the stage's bars, but steps no staircase; a repeat of one is "
+            f"the same kind. Each trial line says its kind (`trial_kind`) and whether it stepped "
+            f"(`stepped`).", "",
+            "| Kind | Its percentage | Starts at | Plays |", "|---|---|---|---|", *rows, ""]
 
 
 #: A counting class in the words the PI confirms it in (the engine C2a plan's Appendix B).

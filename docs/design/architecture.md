@@ -792,7 +792,21 @@ when the run left it, its count fresh (`Session._leave` at the move, `_climbing`
 by `went_on` after a crash from the lines and the start row's `left`; the PI, 2026-11-08, "Pick up
 where it left"); a
 person's value on the setting holds it and a hand-back resumes it at the level nearest that value,
-and each trial's line marks the value it gave `drawn` `"staircase"`. **Every number in a staircase
+and each trial's line marks the value it gave `drawn` `"staircase"`. **A task may declare special
+trials** (`task.Special`, `Task.specials`; the pop-out revision's Task 3, 2026-11-19; TSK-80): each
+kind its name, the setting giving its percentage of trials (in percent, 0 to 100) and the structure
+it plays, refused at load where the structure is the task's default or absent or the share no such
+setting (`bad-special`), their percentages past 100 at the task's starts a warning
+(`specials-over-100`). Between trials, a trial of the default structure is drawn special or normal
+from the run's seed (`Session._special`: `variation.unit(seed, trial, "special trial", 0)` against
+the shares cumulated in declared order over 100, or over their sum past 100), a repeat keeping the
+kind of the trial it repeats (`_specials`, pruned with `_paired`); a special trial plays its kind's
+structure with the stage's values, draws, staircase value and pairing, counts in its bars and its
+condition's count, **and steps no staircase** (the PI's "Only normal trials move it"; `giving` and
+`stepping` apart in `Session.run`, `went_on` stepping only on a normal line). Each line writes
+`trial_kind` (`"normal"`, the kind, or null for a task declaring none) and `stepped`
+(`_Climb.step`'s answer, null where no staircase runs), and the start row `specials` (XC-543).
+**Every number in a staircase
 or a bar may be a setting** (the fix round, 2026-11-07; the PI, "everything should be adjustable in
 the console"; TSK-75): a staircase's `down` and `up` and its levels by a step (`task.Steps`), read
 from the run's live values between trials, a step changed re-deriving the levels at the level

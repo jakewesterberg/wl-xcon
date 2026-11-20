@@ -3172,6 +3172,57 @@ class Group:
                 )
 
 
+#: **A trial that is no special kind** (`Special`; the pop-out revision design's §4): what each
+#: trial line's `trial_kind` says of it in a task that declares special trials (wl-preproc's
+#: answer of 2026-11-19, XC-543), and so a name no special kind may take.
+NORMAL = "normal"
+
+#: **The unit a special kind's percentage is in** (`Special.share`): the setting it names is in
+#: percent of trials, from 0 to 100 (`check`'s `bad-special`).
+SPECIAL_UNIT = "percent"
+
+
+@dataclass(frozen=True, slots=True)
+class Special:
+    """**A kind of special trial** (the pop-out revision design's §4; the PI, 2026-11-16, "A
+    percentage per kind"): `kind` its name, as each trial line's `trial_kind` writes it; `share`
+    the setting giving its percentage of trials (`SPECIAL_UNIT`, 0 to 100); `structure` the trial
+    structure it plays in place of the task's default. Each trial of the default structure is drawn
+    special or normal between trials, from the run's seed (`taskd.Session._special`); a special
+    trial otherwise follows its stage -- its values, its staircase's value and its pairing -- and is
+    counted in its bars, but steps no staircase ("Only normal trials move it"). **Its shape is
+    refused as it is built**: a kind of printable text of 1 to `LABEL_LIMIT` characters, never
+    `NORMAL`; a share that names a setting (`P`); a structure named by text. What needs the task,
+    at load (`check`'s `bad-special`): a structure the task has and not its default, and a share
+    in percent from 0 to 100."""
+
+    kind: str
+    share: P
+    structure: str
+
+    def __post_init__(self) -> None:
+        if not (_one_line(self.kind, LABEL_LIMIT) and self.kind):
+            raise ValueError(
+                f"a special kind is named by printable text of 1 to {LABEL_LIMIT} characters, "
+                f"not {self.kind!r}"
+            )
+        if self.kind == NORMAL:
+            raise ValueError(
+                f"a special kind is not named {NORMAL!r}: that is what a trial line calls a trial "
+                f"of no special kind"
+            )
+        if not isinstance(self.share, P):
+            raise ValueError(
+                f"special kind {self.kind!r} names the setting its share of trials is read from, "
+                f"P('name'), not {self.share!r}"
+            )
+        if not isinstance(self.structure, str) or not self.structure:
+            raise ValueError(
+                f"special kind {self.kind!r} names the trial structure it plays by text, not "
+                f"{self.structure!r}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class Task:
     """One task (engine spec §3.5): its trial structures by name (§13.3), `default` the one the
@@ -3210,6 +3261,11 @@ class Task:
     #: design's goal 8). Empty, none: each setting has a box of its own. A tuple of `Group`s,
     #: refused otherwise as it is built; what each names, at load (`check`'s `bad-group`).
     groups: "tuple[Group, ...]" = ()
+    #: **Its kinds of special trial** (`Special`; the pop-out revision design's §4), in the order
+    #: their shares are cumulated as each trial is drawn. Empty, none: every trial is normal and
+    #: its line's `trial_kind` null. A tuple of `Special`s, no two of one kind or one structure,
+    #: refused otherwise as it is built; what each names, at load (`check`'s `bad-special`).
+    specials: "tuple[Special, ...]" = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.structures, dict) or not self.structures:
@@ -3263,6 +3319,19 @@ class Task:
                 f"a task's groups are a tuple of Groups, each a box's settings, not "
                 f"{self.groups!r}"
             )
+        if not (isinstance(self.specials, tuple)
+                and all(isinstance(special, Special) for special in self.specials)):
+            raise ValueError(
+                f"a task's specials are a tuple of Specials, each a kind of special trial, not "
+                f"{self.specials!r}"
+            )
+        for what in ("kind", "structure"):
+            named = [getattr(special, what) for special in self.specials]
+            for name in dict.fromkeys(named):
+                if named.count(name) > 1:
+                    raise ValueError(
+                        f"two special kinds share the {what} {name!r}; each kind has its own"
+                    )
 
     @property
     def trial(self) -> Trial:

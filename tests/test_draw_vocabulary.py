@@ -123,8 +123,10 @@ def test_a_task_and_a_block_declare_draws_and_a_block_a_factorial():
         {"contrast": (0.1, 0.5)}, (), 1, {}, None)
     assert [spec.name for spec in dataclasses.fields(Block)][-4:] == [
         "trials", "time_limit_s", "draws", "factorial"]
-    # `groups` (the console interface rework, 2026-11-19) closes the class since, after `draws`.
-    assert [spec.name for spec in dataclasses.fields(Task)][-3:] == ["plans", "draws", "groups"]
+    # `groups` (the console interface rework, 2026-11-19) follows `draws`, and `specials` (the
+    # pop-out revision's Task 3, 2026-11-19) closes the class since.
+    assert [spec.name for spec in dataclasses.fields(Task)][-4:] == [
+        "plans", "draws", "groups", "specials"]
     plain = Block("plain", [own])
     assert (plain.draws, plain.factorial, _task().draws) == ({}, None, {})
     assert plain.draws is not Block("other", []).draws

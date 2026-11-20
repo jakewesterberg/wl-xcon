@@ -592,6 +592,8 @@ class SessionRecord:
         object_windows: tuple = (),
         shaping: str = "on",
         calibration=None,
+        trial_kind: str | None = None,
+        stepped: bool | None = None,
     ) -> list[dict]:
         """One trial's record, flushed before returning.
 
@@ -660,7 +662,13 @@ class SessionRecord:
         settings design's §8, XC-513's group 4), so a reader tells a frozen trial, which counted
         toward no bar, and one of the full task from training as declared, its values the full
         task gave each named `drawn: "full"`. And each look's `light_xy` on `calibration`, the
-        run's (`_stimuli`). **Returns the line's `stimuli`**, so the session can say on the changes feed
+        run's (`_stimuli`). **And its kind, and whether it stepped** (the pop-out revision's Task 3;
+        wl-preproc accepted both on 2026-11-19, XC-543, renaming the first): `trial_kind`,
+        `"normal"` or a special kind's name (`task.Special`) in a task declaring special trials,
+        null in one declaring none, its `structure` the structure it played; `stepped`, whether its
+        outcome counted on its block's staircase, a success or a failure on a trial whose value the
+        staircase gave -- false where it moved nothing on it (a special trial, a value a person
+        held, an outcome that is neither, a frozen trial), null where no staircase runs. **Returns the line's `stimuli`**, so the session can say on the changes feed
         that one could not be resolved (`taskd`, once a run).
         """
         stimuli = _stimuli(placed, params, object_windows, calibration)
@@ -688,6 +696,8 @@ class SessionRecord:
                     "drumming": drumming,
                     "aids": list(aids),
                     "structure": structure,
+                    "trial_kind": trial_kind,
+                    "stepped": stepped,
                     "overridden": list(overridden),
                     "drawn": {} if drawn is None else dict(drawn),
                     "live": list(live),
