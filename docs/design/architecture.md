@@ -533,6 +533,15 @@ takes that `After`'s edge on the same frame (`run._Loop.passes`, built between t
 `go_delay` 0 the array and the go are drawn on one frame. At most one such pass a frame, so a
 cycle of zero waits ends on the longest trial, never looping inside a frame.
 
+**The fixation point has a hold look and an act look, since the pop-out revision (the PI,
+2026-11-16; TSK-79).** It stays on when the stimuli appear, and its change to its act look (an
+`Update` of its looks) is the go. Each look is a setting of choices, and **a setting's start may be
+one of its choices** (`Param.start`; XC-517): a run, the record (REC-27's form), the pre-flight and
+the card take it as they take a choice set live, and a start that is none of them is refused as
+the setting is built. A task that hides the point a window held the eye on, on an edge into its
+reaction-time state or in that state's entry, is warned at load, accepted in every kind
+(`fixation-hidden-at-go`, `check._hidden_at_go`).
+
 **Between trials: ordinary Python.** Condition selection, blocks, staircases, adaptive
 updates.
 

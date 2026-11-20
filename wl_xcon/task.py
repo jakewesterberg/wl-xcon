@@ -146,10 +146,14 @@ class Param:
     live: bool = True
     #: **The value a run starts with when nobody gives one** (P4d-2b spec §6.2:
     #: "Starting values are the task's own"; S8 §3.4's *task* layer, under what a console
-    #: or `wlx run --set` gives): a number inside the parameter's own declared range.
-    #: `__post_init__` refuses any other as the task is built: a starting appearance is not
-    #: taken yet, though telemetry carries one as its words since XC-420 closed (the console
-    #: settings build) and the record writes one since REC-27 (XC-517), and a start outside `[low, high]` would run under `wlx run`, which takes no
+    #: or `wlx run --set` gives): a number inside the parameter's own declared range, or, **for a
+    #: setting of choices, one of them** -- a look, the fixation point's hold look say (the
+    #: pop-out revision's plan, Task 5; TSK-79; XC-517, the other half of XC-420): a run, the
+    #: record (REC-27's form), the pre-flight and the card take it as they take a choice set live.
+    #: `__post_init__` refuses any other as the task is built: a setting of choices starts at one
+    #: of them and nothing else, a number included, since a run would start at a value
+    #: `Session.set` refuses; a setting of numbers at a finite number; and a start outside
+    #: `[low, high]` would run under `wlx run`, which takes no
     #: pre-flight (XC-159; the b3a-2 final review, m2). A bound past a float's range is refused
     #: as the setting is built, with a start or without (XC-423); any other bound that is not a
     #: real number is left to
@@ -260,18 +264,33 @@ class Param:
                     f"for none"
                 )
         start = self.start
-        if start is not None and (
+        if start is None:
+            return
+        if self.choices:
+            # **A setting of choices starts at one of them** (XC-517): equal to one, as
+            # `Session.set` and the pre-flight judge a value (`in`), and nothing else, a number
+            # included. Choices that cannot be compared refuse the start, never raise past it.
+            try:
+                among = start in self.choices
+            except Exception:  # noqa: BLE001 -- a task's declarations are code's output
+                among = False
+            if not among:
+                raise ValueError(
+                    f"parameter {self.name!r}: a task's starting value is a number, or one of its "
+                    f"choices; {start!r} is not one of the {_count(self.choices)} choices it "
+                    f"offers"
+                )
+            if isinstance(start, bool) or not isinstance(start, (int, float)):
+                return
+        if (
             isinstance(start, bool)
             or not isinstance(start, (int, float))
             or not math.isfinite(start)
         ):
             raise ValueError(
-                f"parameter {self.name!r}: a task's starting value is a number, and "
-                f"{start!r} is not a finite one; a starting appearance is not taken yet "
-                f"(XC-517)"
+                f"parameter {self.name!r}: a task's starting value is a number, or one of its "
+                f"choices, and {start!r} is no finite number, the setting declaring no choices"
             )
-        if start is None:
-            return
         low, high = _real(self.low), _real(self.high)
         side = (
             "below" if low is not None and start < low
@@ -407,6 +426,15 @@ def _real(bound: object) -> float | None:
     if isinstance(bound, bool) or not isinstance(bound, (int, float)):
         return None
     return bound if math.isfinite(bound) else None
+
+
+def _count(choices: object) -> object:
+    """How many `choices` a setting offers, as a refusal says it, or `"declared"` where they are
+    no collection that counts."""
+    try:
+        return len(choices)
+    except TypeError:
+        return "declared"
 
 
 def _past_float(number: int) -> bool:

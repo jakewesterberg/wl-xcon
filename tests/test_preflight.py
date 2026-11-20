@@ -790,7 +790,7 @@ def test_a_run_of_a_plan_needs_values_for_the_structures_its_conditions_play_onl
 
 def test_a_place_with_no_value_fails_the_starting_values_and_an_appearance_does_not(tmp_path):
     """XC-415 (the PI, 2026-10-30: "Refuse to start"): a setting with choices that places a
-    stimulus -- here a whole position, which no starting value and nothing over the wire can give --
+    stimulus -- here a whole position, which nothing over the wire can give, and no start here --
     left without a value fails the starting values, naming it and where it places, so `gate`
     refuses the start; one left to the run is otherwise not refused only where it places nothing (an
     appearance, the reference task's `target_appearance`). A plan whose every condition playing the

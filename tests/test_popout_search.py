@@ -270,8 +270,10 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     ends a run; and the suggestions' margin, up to 20 answers, can reach a bar's count on the
     smallest windows (`margin-reaches-bar`; the re-review 2, M-7), the training plan's settings
     being read over their ranges; and the set size read at its top, the PI's 36 (2026-11-19), which
-    crowds the ring's windows (`crowded-array`). **Since the console settings plan's Task 11 nothing
-    else**: its
+    crowds the ring's windows (`crowded-array`); and its go hides the fixation point
+    (`fixation-hidden-at-go`; TSK-79, the PI's rule of 2026-11-16 that the point stays on and changes
+    its look at the go), until the pop-out revision's Task 7 gives it its act look in wl-xtasks.
+    **Since the console settings plan's Task 11 nothing else**: its
     caps gone and its open sides judged at their starts (the controller's ruling 5), the layout
     warns of nothing there (`test_the_popout_loads_with_no_layout_warning_at_its_starts`) -- the
     windows that could overlap over the old ranges (`crowded-array`), the fixation window reaching
@@ -291,9 +293,12 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     for found in (on_default, on_measured):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
+    hidden = {"fixation-hidden-at-go"}
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
-                                             "margin-reaches-bar", "endless-plan", "crowded-array"}
-    assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan", "crowded-array"}
+                                             "margin-reaches-bar", "endless-plan",
+                                             "crowded-array"} | hidden
+    assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan",
+                                              "crowded-array"} | hidden
     # The set size's range is closed (a highest is kept for `unbounded-set-size`), so the load
     # reads it at its top: the PI's 36 (2026-11-19) on the 8° ring crowds the 1.5° windows.
     for found in (on_default, on_measured):

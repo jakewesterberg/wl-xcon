@@ -249,6 +249,7 @@ def check_task(
         + _group_faults(task)
         + _label_faults(task)
         + _ambiguous_color_choices(task)
+        + _hidden_at_go(task)
         + _meaning_faults(task)
         + _reaction_time_faults(task)
         + _choice_faults(task)
@@ -671,6 +672,65 @@ def _ambiguous_color_choices(task: Task) -> list[Finding]:
             f"its set and hue, so it cannot say which of them it means: those are left off its "
             f"card, the rest picked as ever; give each choice its own hue, or keep one"),
             blocking=False, accepted_in=SESSION_KINDS, subjects=(f"setting {param.name!r}",)))
+    return findings
+
+
+#: **A task that hides its fixation point at its go** (the pop-out revision's design §2, which
+#: leaves the warning to the builder; TSK-79, the PI's rule of 2026-11-16 for every task: "I dont
+#: think that fixation should disappear when array appears"): the fixation point stays on, and its
+#: look changes at the go. A warning at load, accepted in every kind, never a refusal (the PI,
+#: 2026-10-11: warnings over refusals): a task may have its reasons, and the person starting it
+#: is told the rule.
+FIXATION_HIDDEN_AT_GO = "fixation-hidden-at-go"
+
+
+def _hidden_at_go(task: Task) -> list[Finding]:
+    """`FIXATION_HIDDEN_AT_GO` for each `Hide`, on an edge into the task's reaction-time state
+    (`Task.reaction_time`, its go) or in that state's own entry, of a stimulus a window held the
+    eye on in the edge's source state names (`Window.on`): held by a `Hold` or an `Exited` of that
+    state, each of which keeps the eye there. One finding per structure, source state and
+    stimulus, naming the state and the stimulus. A task with no reaction time, or a structure
+    with no state of its name, says nothing. Read from the declarations, between trials."""
+    timed = task.reaction_time
+    if timed is None or not isinstance(getattr(timed, "state", None), str):
+        return []
+    several = len(task.structures) > 1
+    findings: list[Finding] = []
+    for name, structure in task.structures.items():
+        states = {state.name: state for state in structure.states}
+        go = states.get(timed.state)
+        if go is None:
+            continue
+        windows = {window.name: window for window in structure.windows
+                   if isinstance(window, Window) and isinstance(window.on, str)}
+        entered = [action.stimulus for action in go.enter if isinstance(action, Hide)]
+        for state in structure.states:
+            held = {}
+            for edge in state.go:
+                if (isinstance(edge.guard, (Hold, Exited)) and edge.guard.window in windows):
+                    window = windows[edge.guard.window]
+                    held.setdefault(window.on, window.name)
+            if not held:
+                continue
+            said: list[str] = []
+            for edge in state.go:
+                if edge.to != timed.state:
+                    continue
+                for stimulus in [action.stimulus for action in edge.do
+                                 if isinstance(action, Hide)] + entered:
+                    if stimulus in held and stimulus not in said:
+                        said.append(stimulus)
+            for stimulus in said:
+                where = f"in structure {name!r}, " if several else ""
+                findings.append(Finding(FIXATION_HIDDEN_AT_GO, (
+                    f"{where}the edge from state {state.name!r} into {timed.state!r}, the task's "
+                    f"reaction-time state, hides stimulus {stimulus!r}, which window "
+                    f"{held[stimulus]!r} held the eye on in {state.name!r}: the lab's rule since "
+                    f"2026-11-16 (TSK-79) is that the fixation point stays on, and its look "
+                    f"changes at the go (an Update of its looks, to its act look), so the go is "
+                    f"the point's change, never its going off"),
+                    blocking=False, accepted_in=SESSION_KINDS,
+                    subjects=(f"state {state.name!r}", f"stimulus {stimulus!r}")))
     return findings
 
 

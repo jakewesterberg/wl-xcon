@@ -426,8 +426,9 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
     a categorical parameter that places a window, a stimulus, an update or an array's objects,
     or sizes a window, that nothing gives a value** (`check.unplaced`; XC-415; the PI,
     2026-10-30: "Refuse to start", "A stimulus that cannot be drawn is a case where the run cannot
-    proceed"), naming it and where: a whole position is given by a plan's condition or not at
-    all, since no starting value and nothing over the wire is one. **And for a task's pool naming
+    proceed"), naming it and where: a whole position is given by a plan's condition, or by its
+    setting's start where that is one of its choices (`Param.start`; XC-517), since nothing over
+    the wire is one. **And for a task's pool naming
     no pairing** (`check.unpooled`; the pop-out search build's Task 5). A stimulus's appearance left
     unset is not refused: nothing in this build draws a trial's screen before the display process
     (engine build E), and the record writes `drawn` null for it (`record._stimuli`). Checked as

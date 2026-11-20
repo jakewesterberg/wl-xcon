@@ -118,9 +118,9 @@ def test_a_parameter_declares_the_value_a_run_starts_with_or_none():
 
 @pytest.mark.parametrize("bad", [Disc(size=1.0), True, float("nan"), float("inf"), "0.3"])
 def test_a_parameter_refuses_a_start_that_is_not_a_finite_number(bad):
-    """A starting value is recorded and published, and only a number is: a starting
-    appearance is not taken yet (XC-517), though telemetry carries one as its words since XC-420
-    closed and the record writes one since REC-27."""
+    """A setting of numbers starts at a finite number: a look, a `bool`, a NaN, an infinity and
+    text are refused as it is built. A look is taken as a start only by a setting whose choices
+    hold it (XC-517; `tests/test_fixation_looks.py`)."""
     with pytest.raises(ValueError, match="'fix_hold'.*starting value is a number"):
         Param("fix_hold", unit="s", low=0.05, high=2.0, start=bad)
 
