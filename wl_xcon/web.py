@@ -3275,10 +3275,11 @@ def _summary(frame, view: View, training: bool) -> str:
     """**The summary of a settings tab** (the summary and editor design's goal 1; the PI,
     2026-11-19: "perhaps some way to visualize all params at top and clicking opens the ability to
     change it below", mock-up A): one line per box `_params` draws (`_line`), a group's one
-    (its title, its settings' values joined by " · "), in its sections (`_sections`), the
-    Ceilings section last; a section holding a color card ends with a *New color…* line that opens
-    its panel. Each line's value is the rig's (`_summary_value`); the page's script adds what it
-    alone knows. `view` is the boxes' (nothing here is gated: a line sends nothing)."""
+    (its title, its settings' values joined by " · "; special trials' shares only those on,
+    `_shares_said`), in its sections (`_sections`), the Ceilings section last; a section holding a
+    color card ends with a *New color…* line that opens its panel. Each line's value is the rig's
+    (`_summary_value`); the page's script adds what it alone knows. `view` is the boxes' (nothing
+    here is gated: a line sends nothing)."""
     staged = {change.name: change for change in frame.staged}
     refused = {refusal.name: refusal for refusal in frame.refusals}
     peers = _percents(frame)
@@ -3313,12 +3314,23 @@ def _summary(frame, view: View, training: bool) -> str:
         words = "; ".join(f"{member.label or member.name} {_plain(_PER_TRIAL[member.source][0])}"
                           for member in drawn)
         changed = sum(1 for member in members if member.changed)
-        # **A group's line is not sized by its values** (I1): its name shows whole, and its values
-        # cut with an ellipsis where the columns leave too little, whole in its title.
+        whole = ""
+        if any(member.unit == SPECIAL_UNIT for member in members):
+            # **A group of special trials' shares says only the shares that are on** (the PI,
+            # 2026-11-20, from his try-out: "Shorter line, no cut"), each in short words, or
+            # "none", or where that would not fit, how many kinds and their sum
+            # (`_shares_said`), judged once the columns' width is known, below; every setting
+            # of the group whole in its title.
+            whole = " · ".join(
+                f"{member.label or member.name} {_waits(member, staged.get(member.name), value)}"
+                for member, value in zip(members, values))
+        # **A group's line is not sized by its values** (I1): its name shows whole; a group's
+        # values may cut with an ellipsis, whole in its title, but special trials' never do.
         widths.append(_line_width(group.name, ""))
-        lines.append((section, changed, _line(
+        lines.append((section, changed, (
             group.name, group.name, ", ".join(member.name for member in members), now, shown,
-            state, said, bool(drawn), bool(changed), False, words), len(members)))
+            state, said, bool(drawn), bool(changed), False, words, None, whole, members),
+            len(members)))
     colored = {section for section, row, group, _ in entries
                if group is None and isinstance(row.color, dict) and row.color.get("sets")}
     panels = {section: f'<button type="button" class="line newcolor" '
@@ -3327,7 +3339,94 @@ def _summary(frame, view: View, training: bool) -> str:
                        f'</span><span class="ln">{_e(NEW_COLOR_LINE)}</span><span class="lv">'
                        f"</span></button>" for section in colored}
     run = f"{frame.session_id}/{frame.run_index}" if frame.phase == "running" else ""
-    return _sections(frame.task, lines, run, panels, max(widths))
+    width = max(widths)
+    for at, (section, changed, made, counted) in enumerate(lines):
+        if isinstance(made, tuple):
+            *fields, whole, members = made
+            if whole:
+                fields[3], fields[4] = _shares_said(fields[0], members, staged,
+                                                    max(width, SUMMARY_FLOOR_CH))
+            lines[at] = (section, changed, _line(*fields, whole), counted)
+    return _sections(frame.task, lines, run, panels, width)
+
+
+#: **The most of its line a value takes** (`.line > .lv`'s `max-width` in the page's CSS), so a
+#: special trials' line is judged to fit as the page lays it out (`_shares_said`).
+LINE_VALUE_SHARE = 0.62
+#: **A value's character as wide as it is drawn**, in the summary's `ch`: IBM Plex Mono at 12 px,
+#: 7.2 px each, every character alike (measured in Chromium and WebKit on 2026-11-19, the build's
+#: `task-3-report.md`, and again on 2026-11-20: "4 kinds · 400% of trials", 24 characters, is
+#: 172.8 px in both; layout, not timing), where `_VALUE_CH` takes it as 0.9 to spare. A special
+#: trials' line is judged with it (`_shares_said`), its name and padding still by the estimate that
+#: is never short, and the browser test holds the line uncut at three widths in both engines.
+_MONO_CH = 7.2 / 8.4
+
+
+def _share_words(members: list) -> dict:
+    """**Each special trials' share by its short words** (`_shares_said`): its plain name, less a
+    closing "trials", lower case, cut to its last words that tell it from every other share of the
+    group -- the pop-out's "absent", "empty", "distractor alone" and "disc alone". Formatting, not
+    derivation."""
+    named = {}
+    for member in members:
+        if member.unit != SPECIAL_UNIT:
+            continue
+        words = (member.label or member.name.removesuffix("_percent").replace("_", " ")).split()
+        if len(words) > 1 and words[-1].lower() in ("trials", "trial"):
+            words = words[:-1]
+        named[member.name] = [word.lower() for word in words]
+    short = {}
+    for name, words in named.items():
+        for count in range(1, len(words) + 1):
+            tail = words[-count:]
+            if all(other[-count:] != tail for key, other in named.items() if key != name):
+                break
+        short[name] = " ".join(tail)
+    return short
+
+
+def _shares_said(name: str, members: list, staged: dict, width: float) -> tuple[str, str]:
+    """**A special trials group's summary line, in force and with what waits** (the PI,
+    2026-11-20, from his try-out: "Shorter line, no cut"; the controller's ruling for the form that
+    does not fit): only the shares that are on, each in short words (`_share_words`), "absent 10% ·
+    distractor alone 5%", one waiting to change said with its arrow ("absent 0% → 10%"); "none"
+    with every share at 0. **Where that would not fit its column** -- `width`, the summary's
+    columns in `ch` at their narrowest, the name and padding by the estimate that is never short
+    (`_line_width`), the value as drawn (`_MONO_CH`) and at most `LINE_VALUE_SHARE` of the line --
+    how many kinds are on and their sum, "4 kinds · 400% of trials",
+    from the values in force; its title says every setting of the group whole (`_summary`). The
+    group's other settings, a catch's hold, are left off the line: they matter only while a
+    share is on, and the editor and the title say them. Formatting, not derivation."""
+    short = _share_words(members)
+    shares = [member for member in members if member.name in short]
+
+    def on(value) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+    def said(items) -> str:
+        return " · ".join(items) if items else "none"
+
+    now = [f"{short[member.name]} {_summary_value(member)}" for member in shares
+           if on(member.value)]
+    shown = []
+    for member in shares:
+        change = staged.get(member.name)
+        waiting = change is not None and not change.hands_back and on(change.now)
+        if on(member.value) or waiting:
+            shown.append(f"{short[member.name]} "
+                         f"{_waits(member, change, _summary_value(member))}")
+
+    def fits(text: str) -> bool:
+        value = len(text) * _MONO_CH
+        return _line_width(name, "") + value <= width and value <= LINE_VALUE_SHARE * width
+
+    if fits(said(now)) and fits(said(shown)):
+        return said(now), said(shown)
+    kinds = len(now)
+    total = sum(member.value for member in shares if on(member.value))
+    counted = (f"{kinds} kind{'' if kinds == 1 else 's'} · {_significant(float(total))}% of "
+               f"trials") if kinds else "none"
+    return counted, counted
 
 
 #: **How wide a summary line's characters are, in the summary's `ch`** (the ledger's ruling for the

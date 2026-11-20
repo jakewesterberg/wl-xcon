@@ -12,9 +12,14 @@ before he is asked again.
 > at 1280 and two at 1024**, beside the demo screen's column: the columns are as wide as the widest line a tab's
 > settings can show (`web._widest`, `web._line_width`), and four would cut the pop-out's longest names (the ledger's
 > ruling for Task 2). Since the fix wave the width never follows a value in force: turning special trials on moves
-> nothing (`test_turning_special_trials_on_moves_nothing_in_the_summary`). **One exception to the anti-goal below**: a
-> group's line is sized by its name alone, so the Special trials line's value in force ("10% · 10% · ... · 0.50 s")
-> may cut with an ellipsis at 1280 once shares are on (at 1024 at 100), whole in the line's title and in the editor.
+> nothing (`test_turning_special_trials_on_moves_nothing_in_the_summary`). A group's line is sized by its name
+> alone; **the Special trials line no longer cuts** (the PI, 2026-11-20, from his try-out: "Shorter line, no cut";
+> until then its value in force, "10% · 10% · ... · 0.50 s", cut at 1280 once shares were on): it says only the
+> shares that are on, in short words from their plain names ("absent 10% · empty 5%"), "none" with every share at
+> 0, the catch hold left off it, and where the shares on would not fit its column, how many kinds and their sum
+> ("4 kinds · 400% of trials", the controller's ruling); every share and the catch hold whole in its title and in
+> the editor (`web._shares_said`). The test holds it uncut at 1024, 1280 and 1440 in Chromium and WebKit. Another
+> group's values may still cut, whole in its title.
 
 ## Why
 

@@ -1,6 +1,6 @@
 # Where this build is
 
-**Last updated 2026-11-19**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
+**Last updated 2026-11-20**, at the commit this file was committed in (`git log -1 -- docs/CHECKPOINT.md`). **This page
 is the current state only, and stays one page** (the PI, 2026-11-07, after a whole-project audit). Every earlier
 entry, 2026-08-31 to 2026-11-07, is in `docs/CHECKPOINT-history-2026-08-31-to-2026-11-07.md`, unchanged: read one
 there only when this page or a backlog line sends you to it. A session ends by updating this page (CLAUDE.md).
@@ -30,7 +30,8 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   Safari try-out and a clean CI (full sweep by hand 44086213776, 1608 caught, none survived, shards 34 and 35 cut at
   6 h, XC-500). wl-preproc's pop-out reader is on its main, `d8fe06b`.
 - **`console-build-2026-11-17`** (worktree `.claude/worktrees/console-build-2026-11-17`, **built, unmerged, not
-  pushed**, from `main` `89f7b94`): four builds, one branch, then its flake fix, one review and its fix wave.
+  pushed**, from `main` `89f7b94`): four builds, one branch, its flake fix, one review and its fix wave, then the
+  PI's try-out and his answers.
   1. **The console settings build** (design `docs/superpowers/specs/2026-11-16-console-settings-design.md`; its whole-build
      review's fix wave and the PI's four answers of 2026-11-18).
   2. **The console interface rework** (design `...2026-11-19-console-interface-design.md`, 10 tasks): each setting a
@@ -39,40 +40,34 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   3. **The summary-and-editor layout** (design `...2026-11-19-params-summary-editor-design.md`, 4 tasks): each tab a
      summary of every setting, one line each, above one editor; XC-538 and XC-539 closed.
   4. **The pop-out revision** (design `...2026-11-16-popout-revision-design.md`, plan `...plans/2026-11-16-popout-revision.md`
-     with its 2026-11-19 amendments, Tasks 1 to 8 with 5b): one-frame zero
-     waits (TSK-78), the fixation point stays on and its look change is the go (TSK-79), four special trials as one
-     group with the remainder said "N normal search" (TSK-80, closes XC-534), an array with no target (`odd_place`),
-     a start that may be a choice, `link.SetChoice` (a look's shape picked live), the simulated eye's false-alarm rate,
-     codes 4139-4145. **wl-preproc answered XC-543 on 2026-11-19** (`trial_kind`, `target: null` with `odd_place`;
-     `correct_reject` and `false_alarm` are ours): built to the answer, closed; two notes sent
+     with its 2026-11-19 amendments): one-frame zero waits (TSK-78), the fixation point stays on and its look change
+     is the go (TSK-79), four special trials as one group (TSK-80, closes XC-534), an array with no target
+     (`odd_place`), a start that may be a choice, `link.SetChoice`, the simulated eye's false-alarm rate, codes
+     4139-4145. wl-preproc answered XC-543 on 2026-11-19; built to the answer; two notes sent
      (`docs/pending-wl-preproc-amendments.md`).
-  5. **The pop-out mouse flake, fixed in the product** (`c5cbd705`, pitfall P29): a flick reported the frame after a
-     still pointer's report was taken in one frame, a jump no saccade detector confirms; now eased (`pointer.Source`).
-  6. **One whole-build review of 3 to 5** (`final-review.md` in the revision's ledger: with fixes, 0 Critical, 2
-     Important, 12 Minor) **and its fix wave, done** (`fix-wave-report.md`): the summary sized from what each setting
-     can show, so turning special trials on moves nothing (I1); the simulated eye holds through a delay (I2); one
-     finding per kind naming its structures (XC-545); a saturation judged at its start at load; the feed says "Annulus →
-     Square"; a pre-flight note for a `--set` the draw beats; XC-547 probed, no gap (P28 keeps only its zero-wait
-     lesson); XC-549 to XC-554 filed. Then a scoped re-review (`re-review.md`) and its closing round: a staircase's line
-     says the level its staircase is at, from the frame's staircase row; a run-start refusal names each setting.
-     **The dim panel, as it is**: a panel that cannot show the fixation point's 40 cd/m² now *loads* the pop-out with
-     a warning (`color-set-unreachable`, naming the reachable top), but **Start is refused** by the pre-flight, since
-     the run would begin at 40, and **the page cannot set the point's starting brightness** (its start form sends only
-     staircase starts and the pool, and a setting sent between runs is refused); only `wlx run --set` or `wlx demo
-     --set` starts it. That is a question for the PI, not a told fix.
-  Head: the commit of this page. **6648 passed**, none skipped; WebKit's browser file 178 passed;
+  5. **The pop-out mouse flake, fixed in the product** (`c5cbd705`, pitfall P29).
+  6. **One whole-build review of 3 to 5 and its fix wave** (`final-review.md`, `fix-wave-report.md`,
+     `re-review.md` in the revision's ledger), done.
+  7. **The PI's Safari try-out (2026-11-20), done, and his three answers built** (`answers-report.md` in the
+     revision's ledger): **"ring" everywhere** -- a look is said by its kind in people's words
+     (`task.kind_words`), the record still writing the class `Annulus`, so wl-preproc reads what it read; **a
+     too-dim panel starts at the brightest it can, with a warning** -- a starting luminance the panel cannot show
+     its color set at starts at the reachable top (`check.in_reach`, one judgment for the pre-flight,
+     `Session.run` and `wlx run`; warning `start-at-reachable-top`, accepted with the run's others), recorded as
+     the run's start, refused only where no allowed value shows the set (XC-494), so the page now starts the
+     pop-out on such a panel; **the Special trials line never cuts** -- only the shares that are on, in short
+     words, "none" at rest, "N kinds · M% of trials" where those would not fit (`web._shares_said`). And his
+     words for `reward_correct` approved (XC-554, still waiting on a place outside `bounds.py`).
+  Head: the commit of this page. **6653 passed**, none skipped; WebKit's browser file 177 passed with
+  two page-load timeouts under load, both passing rerun alone;
   welfare diff against `89f7b94` all SAME (nothing to read). Ledgers, git-ignored, in
   `.superpowers/sdd/`: `2026-11-16-popout-revision/` (`progress.md`, a report per task), `2026-11-19-params-summary-editor/`,
   `2026-11-19-console-interface/`, `2026-11-16-console-settings/`.
 - **wl-xtasks `popout-revision-2026-11-16`** (worktree `/Users/jakewesterberg/GitHub/wl-xtasks-worktrees/console-settings-2026-11-16`,
   `d74c251`, on `console-settings-2026-11-16` `c30ca28`, from wl-xtasks `64929fe`; **not merged, not pushed**): the
-  tasks' bounds, sections, plain labels and sentences, and the revised pop-out. **The labels and sentences await the
-  PI's review** (tables in `task-9-report.md` of the rework's ledger and `task-7-report.md` of the revision's), with
-  questions in `.superpowers/questions-for-pi.md` (distractor brightness and Fade-in's step and floor as percents; the
-  hue line saying "blue" at 0% saturation; saturations as percents; "Annulus" or "ring"; words for `reward_correct`,
-  XC-554; the dim panel, asked as it is (above; his choice: a run starts at the panel's reachable top with a warning,
-  the page offers the point's starting brightness, or the refusal at Start stays); and, told, the
-  reward-size guards outside the welfare list, `fix-wave-report.md`).
+  tasks' bounds, sections, plain labels and sentences, and the revised pop-out, unchanged by the answers of
+  2026-11-20 (the ring's word is the rig's). Questions collected for the PI and not among his 2026-11-20 answers
+  stay in `.superpowers/questions-for-pi.md`.
 - **`tryout-design-2026-11-17`** is superseded: its plan was amended and built on the branch above.
 
 ## What exists
@@ -95,19 +90,19 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   fluid is a floor; each delivery's size is a ceiling; a task names how reward is configured, never how much. **The
   record**: the session folder `xcon/` that wl-preproc reads (`record.py`).
 
-## What is next (the PI, 2026-11-07, 2026-11-14, 2026-11-16 and 2026-11-19)
-**The PI asked, 2026-11-19, not to be asked for more input until the pop-out revision is built**: it is built, so his
-questions are collected, not yet asked. In order:
-1. **The PI**: his Safari try-out of the page and the demo, his review of wl-xtasks `popout-revision-2026-11-16`
-   (its labels and sentences), and the collected questions, asked in the UI, the dim panel among them. Tell him with
-   the try-out: the Special trials line may cut its values with an ellipsis once shares are on (whole in its title).
-2. **Push, then CI** (a mutation sweep by hand on the branch), then **the merge ask: merge only on his yes by name**
-   after clean CI.
-3. **The XC-505 warning**, then **the display (build E)**, designed with the PI; "done" includes a real screen.
-4. **Side work on the January path**: the sync-box client (XC-460), the operator's guide (XC-014), the default limits
-   file (XC-459, a welfare design with the PI), wl-preproc's C3 fixture (XC-510). wl-preproc asked (2026-11-19) that
-   XC-391/392/393 be planned now; that is his call, in `questions-for-pi.md`.
-5. **Paused until the pop-out search has run on a rig**: engine builds C4 to C9 and the rig-edit build.
+## What is next (the PI, 2026-11-07 to 2026-11-20)
+In order:
+1. **Push `console-build-2026-11-17` (and wl-xtasks `popout-revision-2026-11-16`), then CI**: the push run, and a
+   full mutation sweep by hand (`gh workflow run ci.yml --ref <branch>`), every shard's log read to its closing
+   line; then **the merge ask: merge only on his yes by name** after clean CI.
+2. **The setting drawings** (his ask in the try-out: a small schematic beside the setting opened, a trial's
+   timeline for a timing, the array for a color; mock-up `.superpowers/brainstorm/71253-1795178057/`): brainstorm
+   notes `.superpowers/brainstorm/drawings-2026-11-20-notes.md`; **a design with him next**, element by element.
+3. **Lab time: XC-391, XC-392, XC-393** (wl-preproc asked 2026-11-19 that they be planned now).
+4. **The XC-505 warning**, then **the display (build E)**, designed with the PI; "done" includes a real screen.
+5. **Side work on the January path**: the sync-box client (XC-460), the operator's guide (XC-014), the default limits
+   file (XC-459, a welfare design with the PI), wl-preproc's C3 fixture (XC-510).
+6. **Paused until the pop-out search has run on a rig**: engine builds C4 to C9 and the rig-edit build.
 
 **How the work is run** (the PI, 2026-11-07): a plan is a design and a list of tests, built once; one review of the
 whole build, and his welfare review of any welfare-listed change; side work only on the January path; a rare edge case
@@ -117,7 +112,7 @@ is settled from his stated principles and told to him in one line; every merge w
 - **Suite**: `WLX_REQUIRE_PREPROC=1 WLX_REQUIRE_BROWSER=1 WLX_REQUIRE_XTASKS=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p
   no:cacheprovider -n auto` (a `wl-preproc` checkout or link at the root, at `d8fe06b` or later, and a `wl-xtasks`
   one, git-ignored at `/wl-xtasks`; wl-sync at the commit `wl-preproc/pyproject.toml` pins). **6200 passed on
-  `main`** (`89f7b94`); 6647 on `console-build-2026-11-17`; none skipped.
+  `main`** (`89f7b94`); 6653 on `console-build-2026-11-17`; none skipped.
 - **CI**: each push sweeps the changed modules with mutants (`tools/mutation_gate.py`), the nightly all, in 36 shards;
   a big branch runs that sweep by hand before its merge (`gh workflow run ci.yml --ref <branch>`). Read every shard's
   log to its closing line; the run's summary can be wrong.

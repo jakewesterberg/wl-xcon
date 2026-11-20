@@ -4147,27 +4147,42 @@ def _heads_kept(page, root: str = "#params") -> list:
         }).map((section) => section.getAttribute('data-section'))""", root)
 
 
-@pytest.mark.parametrize("width", [1024, 1280])
+#: **The special trials' shares a test sets** (the PI, 2026-11-20, "Shorter line, no cut"): all at
+#: 0, one at 10, two on, all at 10 and all at 100, each with the line it says.
+SHARE_CASES = (
+    ({}, "none"),
+    ({"target_absent_percent": 10}, "absent 10%"),
+    ({"target_absent_percent": 10, "odd_place_empty_percent": 5}, "absent 10% · empty 5%"),
+    (dict.fromkeys(SHARES, 10), "4 kinds · 40% of trials"),
+    (dict.fromkeys(SHARES, 100), "4 kinds · 400% of trials"),
+)
+
+
+@pytest.mark.parametrize("width", [1024, 1280, 1440])
 def test_turning_special_trials_on_moves_nothing_in_the_summary(rig, tmp_path, width):
     """The pop-out revision's whole-build review, I1 (the summary and editor design's anti-goal:
     "the page jumping under the pointer"): **the summary's columns are sized from the widest value
     each setting can show** (`web._widest`), never from the values in force, and a group's line by
-    its name (its values cut with an ellipsis, whole in its title). On the pop-out's own rows at
-    1280 x 800 (and 1024), the demo screen's column shown, the four shares set to 10 and then to
-    100 move no line, no header, the legend nor the editor's top, and keep the columns; and **a
-    section of subsections alone keeps its header with its first subsection** in its column (WebKit
-    left "Stimuli · 16 settings" alone at a column's foot). In a real browser: run with
-    `WLX_BROWSER=webkit` too, for Safari."""
+    its name. On the pop-out's own rows at 1024, 1280 and 1440 wide, 800 high, the demo screen's
+    column shown, the four shares at 0, one at 10, two on, all at 10 and all at 100 move no line,
+    no header, the legend nor the editor's top, and keep the columns; and **a section of subsections
+    alone keeps its header with its first subsection** in its column (WebKit left "Stimuli · 16
+    settings" alone at a column's foot). **And the Special trials line is never cut** (the PI,
+    2026-11-20, from his try-out: "Shorter line, no cut"): it says only the shares that are on, in
+    short words, "none" with every share at 0, or, where those would not fit, how many kinds and
+    their sum -- its value never wider than its box (`scrollWidth <= clientWidth`) -- and its title
+    holds every share whole. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.link import decode, encode
 
     made = _popout_own(tmp_path, demo=True)
+    labels = {row.name: row.label for row in made.params if row.name in SHARES}
 
-    def offer(share, trial):
+    def offer(shares, trial):
         rig.hub.offer(decode(encode(dataclasses.replace(made, trial_index=trial, params=tuple(
-            dataclasses.replace(row, value=share) if row.name in SHARES else row
+            dataclasses.replace(row, value=shares.get(row.name, 0)) if row.name in SHARES else row
             for row in made.params)))))
 
-    offer(0, 40)
+    offer({}, 40)
     page = rig.browser_page()
     page.set_viewport_size({"width": width, "height": LAPTOP_H})
     page.click('label[for="t-task"]')
@@ -4177,13 +4192,19 @@ def test_turning_special_trials_on_moves_nothing_in_the_summary(rig, tmp_path, w
     assert before[-1][0] == "editing", before[-1]
     assert _heads_kept(page) == []
     line = '#params > .summary .line[data-open="Special trials"]'
-    for share, trial in ((10, 41), (100, 42)):
-        offer(share, trial)
+    for trial, (shares, said) in enumerate(SHARE_CASES, start=41):
+        offer(shares, trial)
         _arrived(page, trial)
-        page.wait_for_function(f"() => document.querySelector({line!r}).title.includes("
-                               f"'· {share}')")
-        assert _rects(page) == before, share
-        assert _heads_kept(page) == [], share
+        page.wait_for_function(f"() => document.querySelector({line!r} + ' > .lv')"
+                               f".textContent === {said!r}")
+        assert _rects(page) == before, shares
+        assert _heads_kept(page) == [], shares
+        shown = page.evaluate(f"""() => {{ const lv = document.querySelector({line!r} + ' > .lv');
+            return [lv.scrollWidth, lv.clientWidth]; }}""")
+        assert shown[0] <= shown[1], (shares, said, shown)
+        title = page.get_attribute(line, "title")
+        for name, label in labels.items():
+            assert f"{label} {shares.get(name, 0)}%" in title, (name, title)
 
 
 def test_the_special_trials_line_says_the_rest_are_normal_search(rig, tmp_path):

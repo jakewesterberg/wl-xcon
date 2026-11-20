@@ -801,7 +801,9 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
         tmp_path):
     """The whole-build review's M8 and M9, and the catch hold's unit (the controller's ruling on
     Task 7's concern 8), on the pop-out's own rows: **the Special trials line says its shares
-    with %**, "0% · 0% · 0% · 0% · 0.50 s"; a line its staircase gives says its words, the level
+    with %** (since the PI's "Shorter line, no cut" of 2026-11-20, only those on, "none" at rest,
+    "absent 10%" with one on; `test_the_special_trials_line_says_only_the_shares_that_are_on`), a
+    share's widest "100%"; a line its staircase gives says its words, the level
     after them where the frame's staircase gives one
     (`test_a_staircases_line_follows_its_level_as_it_steps`), and its widest, the staircase's
     highest, sizes the columns (`web._widest`, I1); **and the special
@@ -815,7 +817,12 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
 
     made = _popout_own(tmp_path)
     summary = web._summary(made, view(can_write=True), False)
-    assert ">0% · 0% · 0% · 0% · 0.50 s<" in summary, summary[:200]
+    assert '<span class="lv" data-now="none">none</span>' in summary, summary[:200]
+    one = dataclasses.replace(made, params=tuple(
+        dataclasses.replace(row, value=10) if row.name == "target_absent_percent" else row
+        for row in made.params))
+    assert '<span class="lv" data-now="absent 10%">absent 10%</span>' in web._summary(
+        one, view(can_write=True), False)
     rows = {row.name: row for row in made.params}
     stepped = dataclasses.replace(rows["set_size"], source="staircase")
     # With no level from the frame's staircase, its words alone (the re-review's N1).
@@ -830,6 +837,54 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
     assert after.startswith('<span class="unit">s</span>'), after[:120]
     share = box[box.index('data-param="target_absent_percent"'):].split("</button></span>", 1)[1]
     assert not share.startswith('<span class="unit">'), share[:120]
+
+
+def test_the_special_trials_line_says_only_the_shares_that_are_on(tmp_path):
+    """The PI, 2026-11-20, from his try-out: **"Shorter line, no cut"**. The Special trials line
+    says only the shares that are on, each in short words from its plain name -- "absent",
+    "empty", "distractor alone", "disc alone", each telling it from the others -- or "none" with
+    every share at 0, the catch hold left off it; a share waiting to come on says its arrow; and
+    where the shares on would not fit the summary's column (the controller's ruling), how many
+    kinds and their sum, "4 kinds · 400% of trials". Its title says every setting whole, the
+    catch hold among them, and the columns are sized as they were (`web._line_width` of the
+    group's name alone)."""
+    import dataclasses
+    import html
+
+    from _frames import view
+    from test_page_browser import _popout_own
+    from wl_xcon import web
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Staged
+
+    made = _popout_own(tmp_path)
+
+    def line(shares: dict, staged=()) -> tuple[str, str]:
+        frame = dataclasses.replace(made, staged=tuple(staged), params=tuple(
+            dataclasses.replace(row, value=shares[row.name]) if row.name in shares else row
+            for row in made.params))
+        summary = web._summary(frame, view(can_write=True), False)
+        found = summary[summary.index('data-open="Special trials"'):]
+        title = html.unescape(found.split('title="', 1)[1].split('"', 1)[0])
+        value = html.unescape(found.split('<span class="lv"', 1)[1].split(">", 1)[1]
+                              .split("</span>", 1)[0])
+        return value, title
+
+    rows = [row for row in made.params if row.unit == "percent"]
+    assert web._share_words(rows) == {
+        "target_absent_percent": "absent", "odd_place_empty_percent": "empty",
+        "distractor_alone_percent": "distractor alone", "odd_one_alone_percent": "disc alone"}
+    assert line({})[0] == "none"
+    assert line({"distractor_alone_percent": 5})[0] == "distractor alone 5%"
+    assert line({"target_absent_percent": 10, "odd_place_empty_percent": 5})[0] == (
+        "absent 10% · empty 5%")
+    value, title = line(dict.fromkeys(web._share_words(rows), 100))
+    assert value == "4 kinds · 400% of trials"
+    assert ("Target absent trials 100% · Odd place empty trials 100% · Distractor alone trials "
+            "100% · Odd disc alone trials 100% · Catch hold 0.50 s") in title, title
+    waiting = Staged("target_absent_percent", 0, 10, Box("jake"), False, cid="c-1")
+    assert line({}, [waiting])[0] == "absent 0 → 10%"
+    assert "0.50 s" not in line({"target_absent_percent": 10})[0]
 
 
 def test_a_staircases_line_follows_its_level_as_it_steps(tmp_path):
