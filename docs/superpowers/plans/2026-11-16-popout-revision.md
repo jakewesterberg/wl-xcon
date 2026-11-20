@@ -116,6 +116,22 @@ change still stops for him). Where this plan and the code have moved apart, thes
 8. **The PI's review of the wl-xtasks branch** (labels, sentences, the meanings) is asked with the rest, after the
    whole-build review, not before.
 
+9. **A look's shape is a console setting, so Task 5b is added** (Task 5's finding, 2026-11-19: the design's §2 makes
+   each look's shape a console setting, but a live pick of a choice goes only through `SetColor`, which takes a color-set
+   light, and `link._setting` takes numbers and words, welfare-listed). Between Tasks 5 and 6:
+
+   **Task 5b: Pick any declared choice on its box.** `link.SetChoice(name, choice, by, cid=None)`, wire kind `"choice"`:
+   `choice` is the choice's words exactly as `ParamRow.choices` gives them (text of 1 to `TEXT_LIMIT` characters,
+   decoded by its own decoder as `SetColor`'s are, never `link._setting`); the session sets the one declared choice whose
+   words those are through `Session.set` unchanged, from the next trial, recorded as any value set is (no new record
+   shape; wl-preproc is told the new wire command in Task 8, as a note). Its branch sits beside `SetColor`'s in
+   `_command`, outside the listed lines; it joins `link.APPLY_KINDS` and `taskd._BOX`, so Apply all and withdraw take
+   it. The page: a setting whose choices are words and not all color-set lights shows them as segments (a draft until
+   Apply, as a swatch is), its summary line the chosen choice's words. Tests: `test_a_choice_is_picked_by_its_words_and
+   _recorded_as_a_value_set`, `test_a_word_naming_no_choice_is_refused_with_the_choices_named`,
+   `test_a_choice_pick_rides_apply_all_and_withdraws`, and a browser test in Chromium and WebKit
+   `test_a_looks_shape_is_picked_on_its_box_and_applied`. welfare_diff all SAME.
+
 ---
 
 ### Task 1: Tell wl-preproc the new record shapes and allocate the codes, before any is written (§7)
