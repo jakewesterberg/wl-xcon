@@ -429,7 +429,7 @@ def test_the_fixation_window_reaching_the_discs_is_still_warned():
     disc inside it never leaves it; at the values set, as at load, and not at its starts. **In each
     structure that scores the discs**: the search and the probe that shows the odd one alone (the
     pop-out revision), the fixation point's own window `fix` the one whose exit starts the answer,
-    since the point stays on."""
+    since the point stays on. **Said once, naming both** (XC-545), about each one's window."""
     popout = _load_task(XTASKS / "tasks" / "popout_search.py")
     starts = {p.name: p.start for p in popout.params if p.start is not None}
     found = [f for f in laid_out(popout, {**starts, "fix_window": 5.0, "ring_radius": 6.0},
@@ -437,7 +437,8 @@ def test_the_fixation_window_reaching_the_discs_is_still_warned():
              if f.code == "answer-window-reaches-objects"]
 
     assert [(f.is_warning, f.subjects) for f in found] == [
-        (True, ("search: window 'fix'",)), (True, ("odd_one_alone: window 'fix'",))]
+        (True, ("search: window 'fix'", "odd_one_alone: window 'fix'"))]
+    assert found[0].detail.startswith("in structures 'search', 'odd_one_alone': ")
     assert "its radius up to 5° and theirs up to 1.5°" in found[0].detail
     assert not [f for f in laid_out(popout, starts, geometry=DIRECT)
                 if f.code == "answer-window-reaches-objects"]

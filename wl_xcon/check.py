@@ -224,6 +224,14 @@ def check_task(
     # limit that stays is hard, so a task leaves a side open where nothing cannot be), one with no
     # start left to the run's (`_at_start`); the task's own checks read its declarations as written.
     pinned, unstarted = _at_start(task)
+    # **A light's saturation setting is judged at its start too** (the whole-build review of the
+    # pop-out revision; the controller's ruling): the default gray point raises nothing at load,
+    # and a saturation set live is judged where it is set (`laid_out`). **And a luminance setting
+    # whose start the panel cannot show** is judged at its reachable top, warned of, and refused
+    # only as a value (`_reachable_starts`; XC-494's rule).
+    pinned = at_values(pinned, _saturation_starts(task))
+    pinned, unreached = _reachable_starts(task, pinned, calibration)
+    each: list[tuple[str, Finding]] = []
     for name, structure in pinned.structures.items():
         found = check(structure, allocation, components, geometry, calibration, unstarted)
         # **But a set size reads its declared highest**, which it must declare (the PI,
@@ -235,14 +243,11 @@ def check_task(
         for finding in found:
             if finding.code == "direction-outside-0-360" and finding.subjects in drawn:
                 continue
-            findings.append(
-                dataclasses.replace(
-                    finding, detail=f"in structure {name!r}: {finding.detail}",
-                    subjects=tuple(f"{name}: {subject}" for subject in finding.subjects))
-                if several else finding
-            )
+            each.append((name, finding))
+    findings = in_structures(each) if several else [finding for _, finding in each]
     return (
         findings
+        + unreached
         + _structure_faults(task)
         + _unexplained_limits(task)
         + _whole_faults(task)
@@ -303,6 +308,105 @@ def _among(finding: Finding, findings: list[Finding]) -> bool:
     equality leaves `subjects` out, so two parts of a clip warning that name one light asked for
     by two written colors are equal, and are not the same part (Task 10's review, I1)."""
     return any(f == finding and f.subjects == finding.subjects for f in findings)
+
+
+def in_structures(each: list[tuple[str, Finding]]) -> list[Finding]:
+    """**One finding for each kind the structures of a task of several make alike** (XC-545):
+    `each` is `(structure, finding)` in the order found; findings equal but for their structure
+    -- the same code, detail, kinds and subjects -- are said once, in the place the first was,
+    naming every structure it occurs in, `in structures 'search', 'target_absent': ...` (`in
+    structure 'search': ...` where one alone makes it), and about each structure's subjects, each
+    prefixed by its structure as before (`Finding.subjects`), so a later finding about one of them
+    is still known (`taskd.Session._laid_out`). The default calibration's warnings, said five
+    times by the pop-out's five structures until 2026-11-19, are said once each."""
+    merged: list[tuple[Finding, list[str]]] = []
+    for name, finding in each:
+        for found, names in merged:
+            if found == finding and found.subjects == finding.subjects:
+                if name not in names:
+                    names.append(name)
+                break
+        else:
+            merged.append((finding, [name]))
+    said = []
+    for finding, names in merged:
+        where = (f"in structure {names[0]!r}" if len(names) == 1 else
+                 f"in structures {', '.join(repr(name) for name in names)}")
+        said.append(dataclasses.replace(
+            finding, detail=f"{where}: {finding.detail}",
+            subjects=tuple(f"{name}: {subject}" for name in names
+                           for subject in finding.subjects)))
+    return said
+
+
+def _saturation_starts(task: Task) -> dict:
+    """**Each setting a color-set light's saturation is, at its start** (`check_task`): a number
+    setting with a finite start, by name; none with choices, no start, or no such light."""
+    from wl_xcon.declarations import color_set_lights
+
+    params = {param.name: param for param in task.params}
+    starts: dict = {}
+    for light in color_set_lights(task):
+        if not isinstance(light.saturation, P):
+            continue
+        param = params.get(light.saturation.name)
+        if param is not None and not param.choices and _finite(param.start):
+            starts[param.name] = param.start
+    return starts
+
+
+def _reachable_starts(task: Task, pinned: Task,
+                      calibration: Calibration | None) -> tuple[Task, list[Finding]]:
+    """**A luminance setting whose start `calibration` cannot show its color set at, not even the
+    apex, but some lower value it allows can** (XC-494's rule, the PI's "warnings over refusals";
+    the whole-build review of the pop-out revision, the controller's ruling on Task 7's concern 3:
+    a panel too dim for the fixation point's 40 cd/m²): the load judges it at the panel's
+    reachable top for the set (`reachable_top`, from the least it allows, its declared lowest or
+    `DESATURATED_STEP`) and warns, `color-set-unreachable`, naming the top; a run starting at the
+    start is refused (`unshowable`: `preflight.values`, `Session.run`), as is a value set live
+    above the top (`taskd.Session._impossible`). One no value the setting allows shows is left as
+    it is, refused as a light (`_one_color`, `unrealizable-color`). Only a setting the load holds
+    at its start (`_at_start`: an open side); one read over its declared range keeps the range's
+    rule (`_within_reach`, `_desaturated_range`). At load, never in a frame."""
+    from wl_xcon.declarations import color_set_lights
+
+    if calibration is None:
+        return pinned, []
+    declared = {param.name: param for param in task.params}
+    tops: dict = {}
+    sets: dict = {}
+    for light in color_set_lights(task):
+        if not isinstance(light.luminance, P):
+            continue
+        param = declared.get(light.luminance.name)
+        if (param is None or param.choices or not _finite(param.start) or param.start <= 0.0
+                or (param.low is not None and param.high is not None)):
+            continue
+        start = float(param.start)
+        least = float(param.low) if _finite(param.low) and param.low > 0.0 else DESATURATED_STEP
+        if least >= start or reachable_top(light.colorset, calibration, start, start) is not None:
+            continue
+        top = reachable_top(light.colorset, calibration, least, start)
+        if top is None:
+            continue
+        if param.name not in tops or top < tops[param.name]:
+            tops[param.name] = top
+        names = sets.setdefault(param.name, [])
+        if light.colorset.name not in names:
+            names.append(light.colorset.name)
+    if not tops:
+        return pinned, []
+    name = calibration.id or calibration.measured_on
+    findings = [Finding("color-set-unreachable", (
+        f"calibration {name} cannot show color set{'s' if len(sets[setting]) > 1 else ''} "
+        f"{', '.join(repr(one) for one in sets[setting])} at the start of setting {setting!r}, "
+        f"{declared[setting].start:g} cd/m² of macaque luminance, not even the apex: this panel's "
+        f"reachable top for it is about {top:.3g} cd/m², and a run starting above that, or a value "
+        f"set live above it, is refused; the task is checked at that top and runs at any value up "
+        f"to it"), blocking=False, accepted_in=SESSION_KINDS,
+        subjects=tuple(f"color set {one!r}" for one in sets[setting]))
+        for setting, top in tops.items()]
+    return at_values(pinned, tops), findings
 
 
 def _outside(param: Param, value: object) -> bool:
@@ -910,7 +1014,7 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
     pinned, unstarted = _at_start(at_values(task, values))
     own, _ = _at_start(task)
     several = len(pinned.structures) > 1
-    findings: list[Finding] = []
+    each: list[tuple[str, Finding]] = []
     for name, structure in pinned.structures.items():
         found = check(structure, allocation, None, geometry, calibration, unstarted)
         found = [finding for finding in found if finding.code in LAYOUT or finding.blocking]
@@ -919,10 +1023,9 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
                           unstarted)
             found = [finding for finding in found if finding.code in LAYOUT
                      or not _among(finding, given)]
-        findings += [dataclasses.replace(
-            finding, detail=f"in structure {name!r}: {finding.detail}",
-            subjects=tuple(f"{name}: {subject}" for subject in finding.subjects))
-            if several else finding for finding in found]
+        each += [(name, finding) for finding in found]
+    # One finding for each kind the structures make alike, naming them (XC-545).
+    findings: list[Finding] = in_structures(each) if several else [f for _, f in each]
     waits, longest = _waits(task)
     for name in sorted(waits):
         value = values.get(name)

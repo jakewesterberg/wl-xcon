@@ -318,7 +318,9 @@ def test_a_structure_whose_table_does_not_say_where_its_stimulus_appears_is_refu
 
 
 def test_each_structures_findings_name_it_when_the_task_has_several():
-    """A one-structure task's findings read as `check`'s always have (call 13)."""
+    """A one-structure task's findings read as `check`'s always have (call 13). **A finding
+    several structures make alike is said once, naming each** (XC-545), about each one's
+    subjects; one a single structure makes names it alone."""
     orphaned = Trial(start="a", states=[State("a", go=[On(After(1.0), Outcome.CORRECT)]),
                                         State("orphan", go=[On(After(1.0), Outcome.CORRECT)])])
     (own,) = [f for f in check(orphaned) if f.code == "unreachable-state"]
@@ -328,7 +330,11 @@ def test_each_structures_findings_name_it_when_the_task_has_several():
 
     assert [f.detail for f in alone if f.code == "unreachable-state"] == [own.detail]
     assert [f.detail for f in both if f.code == "unreachable-state"] == [
-        f"in structure 'one': {own.detail}", f"in structure 'two': {own.detail}"]
+        f"in structures 'one', 'two': {own.detail}"]
+    other = Trial(start="a", states=[State("a", go=[On(After(1.0), Outcome.CORRECT)])])
+    mixed = check_task(Task({"one": orphaned, "two": other}, default="one"))
+    assert [f.detail for f in mixed if f.code == "unreachable-state"] == [
+        f"in structure 'one': {own.detail}"]
 
 
 def test_a_setting_two_structures_declare_differently_is_refused():

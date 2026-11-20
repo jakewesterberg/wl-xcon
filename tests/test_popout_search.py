@@ -272,10 +272,8 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     being read over their ranges; and the set size read at its top, the PI's 36 (2026-11-19), which
     crowds the ring's windows (`crowded-array`). **Since the pop-out's revision** its go no longer
     hides the fixation point (no `fixation-hidden-at-go`; TSK-79: the point stays on and takes its
-    act look), and on the default calibration the fixation point's saturation, read over its range
-    at load as a closed range is, reaches the full color at 40 cd/m², past what the sRGB standard
-    shows the set at (`color-set-desaturated`, naming the point's brightness; at its start, 0, it
-    is the set's gray: `test_popout_revision.py`). **Since the console settings plan's Task 11
+    act look), and the fixation point's saturation is judged at its start at load, 0, the set's
+    gray, so nothing is paler (`test_popout_revision.py`). **Since the console settings plan's Task 11
     nothing else**: its
     caps gone and its open sides judged at their starts (the controller's ruling 5), the layout
     warns of nothing there (`test_the_popout_loads_with_no_layout_warning_at_its_starts`) -- the
@@ -298,7 +296,11 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
         assert all(f.is_warning for f in found), found
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
                                              "margin-reaches-bar", "endless-plan",
-                                             "crowded-array", "color-set-desaturated"}
+                                             "crowded-array"}
+    # Each said once, naming the structures it is in (XC-545).
+    for code in ("color-on-default", "contrast-on-default"):
+        (one,) = [f for f in on_default if f.code == code]
+        assert one.detail.startswith(f"in structures {', '.join(map(repr, task.structures))}: ")
     assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan",
                                               "crowded-array"}
     # The set size's range is closed (a highest is kept for `unbounded-set-size`), so the load
@@ -1204,8 +1206,8 @@ def test_brightening_the_colors_past_what_the_panel_shows_warns_live(tmp_path):
     color gives up there, a warning he accepts by making the change (`warnings.jsonl`, `how`
     `set`) and said on the changes feed. Lowering it to 27, the same set still paler than asked,
     and then back to 15, adds nothing new. The value applies: a warning, never a refusal. **Said
-    once for each structure that draws the colors** since the pop-out's revision gave it its special
-    kinds' (the search's read here)."""
+    once, naming each structure that draws the colors** (XC-545; until 2026-11-19 once for each of
+    the pop-out's five)."""
     trainer = _Sets("color_luminance", (28.0, 27.0, 15.0))
     session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
 
@@ -1214,8 +1216,9 @@ def test_brightening_the_colors_past_what_the_panel_shows_warns_live(tmp_path):
     assert session.refusals == []
     every = [row for row in _rows(session, "warnings.jsonl")
              if row["code"] == "color-set-desaturated"]
-    assert len(every) == len(_load_task(TASK_FILE).structures)
-    warned = [row for row in every if row["detail"].startswith("in structure 'search': ")]
+    structures = ", ".join(map(repr, _load_task(TASK_FILE).structures))
+    warned = [row for row in every if row["detail"].startswith(f"in structures {structures}: ")]
+    assert warned == every
     assert [(row["how"], row["by"]) for row in warned] == [("set", {"kind": "box",
                                                                     "name": "jake"})]
     assert ("calibration srgb-standard cannot show color set 'isohue' as written at 28 cd/m² of "
@@ -1226,6 +1229,37 @@ def test_brightening_the_colors_past_what_the_panel_shows_warns_live(tmp_path):
     assert len(fed) == len(every)
     lines = _rows(session, "trials.jsonl")
     assert {line["params"]["color_luminance"] for line in lines} == {15.0, 28.0, 27.0}
+
+
+def test_raising_the_fixation_points_saturation_live_warns_once(tmp_path):
+    """The whole-build review of the pop-out revision, the controller's ruling: **a saturation
+    setting is judged at its start at load** -- the fixation point's 0, the set's gray, raises no
+    `color-set-desaturated` -- **and at the value set live**: a trainer raising `fix_saturation`
+    to the full color (1) at the point's 40 cd/m² is told, once, naming the structures (XC-545),
+    the share of chroma the sRGB standard cannot show there; a warning he accepts by making the
+    change, said on the changes feed, and the value applies."""
+    from wl_xcon.check import check_task as loaded
+
+    task = _load_task(TASK_FILE)
+    at_load = loaded(task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=SRGB,
+                     deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+    assert "color-set-desaturated" not in {f.code for f in at_load}
+
+    trainer = _Sets("fix_saturation", (1.0,))
+    session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
+    session.run()
+
+    assert session.refusals == []
+    every = [row for row in _rows(session, "warnings.jsonl")
+             if row["code"] == "color-set-desaturated"]
+    assert len(every) == 1, every
+    assert every[0]["how"] == "set" and "fix_" in every[0]["detail"], every[0]
+    assert every[0]["detail"].startswith("in structures 'search', ")
+    fed = [said for kind, _, _, said in session.controls
+           if kind == "warning" and said.startswith("color-set-desaturated")]
+    assert fed == [f"color-set-desaturated: {every[0]['detail']}"]
+    lines = _rows(session, "trials.jsonl")
+    assert 1.0 in {line["params"]["fix_saturation"] for line in lines}
 
 def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_reads_it(tmp_path):
     """XC-491, wl-preproc's answer of 2026-11-14, accepted with one rename: **the trial line's key
@@ -1320,23 +1354,10 @@ DIM = measured(**{name: xyY(x, y, Y * 0.1) for name, (x, y, Y) in PRIMARIES.item
                id="dim@2027-01-20")
 
 
-def _dim_enough(folder: Path) -> Path:
-    """**The pop-out with its fixation point at 15 cd/m²**, both looks, written into `folder` with
-    its colors beside it as wl-xtasks holds them: since the pop-out's revision the point's looks are
-    color-set lights, held to the set's apex as the colors are, and `DIM` cannot show the apex at the
-    point's 40 cd/m² (`test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_
-    value`). Engine test material, not the PI's task."""
-    (folder / "tasks").mkdir(parents=True, exist_ok=True)
-    (folder / "stimuli").mkdir(exist_ok=True)
-    (folder / "stimuli" / "isohue.json").write_text(STIMULI.read_text())
-    text = TASK_FILE.read_text()
-    for name in ("fix_luminance", "fix_act_luminance"):
-        old = f'Param("{name}", unit="cd/m2", high=80.0, start=40.0,'
-        assert text.count(old) == 1, old
-        text = text.replace(old, f'Param("{name}", unit="cd/m2", high=80.0, start=15.0,')
-    path = folder / "tasks" / "popout_search.py"
-    path.write_text(text)
-    return path
+#: **The fixation point brought within `DIM`'s reach for a run**, both looks at 15 cd/m²: given as
+#: the run's starting values, never as a copy of the task (the pop-out revision's whole-build
+#: review, the controller's ruling on Task 7's concern 3).
+WITHIN_DIM = {"fix_luminance": 15.0, "fix_act_luminance": 15.0}
 
 
 def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_value(tmp_path):
@@ -1347,29 +1368,35 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
     (`color-set-unreachable`), as it was over the old range of 1 to 30 -- **a trainer's live value
     above that top is refused**, the previous value standing, with a sentence naming it, while one
     below it is taken; **and a run starting above it is refused** -- by the pre-flight and by
-    `Session.run` -- naming it too. **Since the pop-out's revision** its fixation point's looks are
-    color-set lights at 40 cd/m², which this panel cannot show either, so the pop-out as written is
-    refused here at load, naming the point's brightness, as the colors are at a start it cannot
-    show (`unrealizable-color`); the rest is read on the pop-out with the point at 15
-    (`_dim_enough`)."""
+    `Session.run` -- naming it too. **The fixation point's looks**, color-set lights at 40 cd/m²
+    since the pop-out's revision, which this panel cannot show either, **follow the same rule**
+    (the whole-build review, the controller's ruling; `check._reachable_starts`): the pop-out as
+    written loads with `color-set-unreachable` naming the point's brightness and the top, and a run
+    starting at the point's 40 is refused naming the top; given 15 (`WITHIN_DIM`), it runs."""
     from wl_xcon.preflight import FAIL, values as starting_values
 
-    as_written = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)),
-                            geometry=DIRECT, calibration=DIM, deployment=Deployment.RIG_FIXED,
-                            source=TASK_FILE)
-    refusing = [f.detail for f in as_written if f.blocking]
-    assert refusing and all("luminance=40.0" in detail and "fix_" in detail
-                            for detail in refusing), refusing[:2]
-    dimmer = _dim_enough(tmp_path / "dimmer")
-    found = check_task(_load_task(dimmer), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
-                       calibration=DIM, deployment=Deployment.RIG_FIXED, source=dimmer)
+    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)),
+                       geometry=DIRECT, calibration=DIM, deployment=Deployment.RIG_FIXED,
+                       source=TASK_FILE)
     assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
-    assert "color-set-unreachable" not in {f.code for f in found}
+    unreached = [f.detail for f in found if f.code == "color-set-unreachable"]
+    assert len(unreached) == 2 and all("40 cd/m²" in said and "about 18.9 cd/m²" in said
+                                       for said in unreached), unreached
+    assert {said.split("setting ")[1].split(",")[0] for said in unreached} == {
+        "'fix_luminance'", "'fix_act_luminance'"}
+    assert not [said for said in unreached if "'color_luminance'" in said]
     assert "color-set-desaturated" in {f.code for f in found}, "at 15, as written it is not shown"
+
+    point = starting_values(_load_task(TASK_FILE), {}, (), "training", calibration=DIM)
+    assert point.result == FAIL and "at 40 cd/m²" in point.said and "reachable top" in point.said
+    as_written = _opened(replace(_spec(tmp_path / "written", seed=5, start_block="Fade-in"),
+                                 calibration=DIM), Simulated())
+    with pytest.raises(SystemExit, match="task refused, run not started: .*at 40 cd/m²"):
+        as_written.run()
 
     refused = _Locks("color_luminance", 25.0, stop_at=5)
     session = _opened(replace(_spec(tmp_path / "live", seed=5, start_block="Fade-in"),
-                              calibration=DIM, task=str(dimmer)), refused)
+                              calibration=DIM, values=dict(WITHIN_DIM)), refused)
     refused.session = session
     session.run()
     assert session.refusals == [("color_luminance", JAKE, (
@@ -1381,45 +1408,74 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
 
     taken = _Locks("color_luminance", 18.0, stop_at=5)
     within = _opened(replace(_spec(tmp_path / "within", seed=5, start_block="Fade-in"),
-                             calibration=DIM, task=str(dimmer)), taken)
+                             calibration=DIM, values=dict(WITHIN_DIM)), taken)
     taken.session = within
     within.run()
     assert within.refusals == []
     assert [line["params"]["color_luminance"] for line in _rows(within, "trials.jsonl")][1:] == (
         [18.0] * (len(_rows(within, "trials.jsonl")) - 1))
 
-    item = starting_values(_load_task(dimmer), {"color_luminance": 25.0}, (), "training",
-                           calibration=DIM)
+    item = starting_values(_load_task(TASK_FILE), {**WITHIN_DIM, "color_luminance": 25.0}, (),
+                           "training", calibration=DIM)
     assert item.result == FAIL and "its reachable top" in item.said
     assert "about 18.9 cd/m²" in item.said
     started = _opened(replace(_spec(tmp_path / "start", seed=5, start_block="Fade-in"),
-                              calibration=DIM, values={"color_luminance": 25.0},
-                              task=str(dimmer)), Simulated())
+                              calibration=DIM, values={**WITHIN_DIM, "color_luminance": 25.0}),
+                      Simulated())
     with pytest.raises(SystemExit, match="task refused, run not started: .*about 18.9 cd/m²"):
         started.run()
 
 
-#: A panel a twenty-fifth as bright as `DIM`: the four colors' reachable top on it, under 1 cd/m²,
-#: is below `color_luminance`'s start, 15.
+#: A panel a twenty-fifth as bright as `DIM`: the four colors' reachable top on it, about 0.75
+#: cd/m², is below `color_luminance`'s start, 15 (computed 2026-11-19 with `check.reachable_top`).
 DARK = measured(**{name: xyY(x, y, Y * 0.004) for name, (x, y, Y) in PRIMARIES.items()},
                 id="dark@2027-01-20")
+#: A panel a two-hundredth as bright as `DARK`: it cannot show the set's apex even at 0.05 cd/m²,
+#: the least a luminance setting is read from (`check.DESATURATED_STEP`).
+BLACK = measured(**{name: xyY(x, y, Y * 0.00002) for name, (x, y, Y) in PRIMARIES.items()},
+                 id="black@2027-01-20")
+
+
+def test_a_panel_that_cannot_show_the_colors_at_their_start_warns_and_refuses_the_run(tmp_path):
+    """XC-494's rule at a start (the pop-out revision's whole-build review, the controller's ruling
+    on Task 7's concern 3, `check._reachable_starts`): where a panel cannot show the four colors at
+    `color_luminance`'s start, 15 cd/m², not even the set's apex, but can at a lower value the
+    setting allows, **the task loads with `color-set-unreachable`**, naming the start and the
+    panel's reachable top, about 0.75 cd/m², and is checked there; **a run starting at the start
+    is refused**, by the pre-flight and by `Session.run`, since its first trial could not be drawn.
+    Until 2026-11-19 the task was refused at load (`unrealizable-color`)."""
+    from wl_xcon.preflight import FAIL, values as starting_values
+
+    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                       calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+    assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
+    (colors,) = [f.detail for f in found if f.code == "color-set-unreachable"
+                 and "'color_luminance'" in f.detail]
+    assert "15 cd/m²" in colors and "about 0.75 cd/m²" in colors, colors
+
+    item = starting_values(_load_task(TASK_FILE), {}, (), "training", calibration=DARK)
+    assert item.result == FAIL and "at 15 cd/m²" in item.said and "reachable top" in item.said
+    started = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), calibration=DARK),
+                      Simulated())
+    with pytest.raises(SystemExit, match="task refused, run not started: .*at 15 cd/m²"):
+        started.run()
 
 
 def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_refuses_the_task():
-    """XC-494's other side: where a panel cannot show the four colors at `color_luminance`'s start,
-    15 cd/m², not even the set's apex, a run could not draw its first trial, so **the task is
-    refused at load**, as a fixed luminance it cannot show is (`unrealizable-color`): every color
+    """XC-494's other side: where a panel cannot show the four colors at any luminance their
+    setting allows, not even the set's apex at 0.05 cd/m², no trial could be drawn, so **the task
+    is refused at load**, as a fixed luminance it cannot show is (`unrealizable-color`): every color
     the task can draw, at the start -- since the console settings plan's Task 11 its lowest is
-    open, so the load judges it there, where it judged both ends of the old range of 1 to 30 --
-    the lights handed on as given (`check._within_reach`; CI's sweep of run 42496196528, where it
-    survived neutering, nothing else refusing them)."""
+    open, so the load judges it there -- the lights handed on as given (`check._within_reach`; CI's
+    sweep of run 42496196528, where it survived neutering, nothing else refusing them)."""
     found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
-                       calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+                       calibration=BLACK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
     # The color set's own, the fixation point's lights at their 40 cd/m² among them since the
     # pop-out's revision made its looks color-set lights.
     unshown = [f for f in found if f.code == "unrealizable-color" and "'isohue'" in f.detail]
 
     assert unshown and all(f.blocking for f in unshown)
+    assert "color-set-unreachable" not in {f.code for f in found}
     for color in ("blue", "purple", "red", "green"):
         for end in ("luminance=15.0",):
             assert any(f"'isohue', '{color}'" in f.detail and end in f.detail for f in unshown), (
@@ -1618,10 +1674,11 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     on either calibration but the set size's top -- read at the PI's 36 (2026-11-19), whose 1.5°
     windows crowd on the 8° ring -- and none at its starts set (`check.laid_out`; twelve 1° discs
     on the 8° ring, 4.13° apart, their windows and the 2° fixation window clear of each other),
-    nor any limit without its reason. **And on the default calibration, the fixation point's
-    saturation read at its top** since the pop-out's revision: the full color at 40 cd/m², which
-    the sRGB standard shows paler (`color-set-desaturated`, once for each structure drawing the
-    point), while at its start, 0, the point is the set's gray."""
+    nor any limit without its reason. **And the fixation point's saturation judged at its start**
+    (the pop-out revision's whole-build review, the controller's ruling): at 0 the point is the
+    set's gray, which every panel shows, so no `color-set-desaturated` at load on either
+    calibration; raised live it is warned of
+    (`test_raising_the_fixation_points_saturation_live_warns_once`)."""
     from wl_xcon.check import LAYOUT, UNEXPLAINED_LIMIT, laid_out
 
     allocation = _load_allocation(Path(ALLOCATION))
@@ -1629,13 +1686,9 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     for calibration in (SRGB, measured()):
         found = check_task(task, allocation, geometry=DIRECT, calibration=calibration,
                            deployment=Deployment.RIG_FIXED, source=TASK_FILE)
-        said = [f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}
-                and f.code != "color-set-desaturated"]
+        said = [f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}]
         # Only the set size's top (a closed range is read at its ends): the PI's 36, 2026-11-19.
         assert len(said) == 1 and "36 objects ('set_size')" in said[0], said
-        paler = [f.detail for f in found if f.code == "color-set-desaturated"]
-        assert len(paler) == (len(task.structures) if calibration is SRGB else 0), paler
-        assert all("'fix_luminance'" in detail for detail in paler)
         at_starts = laid_out(task, {**starts, "set_size": 12}, allocation=allocation,
                              geometry=DIRECT, calibration=calibration,
                              deployment=Deployment.RIG_FIXED)
@@ -1804,9 +1857,10 @@ def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(ta
     session.run()
     warned = [said for kind, _, _, said in session.controls if kind == "warning"
               and said.startswith("answer-window-reaches-objects")]
-    # Once for each structure scoring the discs: the search, and the probe of the odd one alone.
-    assert [said.split(": ")[1] for said in warned] == ["in structure 'search'",
-                                                       "in structure 'odd_one_alone'"], warned
+    # Once, naming each structure scoring the discs: the search, and the probe of the odd one
+    # alone (XC-545).
+    assert [said.split(": ")[1] for said in warned] == [
+        "in structures 'search', 'odd_one_alone'"], warned
     assert all("on a ring as small as 4° about it" in said for said in warned)
     assert all("its radius up to 4.5° and theirs up to 1.5°" in said for said in warned)
 

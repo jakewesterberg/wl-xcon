@@ -465,14 +465,11 @@ BEFORE = {"color-on-default", "contrast-on-default", "margin-reaches-bar", "endl
 
 
 def test_the_popout_loads_with_no_warning_it_did_not_have(task):
-    """The plan's seam note: **the revision brings no new warning** but one, on the nominal
-    calibration only, which the PI's rule asks for (TSK-79's fixation point is a setting of hue and
-    saturation, "warn with an explanation"): with every fixation look's saturation read over its
-    range, as a closed range is at load, its top, the full color at 40 cd/m², is more than the
-    sRGB standard shows the set at, so `color-set-desaturated` says how much, naming the
-    fixation point's brightness; at its start, 0, it is the set's gray, which every panel shows.
-    On a measured panel, nothing new. `fixation-hidden-at-go` is gone: the point changes its
-    look at the go."""
+    """The plan's seam note: **the revision brings no new warning** (`fixation-hidden-at-go` is
+    gone: the point changes its look at the go). **A saturation setting is judged at its start at
+    load** (the whole-build review, the controller's ruling): the fixation point's, 0, is the set's
+    gray, which every panel shows, so no `color-set-desaturated` on either calibration; and each
+    warning is said once, naming the structures it is in (XC-545)."""
     from wl_xcon.check import check_task, laid_out
 
     allocation = popout._load_allocation(Path(popout.ALLOCATION))
@@ -483,10 +480,10 @@ def test_the_popout_loads_with_no_warning_it_did_not_have(task):
         assert all(f.is_warning for f in found[name]), found[name]
     assert {f.code for f in found["measured"]} == BEFORE - {"color-on-default",
                                                             "contrast-on-default"}
-    assert {f.code for f in found["default"]} == BEFORE | {"color-set-desaturated"}
-    desaturated = [f.detail for f in found["default"] if f.code == "color-set-desaturated"]
-    assert desaturated and all("'fix_luminance'" in detail and "40 cd/m²" in detail
-                               for detail in desaturated), desaturated
+    assert {f.code for f in found["default"]} == BEFORE
+    # Once each, but the plan's two margins, which say two things (XC-545).
+    assert Counter(f.code for f in found["default"]) == {
+        **dict.fromkeys(BEFORE, 1), "margin-reaches-bar": 2}
     starts = {param.name: param.start for param in task.params if param.start is not None}
     at_starts = laid_out(task, {**starts, "set_size": 12}, allocation=allocation,
                          geometry=popout.DIRECT, calibration=SRGB,
