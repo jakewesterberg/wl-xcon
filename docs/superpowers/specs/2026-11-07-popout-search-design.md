@@ -4,6 +4,8 @@
 he gave them). The design document a builder plans from. Its plan is a design and a list of tests, built once (the PI,
 2026-11-07, after the whole-project audit: "Yes, lighter").
 
+> **Revised 2026-11-19.** The PI revised this design on 2026-11-16 after trying demo mode ([the pop-out revision design](2026-11-16-popout-revision-design.md), built on `console-build-2026-11-17`): the fixation point stays on when the array appears and its change to an act look is the go, after a go delay the trainer sets (0 s to start); the bounds this design fixed are settings; four special trials, each a percentage, are drawn between trials. Where this text says the fixation dot goes off on the frame the items appear (§3.1), the revision rules; the stages, the staircases and the bars stand.
+
 ## 1. Intent
 
 The lab's first real training task: an animal that already fixates reliably learns to look to the one item that pops

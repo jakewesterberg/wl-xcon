@@ -1351,7 +1351,17 @@ join that never happens.
 
 ---
 
-# OPEN — the pop-out's revision: each trial's kind, whether it stepped, the go, and seven codes (new, 2026-11-19)
+# ANSWERED 2026-11-19 — the pop-out's revision: each trial's kind, whether it stepped, the go, and seven codes (new, 2026-11-19)
+
+> **Accepted by wl-preproc 2026-11-19 with two changes, both built (XC-543 closed).** (1) An array found by `"none"` writes
+> `target: null`, and the place an odd one would hold under its own key, `odd_place` (the index among the array's
+> objects); on every other array `odd_place` is absent or null. (2) The trial line's `kind` is renamed **`trial_kind`**
+> (same values, always written). Accepted as written: `stepped`, the start row's `specials`, `found_by`, `objects[].drawn`,
+> the looks and `go_delay` as params, the go as the fix entry's `update` with `changed: ["looks"]`, and items 6 and 8.
+> Codes 4139-4145 are not theirs to name (wl-xtasks' range, ADR-0007); no objection. **A correction to item 7:**
+> `correct_reject` and `false_alarm` are **not** in wl-preproc's frozen layer; they are ours (`wl_xcon/task.py`,
+> allocation 4123 and 4124), strobed as `TRIAL_CORRECT` and `TRIAL_ERROR` by our `codes.py`. The text below is the ask as
+> sent; read `kind` as `trial_kind` and item 3's target as above.
 
 Opened 2026-11-19 on the PI's approved design (`docs/superpowers/specs/2026-11-16-popout-revision-design.md`), backlog
 XC-543, **before any of these shapes is written**, as XC-491 and XC-513 were. Read against our source on 2026-11-19
@@ -1376,7 +1386,7 @@ them.
 
 ## What changes on our side
 
-**1. Each trial line gains `kind` and `stepped`**, always written.
+**1. Each trial line gains `kind` (answered: `trial_kind`) and `stepped`**, always written.
 - `kind`: `"normal"` or a special kind's name (`"target_absent"`, `"odd_place_empty"`, `"distractor_alone"`,
   `"odd_one_alone"`) for a task declaring special trials; `null` for one declaring none. The line's `structure` names the
   structure it played.
@@ -1403,7 +1413,7 @@ appearances in REC-27's form; `fix_color` and `fix_act_color`, color-set lights 
 **6. The go and reaction time.** The task's reaction time runs from `GO_CUE` to `SACCADE_ONSET` (4098), no longer from
 `ARRAY_ON` (4103); with `go_delay` 0 the two are on one frame. Where a reader derives one, it starts at `GO_CUE`.
 
-**7. Two outcomes this work now reaches**, both already in the frozen layer: `correct_reject`, a catch held;
+**7. Two outcomes this work now reaches**, said to be in the frozen layer (answered: they are not; they are ours, see the note at the top): `correct_reject`, a catch held;
 `false_alarm`, a catch broken (reasons 4123, 4124).
 
 **8. Told, not asked:** a state whose wait is 0 now lasts no frame, so a trial with a zero `timeout` ends on the frame of
@@ -1420,3 +1430,13 @@ its error, one frame sooner than before.
 - The new settings' names: values in `params`.
 - Any timing claim: nothing here is measured; the one-frame note in item 8 is a consequence of the engine's rule, not a
   figure.
+
+## Told, not asked (added 2026-11-19, on the answer; the record's shape is unchanged by either)
+
+- **The start row's `specials` is written with sorted keys**, not in the declared order above: `record.run_row` sorts
+  every row's keys. The declared order is the task's (its hash is on the start row), so a reader reproducing the draw
+  takes the order from the task, not from the row.
+- **A new wire command, `choice`** (`link.SetChoice`, kind `"choice"`): the console picks a setting's choice by its
+  words, a look's shape among them (`fix_look`, `fix_act_look`). It is recorded as an ordinary value set (a `set` change of
+  the setting, as any other), with no new record shape.
+

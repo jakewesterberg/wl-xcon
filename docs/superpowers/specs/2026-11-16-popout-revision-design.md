@@ -7,6 +7,8 @@
   scaling, colors, sections and the Training tab.
 - wl-xtasks is curated with the PI, so the task's change is reviewed with him.
 
+> **Built 2026-11-19** on `console-build-2026-11-17` (the plan's Tasks 1 to 7, with 5b; wl-xtasks `popout-revision-2026-11-16`), not merged. wl-preproc accepted its record shapes the same day with two changes (a trial line's `trial_kind`; an array with no target writes `target: null` and its `odd_place`), see [pending-wl-preproc-amendments.md](../../pending-wl-preproc-amendments.md). Where the build and this text differ, the plan's amendments and `decisions.md` (TSK-78 to TSK-80) rule.
+
 ## 1. Why
 
 Trying the pop-out with the mouse, the PI asked for catch trials:

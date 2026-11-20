@@ -37,6 +37,10 @@ the rig service and its page, and a live rig's page opens one for the test monke
 the pop-out search by a scripted pointer and by a browser's mouse. **The operator document is still owed**
 (XC-014), so M1 is still not met.
 
+*Amended 2026-11-19:* the pop-out search is revised on the branch `console-build-2026-11-17` (not merged): its fixation point stays on
+and its change is the go, four special trials, and its bounds as settings ([the revision's design](superpowers/specs/2026-11-16-popout-revision-design.md)).
+It has run only in simulation and with the mouse; the M1 gate, a task run on a rig, is not met by it.
+
 ## M2 — Display validated on rig hardware
 Protocol V1 on at least one rig: photodiode-measured onset lag and variability, dropped-frame rate
 over a 2 h stress run; protocol **V9** for split-panel per-half photometry and stereo viewport
