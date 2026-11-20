@@ -26,6 +26,10 @@ draws (`Seeing.display`, before the frame's sample is polled) and told each stat
   It lands on the target with probability `accuracy`; otherwise on a distractor if one is drawn,
   else on empty space. Where each is, is where the display draws it on the frame the saccade
   starts (an array's objects wherever its last `Show` or `Update` put them, `task.placements`).
+- **It holds what only ends a trial wrong**: an `Exited` edge to a wrong outcome, or to a state
+  from which no right outcome can be reached (`_lost`; the delayed pop-out's `delay`, whose
+  `Exited("fix")` enters the timeout state `early`), asks the eye to stay, not to answer: it waits
+  for the go (2026-11-19, the whole-build review's I2).
 - **Early, before the go, at its early rate**: on a trial drawn early (`early_rate`), the eye
   holding a fixation window it is asked to stay in leaves it once, after a latency from when the
   hold began, as an answer would go; so a hold shorter than the latency answers the go instead.
@@ -134,6 +138,24 @@ _ANSWER = 2
 _EARLY = 3
 _AWAY = 4
 _ALARM = 5
+
+
+def _lost(trial: Trial) -> frozenset:
+    """**The names of `trial`'s states from which no right outcome (`RIGHT`) can be reached**, by
+    any path of their edges: between trials (`Eye._read`)."""
+    edges = {state.name: [edge.to for edge in state.go] for state in trial.states}
+    right: set = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, ends in edges.items():
+            if name in right:
+                continue
+            if any((isinstance(to, Outcome) and to in RIGHT)
+                   or (isinstance(to, str) and to in right) for to in ends):
+                right.add(name)
+                changed = True
+    return frozenset(name for name in edges if name not in right)
 
 
 class Eye:
@@ -262,6 +284,11 @@ class Eye:
         self._distractors = tuple(distractors)
         # What a false alarm can land on: the error windows, and every array's distractors.
         lures = list(distractors)
+        # **The states from which no right outcome can be reached** (follow their edges): leaving
+        # a window into one ends the trial wrong as surely as an edge to a wrong outcome does,
+        # however many states it passes through -- the delayed pop-out's `Exited("fix") ->
+        # "early"`, a timeout state before its fixation break -- so the eye holds it.
+        lost = _lost(trial)
         asks: dict = {}
         for state in trial.states:
             seek: list = []
@@ -280,7 +307,8 @@ class Eye:
                 if isinstance(guard, Hold):
                     held.append(guard.window)
                 elif isinstance(guard, Exited):
-                    if isinstance(edge.to, Outcome) and edge.to not in RIGHT:
+                    if ((isinstance(edge.to, Outcome) and edge.to not in RIGHT)
+                            or (isinstance(edge.to, str) and edge.to in lost)):
                         held.append(guard.window)
                     else:
                         left.append(guard.window)

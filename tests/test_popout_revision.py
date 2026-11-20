@@ -637,6 +637,27 @@ def test_a_simulated_session_with_specials_runs_end_to_end_through_the_simulated
         assert trial.outcome == marker.name.removeprefix("TRIAL_").lower(), line
 
 
+@pytest.mark.parametrize("go_delay", [0.0, 0.3])
+def test_a_simulated_session_plays_the_delayed_version_through_the_simulated_eye(task, tmp_path,
+                                                                                 go_delay):
+    """The delayed version the PI asked for, the path, not the piece (the whole-build review's I2):
+    **a session of Crowd at `go_delay` 0.3 plays as one at 0** -- the simulated eye holds the point
+    through the delay, since leaving it there enters `early`, from which no right outcome can be
+    reached (`simeye._lost`), and answers after the go -- so most trials are answered right, a
+    catch is mostly held, and fixation breaks stay few. Until 2026-11-19 the eye read the delay as
+    a relay it should answer, and 243 of 299 such trials were breaks."""
+    _, lines = _session(tmp_path, stop=220,
+                        values={**dict.fromkeys(SHARES, 10), "go_delay": go_delay},
+                        false_alarm_rate=0.1)
+    assert {line["params"]["go_delay"] for line in lines} == {go_delay}
+    outcomes = Counter(line["outcome"] for line in lines)
+    assert len(lines) >= 150, outcomes
+    assert outcomes["correct"] >= 0.35 * len(lines), outcomes
+    assert outcomes["correct_reject"] >= 0.12 * len(lines), outcomes
+    assert outcomes["fixation_break"] <= 0.12 * len(lines), outcomes
+    assert outcomes["false_alarm"] >= 1, outcomes
+
+
 def test_a_session_spec_carries_the_false_alarm_rate_to_the_eye(tmp_path, monkeypatch):
     """The plan's Task 6, carried to Task 7: **a session's simulated eye takes its false-alarm rate
     from its spec** (`SessionSpec.false_alarm_rate`), 0 by default, so a simulated session can
