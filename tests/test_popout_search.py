@@ -270,10 +270,13 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     ends a run; and the suggestions' margin, up to 20 answers, can reach a bar's count on the
     smallest windows (`margin-reaches-bar`; the re-review 2, M-7), the training plan's settings
     being read over their ranges; and the set size read at its top, the PI's 36 (2026-11-19), which
-    crowds the ring's windows (`crowded-array`); and its go hides the fixation point
-    (`fixation-hidden-at-go`; TSK-79, the PI's rule of 2026-11-16 that the point stays on and changes
-    its look at the go), until the pop-out revision's Task 7 gives it its act look in wl-xtasks.
-    **Since the console settings plan's Task 11 nothing else**: its
+    crowds the ring's windows (`crowded-array`). **Since the pop-out's revision** its go no longer
+    hides the fixation point (no `fixation-hidden-at-go`; TSK-79: the point stays on and takes its
+    act look), and on the default calibration the fixation point's saturation, read over its range
+    at load as a closed range is, reaches the full color at 40 cd/m², past what the sRGB standard
+    shows the set at (`color-set-desaturated`, naming the point's brightness; at its start, 0, it
+    is the set's gray: `test_popout_revision.py`). **Since the console settings plan's Task 11
+    nothing else**: its
     caps gone and its open sides judged at their starts (the controller's ruling 5), the layout
     warns of nothing there (`test_the_popout_loads_with_no_layout_warning_at_its_starts`) -- the
     windows that could overlap over the old ranges (`crowded-array`), the fixation window reaching
@@ -293,12 +296,11 @@ def test_popout_loads_clean_but_the_expected_warnings(task):
     for found in (on_default, on_measured):
         assert [f for f in found if any(f.refuses(kind) for kind in SESSION_KINDS)] == []
         assert all(f.is_warning for f in found), found
-    hidden = {"fixation-hidden-at-go"}
     assert {f.code for f in on_default} == {"color-on-default", "contrast-on-default",
                                              "margin-reaches-bar", "endless-plan",
-                                             "crowded-array"} | hidden
+                                             "crowded-array", "color-set-desaturated"}
     assert {f.code for f in on_measured} == {"margin-reaches-bar", "endless-plan",
-                                              "crowded-array"} | hidden
+                                              "crowded-array"}
     # The set size's range is closed (a highest is kept for `unbounded-set-size`), so the load
     # reads it at its top: the PI's 36 (2026-11-19) on the 8° ring crowds the 1.5° windows.
     for found in (on_default, on_measured):
@@ -313,9 +315,14 @@ def test_it_holds_the_pis_values(task):
     number is a setting** (the PI, 2026-11-07: "everything should be adjustable in the console,
     no?"): the sizes, the colors' brightness, the bars and their windows, the staircases' counts and
     steps, each starting at the PI's value, and none of them a difficulty but the sizes and the
-    brightness."""
+    brightness. **Since the pop-out's revision** (its design, §2 to §6) the task has its four special
+    kinds' structures beside the search, the array appears with its delay, the fixation point is
+    drawn in its hold look and scored by its own window throughout, and the engine's waits are
+    settings too (`test_popout_revision.py` holds the rest)."""
     trial = task.trial
-    assert list(task.structures) == ["search"] and task.default == "search"
+    assert list(task.structures) == ["search", "target_absent", "odd_place_empty",
+                                     "distractor_alone", "odd_one_alone"]
+    assert task.default == "search"
     starts = {param.name: param.start for param in task.params}
     assert {name: starts.get(name) for name in (
         "inter_trial", "fix_acquisition", "fix_hold", "response_deadline", "target_hold",
@@ -338,14 +345,17 @@ def test_it_holds_the_pis_values(task):
         "odd_color", "distractor_color"]
     assert all(param.choices for param in task.params if param.start is None)
     assert trial.background is None, "black, the default bottom layer"
-    # The array appears with the go, so a trial that reaches it and ends unanswered is a failure:
-    # "a wrong item and no response count as failures" (§3.4; the build's review, I1).
-    assert trial.counting == Counting(after_stimulus=SPENT, appears="go")
+    # The array appears with its delay, before the go, so a trial that reaches it and ends
+    # unanswered is a failure: "a wrong item and no response count as failures" (§3.4; the build's
+    # review, I1).
+    assert trial.counting == Counting(after_stimulus=SPENT, appears="delay")
 
     shows = {action.stimulus.name: action.stimulus
              for _, action in actions_of(trial) if isinstance(action, Show)}
     assert set(shows) == {"fix", "search"}
-    assert isinstance(shows["fix"].looks, Disc) and shows["fix"].looks.size == P("fix_size")
+    assert shows["fix"].looks == P("fix_look")
+    (hold,) = [param for param in task.params if param.name == "fix_look"]
+    assert isinstance(hold.start, Disc) and hold.start.size == P("fix_size")
     ring = shows["search"].looks
     assert isinstance(ring, Array) and ring.radius == P("ring_radius") and ring.n == P("set_size")
     assert (ring.looks, ring.among) == (P("odd_color"), P("distractor_color"))
@@ -355,8 +365,7 @@ def test_it_holds_the_pis_values(task):
     windows = {window.name if isinstance(window, Window) else window.of: (
         window.radius if isinstance(window, Window) else window.scale)
         for window in trial.windows}
-    assert windows == {"fix": P("fix_window"), "center": P("fix_window"),
-                       "search": P("object_window")}
+    assert windows == {"fix": P("fix_window"), "search": P("object_window")}
     assert any(isinstance(window, ObjectWindows) for window in trial.windows)
     rewards = [action for _, action in actions_of(trial) if isinstance(action, Reward)]
     assert rewards == [Reward("reward_correct")]
@@ -426,17 +435,19 @@ def test_its_pairings_are_named_by_their_colors_for_the_trainer_and_the_reviewer
 
 
 def test_the_go_is_the_frame_the_array_appears(task):
-    """§3.1, "no delay between array presentation and fixation dimming/go cue": the discs come on
-    and the fixation point goes off on one frame, the frame the trial enters `go`, after the second
-    of blank screen between trials and the fixation held 0.5 s. Held 0.3 s, the odd one pays one
-    reward and the trial ends, with no timeout."""
+    """§3.1, "no delay between array presentation and fixation dimming/go cue", as revised (the
+    pop-out revision's §3, `go_delay` 0 to start): the discs come on and the fixation point takes
+    its act look on one frame, the frame the trial enters `go`, after the second of blank screen
+    between trials and the fixation held 0.5 s; **the point stays on** (§2). Held 0.3 s, the odd
+    one pays one reward and the trial ends, with no timeout."""
     result, eye, log = _play(task, [LOOK, ("go", 48, ODD_ONE)])
 
     shown = _shown(result)
     assert result.outcome is Outcome.CORRECT, result.visited
     go = eye.begun["go"]
     assert eye.begun["await_fix"] == 1 + HZ, "a second of blank screen between trials"
-    assert shown["fix"] == (eye.begun["await_fix"], go)
+    assert shown["fix"] == (eye.begun["await_fix"], None)
+    assert [(changed.name, changed.frame) for changed in result.changed] == [("fix", go)]
     assert shown["search"] == (go, None)
     assert go == eye.begun["hold_fix"] + round(0.5 * HZ)
     assert result.frames == eye.begun["on_target"] + round(0.3 * HZ) - 1
@@ -520,7 +531,7 @@ def test_an_eye_already_at_the_center_as_the_fixation_point_comes_on_has_entered
     result, eye, log = _play(task, [("go", 48, ODD_ONE)], eye_at=FIXATION)
 
     assert result.outcome is Outcome.CORRECT, result.visited
-    assert result.visited[:4] == ("between", "await_fix", "hold_fix", "go")
+    assert result.visited[:5] == ("between", "await_fix", "hold_fix", "delay", "go")
     shown = _shown(result)
     assert eye.begun["await_fix"] == 1 + HZ, "a second of blank screen between trials"
     assert shown["fix"][0] == eye.begun["await_fix"]
@@ -706,11 +717,14 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     (`color_sets`): as its file reads, and as this rig's calibration drew it -- each color as shown,
     the chroma given up together, each color's output levels, **at each luminance the run's values
     draw it at** (the fix round: `color_luminance` a setting), a list. So each line's whole
-    parameter set of a Fade-in session is under 1.25 KB -- under 1 KB before the fix round made
+    parameter set of a Fade-in session is under 2.75 KB -- under 1 KB before the fix round made
     twelve more of its numbers settings, each a key of every line, and each look's luminance a
-    reference to one, 0.15 KB in all -- (the line's other keys, each stimulus's place among them,
-    are as they were), no line realizes the set again (`color_realized` null), and the record still
-    reads back: the run's stage and pool, as wl-xcon's own resume finds them."""
+    reference to one, 0.15 KB in all; under 1.25 KB before the pop-out's revision added 22
+    settings, the bounds, graces, shares and the fixation point's two looks among them, 1.4 KB, the
+    looks and their hues 0.86 KB of it, each written as a reference to its settings, never a color
+    set -- (the line's other keys, each stimulus's place among them, are as they were), no line
+    realizes the set again (`color_realized` null), and the record still reads back: the run's
+    stage and pool, as wl-xcon's own resume finds them."""
     from wl_xcon import resume
     from wl_xcon.taskd import went_on
 
@@ -722,7 +736,7 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     assert len(lines) >= 30
     # Each line's `params` as the record writes it: keys sorted, `json`'s separators.
     weights = [len(json.dumps(line["params"], sort_keys=True).encode()) for line in lines]
-    assert max(weights) < 1280, sorted(weights)[-3:]
+    assert max(weights) < 2816, sorted(weights)[-3:]
     assert all(line["color_realized"] is None for line in lines)
     by_reference = {"class": "P", "fields": {"name": "distractor_fraction"}}
     brightness = {"class": "P", "fields": {"name": "color_luminance"}}
@@ -744,17 +758,23 @@ def test_each_line_names_its_colors_and_each_run_defines_the_set_once(task, tmp_
     assert {name: text.count(source) for name, text in written.items() if source in text} == {
         "runs.jsonl": 1}, "the set's definition is in the record once"
     (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
-    shown = photometry.realize(theirs, SRGB)
+
+    def realized(luminance: float) -> dict:
+        shown = photometry.realize(theirs, SRGB, luminance)
+        return {"luminance_cd_m2": luminance, "desaturation": shown.desaturation,
+                "xy": {color: list(xy) for color, xy in shown.xy.items()},
+                "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
+                "drive": {color: list(levels) for color, levels in shown.drive.items()},
+                "macaque_row": list(photometry.macaque_row(SRGB))}
+
     assert start["calibration"] == SRGB.id
+    # At each luminance the run's values draw it at: the colors' 15, and since the pop-out's
+    # revision the fixation point's 40, its two looks color-set lights, in the order first met.
     assert start["color_sets"] == {"isohue": {
         "name": "isohue", "colors": {color: list(xy) for color, xy in theirs.colors.items()},
         "apex": list(theirs.apex), "luminance_cd_m2": 15.0, "held": "macaque_2deg_LM1",
         "source": theirs.source, "design": theirs.design,
-        "realized": [{"luminance_cd_m2": 15.0, "desaturation": shown.desaturation,
-                      "xy": {color: list(xy) for color, xy in shown.xy.items()},
-                      "xyz": {color: list(xyz) for color, xyz in shown.xyz.items()},
-                      "drive": {color: list(levels) for color, levels in shown.drive.items()},
-                      "macaque_row": list(photometry.macaque_row(SRGB))}],
+        "realized": [realized(40.0), realized(15.0)],
     }}
 
     restored = resume.read(session.directory, departure=1_700_000_000.0)
@@ -846,7 +866,8 @@ def test_a_simulated_session_runs_end_to_end_through_the_simulated_eye(tmp_path,
     and each trial's recorded outcome is what a plain `gaze.Tracked` makes of the samples the eye
     gave it. It answers right, on a distractor and early; Fade-in's staircase moves the
     distractors' luminance; and on every trial that reached the go, the discs came on the frame the
-    fixation point went off."""
+    fixation point took its act look (the pop-out revision's §3, `go_delay` 0), the point staying
+    on."""
     played = []
     made = simeye.Eye.world
 
@@ -880,8 +901,10 @@ def test_a_simulated_session_runs_end_to_end_through_the_simulated_eye(tmp_path,
     went = [line for line in lines if line["shown"]]
     assert went
     for line in went:
-        stimuli = {entry["name"]: entry for entry in line["stimuli"]}
-        assert stimuli["fix"]["off"] == stimuli["search"]["frame"], line["stimuli"]
+        stimuli = {(entry["name"], entry["kind"]): entry for entry in line["stimuli"]}
+        assert stimuli["fix", "update"]["frame"] == stimuli["search", "show"]["frame"], (
+            line["stimuli"])
+        assert stimuli["fix", "update"]["changed"] == ["looks"]
 
 
 class _Locks(Simulated):
@@ -1114,7 +1137,9 @@ def test_a_staircase_step_changed_live_re_derives_its_levels(tmp_path):
 
 def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tmp_path):
     """The trainer dims the colors from 15 to 12 cd/m² of macaque luminance (`color_luminance`) at
-    the run's fifth trial. The run's start row realizes the set at 15; the first line drawn at 12
+    the run's fifth trial. The run's start row realizes the set at 15 -- and at 40, the fixation
+    point's brightness, its two looks color-set lights since the pop-out's revision; the first line
+    drawn at 12
     carries the set realized at 12 -- each color's chromaticity as shown, the chroma given up
     together and its output levels -- and no other line does, so a reader knows each trial's drawn
     light from its line's `color_luminance` and the record alone, without the rig: the realization
@@ -1129,8 +1154,8 @@ def test_the_colors_brightness_changed_live_is_realized_once_and_written_once(tm
     (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
     theirs = photometry.ColorSet.load(STIMULI)
     at = {luminance: photometry.realize(theirs, SRGB, luminance) for luminance in (15.0, 12.0)}
-    assert [entry["luminance_cd_m2"] for entry in start["color_sets"]["isohue"]["realized"]] == [
-        15.0]
+    assert sorted(entry["luminance_cd_m2"]
+                  for entry in start["color_sets"]["isohue"]["realized"]) == [15.0, 40.0]
     written = [(line["index"], line["color_realized"]) for line in lines
                if line["color_realized"] is not None]
     assert len(written) == 1
@@ -1178,22 +1203,27 @@ def test_brightening_the_colors_past_what_the_panel_shows_warns_live(tmp_path):
     trainer raising it to 28 cd/m² live is told, `color-set-desaturated`, the share of chroma every
     color gives up there, a warning he accepts by making the change (`warnings.jsonl`, `how`
     `set`) and said on the changes feed. Lowering it to 27, the same set still paler than asked,
-    and then back to 15, adds nothing new. The value applies: a warning, never a refusal."""
+    and then back to 15, adds nothing new. The value applies: a warning, never a refusal. **Said
+    once for each structure that draws the colors** since the pop-out's revision gave it its special
+    kinds' (the search's read here)."""
     trainer = _Sets("color_luminance", (28.0, 27.0, 15.0))
     session = _opened(_spec(tmp_path, seed=5, start_block="Fade-in"), trainer)
 
     session.run()
 
     assert session.refusals == []
-    warned = [row for row in _rows(session, "warnings.jsonl")
-              if row["code"] == "color-set-desaturated"]
+    every = [row for row in _rows(session, "warnings.jsonl")
+             if row["code"] == "color-set-desaturated"]
+    assert len(every) == len(_load_task(TASK_FILE).structures)
+    warned = [row for row in every if row["detail"].startswith("in structure 'search': ")]
     assert [(row["how"], row["by"]) for row in warned] == [("set", {"kind": "box",
                                                                     "name": "jake"})]
     assert ("calibration srgb-standard cannot show color set 'isohue' as written at 28 cd/m² of "
             "macaque luminance") in warned[0]["detail"]
     fed = [said for kind, _, _, said in session.controls
            if kind == "warning" and said.startswith("color-set")]
-    assert fed == [f"color-set-desaturated: {warned[0]['detail']}"]
+    assert f"color-set-desaturated: {warned[0]['detail']}" in fed
+    assert len(fed) == len(every)
     lines = _rows(session, "trials.jsonl")
     assert {line["params"]["color_luminance"] for line in lines} == {15.0, 28.0, 27.0}
 
@@ -1224,7 +1254,8 @@ def test_a_luminance_new_to_its_run_is_the_lines_color_realized_and_wl_preproc_r
     (start,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "start"]
     defined = start["color_sets"]["isohue"]
     assert "color_realized" not in defined
-    assert [each["luminance_cd_m2"] for each in defined["realized"]] == [15.0]
+    # The colors' 15, and the fixation point's 40 since the pop-out's revision.
+    assert sorted(each["luminance_cd_m2"] for each in defined["realized"]) == [15.0, 40.0]
     restored = resume.read(session.directory, departure=1_700_000_000.0)
     assert [line["color_realized"] for line in restored.last_run.lines] == [
         line["color_realized"] for line in lines]
@@ -1289,6 +1320,25 @@ DIM = measured(**{name: xyY(x, y, Y * 0.1) for name, (x, y, Y) in PRIMARIES.item
                id="dim@2027-01-20")
 
 
+def _dim_enough(folder: Path) -> Path:
+    """**The pop-out with its fixation point at 15 cd/m²**, both looks, written into `folder` with
+    its colors beside it as wl-xtasks holds them: since the pop-out's revision the point's looks are
+    color-set lights, held to the set's apex as the colors are, and `DIM` cannot show the apex at the
+    point's 40 cd/m² (`test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_
+    value`). Engine test material, not the PI's task."""
+    (folder / "tasks").mkdir(parents=True, exist_ok=True)
+    (folder / "stimuli").mkdir(exist_ok=True)
+    (folder / "stimuli" / "isohue.json").write_text(STIMULI.read_text())
+    text = TASK_FILE.read_text()
+    for name in ("fix_luminance", "fix_act_luminance"):
+        old = f'Param("{name}", unit="cd/m2", high=80.0, start=40.0,'
+        assert text.count(old) == 1, old
+        text = text.replace(old, f'Param("{name}", unit="cd/m2", high=80.0, start=15.0,')
+    path = folder / "tasks" / "popout_search.py"
+    path.write_text(text)
+    return path
+
+
 def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_value(tmp_path):
     """XC-494, by the PI's "warnings over refusals" (2026-10-11): on a panel that cannot show the
     colors at all above about 18.9 cd/m², not even the set's apex, **the task loads**, its start,
@@ -1297,18 +1347,29 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
     (`color-set-unreachable`), as it was over the old range of 1 to 30 -- **a trainer's live value
     above that top is refused**, the previous value standing, with a sentence naming it, while one
     below it is taken; **and a run starting above it is refused** -- by the pre-flight and by
-    `Session.run` -- naming it too."""
+    `Session.run` -- naming it too. **Since the pop-out's revision** its fixation point's looks are
+    color-set lights at 40 cd/m², which this panel cannot show either, so the pop-out as written is
+    refused here at load, naming the point's brightness, as the colors are at a start it cannot
+    show (`unrealizable-color`); the rest is read on the pop-out with the point at 15
+    (`_dim_enough`)."""
     from wl_xcon.preflight import FAIL, values as starting_values
 
-    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
-                       calibration=DIM, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
+    as_written = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)),
+                            geometry=DIRECT, calibration=DIM, deployment=Deployment.RIG_FIXED,
+                            source=TASK_FILE)
+    refusing = [f.detail for f in as_written if f.blocking]
+    assert refusing and all("luminance=40.0" in detail and "fix_" in detail
+                            for detail in refusing), refusing[:2]
+    dimmer = _dim_enough(tmp_path / "dimmer")
+    found = check_task(_load_task(dimmer), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+                       calibration=DIM, deployment=Deployment.RIG_FIXED, source=dimmer)
     assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
     assert "color-set-unreachable" not in {f.code for f in found}
     assert "color-set-desaturated" in {f.code for f in found}, "at 15, as written it is not shown"
 
     refused = _Locks("color_luminance", 25.0, stop_at=5)
     session = _opened(replace(_spec(tmp_path / "live", seed=5, start_block="Fade-in"),
-                              calibration=DIM), refused)
+                              calibration=DIM, task=str(dimmer)), refused)
     refused.session = session
     session.run()
     assert session.refusals == [("color_luminance", JAKE, (
@@ -1320,19 +1381,20 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
 
     taken = _Locks("color_luminance", 18.0, stop_at=5)
     within = _opened(replace(_spec(tmp_path / "within", seed=5, start_block="Fade-in"),
-                             calibration=DIM), taken)
+                             calibration=DIM, task=str(dimmer)), taken)
     taken.session = within
     within.run()
     assert within.refusals == []
     assert [line["params"]["color_luminance"] for line in _rows(within, "trials.jsonl")][1:] == (
         [18.0] * (len(_rows(within, "trials.jsonl")) - 1))
 
-    item = starting_values(_load_task(TASK_FILE), {"color_luminance": 25.0}, (), "training",
+    item = starting_values(_load_task(dimmer), {"color_luminance": 25.0}, (), "training",
                            calibration=DIM)
     assert item.result == FAIL and "its reachable top" in item.said
     assert "about 18.9 cd/m²" in item.said
     started = _opened(replace(_spec(tmp_path / "start", seed=5, start_block="Fade-in"),
-                              calibration=DIM, values={"color_luminance": 25.0}), Simulated())
+                              calibration=DIM, values={"color_luminance": 25.0},
+                              task=str(dimmer)), Simulated())
     with pytest.raises(SystemExit, match="task refused, run not started: .*about 18.9 cd/m²"):
         started.run()
 
@@ -1353,8 +1415,8 @@ def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_r
     survived neutering, nothing else refusing them)."""
     found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
                        calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
-    # The color set's own: the fixation point's gray at its range's top, 80 cd/m², is the
-    # warning it is on any panel too dim for it.
+    # The color set's own, the fixation point's lights at their 40 cd/m² among them since the
+    # pop-out's revision made its looks color-set lights.
     unshown = [f for f in found if f.code == "unrealizable-color" and "'isohue'" in f.detail]
 
     assert unshown and all(f.blocking for f in unshown)
@@ -1369,10 +1431,22 @@ def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_r
 #: §5, the console settings plan's Task 11, the training ones split): each setting's section as
 #: `task.section_of` gives it, the six times by their unit, so naming none.
 SECTIONS = {
-    **dict.fromkeys(("inter_trial", "fix_acquisition", "fix_hold", "response_deadline",
-                     "target_hold", "timeout"), "Timing"),
+    **dict.fromkeys(("inter_trial", "fix_acquisition", "fix_hold", "go_delay",
+                     "response_deadline", "target_hold", "timeout", "blink_grace",
+                     "tracker_lost_grace"), "Timing"),
+    # The bounds on the engine's own waits, settings since the pop-out's revision (its §3).
+    **dict.fromkeys(("fix_hold_limit", "landing_limit", "target_hold_limit", "catch_hold_limit"),
+                    "Timing/bounds"),
+    # Its special trials (the revision's §4 and §5), right after Timing.
+    **dict.fromkeys(("target_absent_percent", "odd_place_empty_percent",
+                     "distractor_alone_percent", "odd_one_alone_percent", "catch_hold"),
+                    "Special trials"),
     **dict.fromkeys(("fix_window", "object_window"), "Gaze windows"),
-    **dict.fromkeys(("fix_size", "fix_luminance"), "Stimuli/fixation point"),
+    # The fixation point's two looks (the revision's §2).
+    **dict.fromkeys(("fix_look", "fix_act_look", "fix_size", "fix_act_size", "fix_hole",
+                     "fix_act_hole", "fix_color", "fix_act_color", "fix_saturation",
+                     "fix_act_saturation", "fix_luminance", "fix_act_luminance"),
+                    "Stimuli/fixation point"),
     **dict.fromkeys(("disc_size", "ring_radius", "set_size", "array_rotation"), "Stimuli/array"),
     # The pairings with the colors they pair (the console interface rework's Task 9).
     **dict.fromkeys(("odd_color", "distractor_color", "color_luminance", "distractor_fraction",
@@ -1387,16 +1461,19 @@ SECTIONS = {
 
 def test_the_popout_declares_the_companion_designs_sections(task):
     """§7 of the console settings design ("The task file names it") and the companion design's §5:
-    Timing; Gaze windows; Stimuli, as fixation point and array; Colors, the pairings among them
-    since the console interface rework's Task 9; and the Training tab's bars, staircases and
-    suggestions. **Every setting has its section**, none falling to
-    Other; the six times name none and go to Timing by their unit; the training ones sit under
-    `TRAINING_SECTION`, which the Training tab gathers (Task 10)."""
+    Timing, its bounds a subsection since the pop-out's revision; Special trials; Gaze windows;
+    Stimuli, as fixation point and array; Colors, the pairings among them since the console
+    interface rework's Task 9; and the Training tab's bars, staircases and suggestions. **Every
+    setting has its section**, none falling to Other; the times name none and go to Timing by
+    their unit; the training ones sit under `TRAINING_SECTION`, which the Training tab gathers
+    (Task 10)."""
     from wl_xcon.task import OTHER, TRAINING_SECTION, section_of
 
     assert {param.name: section_of(param) for param in task.params} == SECTIONS
     assert OTHER not in {section_of(param) for param in task.params}
     times = {name for name, section in SECTIONS.items() if section == "Timing"}
+    assert list(dict.fromkeys(SECTIONS.values()))[:4] == [
+        "Timing", "Timing/bounds", "Special trials", "Gaze windows"]
     assert {param.name: (param.unit, param.section) for param in task.params
             if param.name in times} == dict.fromkeys(times, ("s", ""))
     assert {param.name for param in task.params
@@ -1406,20 +1483,28 @@ def test_the_popout_declares_the_companion_designs_sections(task):
 
 #: **Each limit the pop-out keeps** (the console settings design's §4; the PI, 2026-11-16, "Hard
 #: limits only where impossible"): (lowest, highest), `None` for an open side. A time, a distance,
-#: a luminance and a margin below 0, a count below 1 and a fraction above 1 cannot be; a size's
-#: lowest stays open (the controller's ruling: a size of 0 is refused at the value), and so does
-#: the colors' luminance, which at 0 gives a color no chromaticity, refused at the value too; it
-#: keeps COL-29's highest, as the fixation point's luminance does. **The training
+#: a hole, a margin and a share below 0, a count below 1, a fraction above 1 and a share above 100
+#: cannot be; a size's lowest stays open (the controller's ruling: a size of 0 is refused at the
+#: value), and so does a color-set light's luminance -- the colors', and the fixation point's since
+#: the pop-out's revision -- which at 0 gives a color no chromaticity, refused at the value too; each
+#: keeps COL-29's highest. **The training
 #: plan's settings keep both ends** (`PLANNED_WHY`): this engine's load checks refuse a staircase's
 #: or a bar's setting with an open side (`bad-staircase`, `bad-plan`), as `unbounded-set-size`
 #: refuses a set size with no highest, so each side no standard reason covers keeps its number.
 BOUNDS = {
     **dict.fromkeys(("inter_trial", "fix_acquisition", "fix_hold", "response_deadline",
-                     "target_hold", "timeout"), (0.0, None)),
-    **dict.fromkeys(("fix_window", "disc_size", "fix_size"), (None, None)),
+                     "target_hold", "timeout", "go_delay", "blink_grace", "tracker_lost_grace",
+                     "fix_hold_limit", "landing_limit", "target_hold_limit", "catch_hold_limit",
+                     "catch_hold"), (0.0, None)),
+    **dict.fromkeys(("fix_window", "disc_size", "fix_size", "fix_act_size"), (None, None)),
+    **dict.fromkeys(("fix_hole", "fix_act_hole"), (0.0, None)),
+    **dict.fromkeys(("fix_saturation", "fix_act_saturation"), (0.0, 1.0)),
+    **dict.fromkeys(("target_absent_percent", "odd_place_empty_percent",
+                     "distractor_alone_percent", "odd_one_alone_percent"), (0, 100)),
     "object_window": (0.0, None),
     "ring_radius": (0.0, None),
-    "fix_luminance": (0.0, 80.0),
+    # A color-set light since the pop-out's revision, whose lowest is open as the colors' is.
+    **dict.fromkeys(("fix_luminance", "fix_act_luminance"), (None, 80.0)),
     "color_luminance": (None, 80.0),
     "set_size": (1, 36),
     "array_rotation": (0.0, 360.0),
@@ -1466,8 +1551,11 @@ def test_the_popouts_bounds_are_impossible_ones_with_reasons(task):
     whys = {name: param.why for name, param in numbers.items() if param.why}
     assert whys == {
         "array_rotation": "a direction, written from 0 to 360 (the PI, 2026-10-30)",
-        **dict.fromkeys(("fix_luminance", "color_luminance"),
+        **dict.fromkeys(("fix_luminance", "fix_act_luminance", "color_luminance"),
                         "white on the default calibration, the published sRGB 80 cd/m² (COL-29)"),
+        **dict.fromkeys(("target_absent_percent", "odd_place_empty_percent",
+                         "distractor_alone_percent", "odd_one_alone_percent"),
+                        "a share of trials is at most 100"),
         "set_size": "a run builds every disc before its first frame, so a set size needs a "
                     "highest: 36, the PI's (2026-11-19)",
         **dict.fromkeys(PLANNED, PLANNED_WHY),
@@ -1530,7 +1618,10 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     on either calibration but the set size's top -- read at the PI's 36 (2026-11-19), whose 1.5°
     windows crowd on the 8° ring -- and none at its starts set (`check.laid_out`; twelve 1° discs
     on the 8° ring, 4.13° apart, their windows and the 2° fixation window clear of each other),
-    nor any limit without its reason."""
+    nor any limit without its reason. **And on the default calibration, the fixation point's
+    saturation read at its top** since the pop-out's revision: the full color at 40 cd/m², which
+    the sRGB standard shows paler (`color-set-desaturated`, once for each structure drawing the
+    point), while at its start, 0, the point is the set's gray."""
     from wl_xcon.check import LAYOUT, UNEXPLAINED_LIMIT, laid_out
 
     allocation = _load_allocation(Path(ALLOCATION))
@@ -1538,9 +1629,13 @@ def test_the_popout_loads_with_no_layout_warning_at_its_starts(task):
     for calibration in (SRGB, measured()):
         found = check_task(task, allocation, geometry=DIRECT, calibration=calibration,
                            deployment=Deployment.RIG_FIXED, source=TASK_FILE)
-        said = [f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}]
+        said = [f.detail for f in found if f.code in {*LAYOUT, UNEXPLAINED_LIMIT}
+                and f.code != "color-set-desaturated"]
         # Only the set size's top (a closed range is read at its ends): the PI's 36, 2026-11-19.
         assert len(said) == 1 and "36 objects ('set_size')" in said[0], said
+        paler = [f.detail for f in found if f.code == "color-set-desaturated"]
+        assert len(paler) == (len(task.structures) if calibration is SRGB else 0), paler
+        assert all("'fix_luminance'" in detail for detail in paler)
         at_starts = laid_out(task, {**starts, "set_size": 12}, allocation=allocation,
                              geometry=DIRECT, calibration=calibration,
                              deployment=Deployment.RIG_FIXED)
@@ -1674,7 +1769,8 @@ def test_a_window_set_above_its_highest_is_kept_that_long(task):
 
 def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(task, tmp_path):
     """The re-review, I-2 (the controller's ruling of 2026-11-08: a warning, by the PI's "warnings
-    over refusals"): the answer begins as the eye leaves the fixation window, `center`; where that
+    over refusals"): the answer begins as the eye leaves the fixation window, `fix` since the
+    pop-out's revision (the point stays on); where that
     window reaches a disc's window -- a ring of 4° and a fixation window of 4.5°, both inside their
     ranges -- a look straight to the odd one, held, never leaves it, and ends as no response, a
     staircase's failure, with no reward. So **a value set live that makes it reach is warned on the
@@ -1708,8 +1804,11 @@ def test_the_window_whose_exit_starts_the_answer_reaching_the_discs_is_warned(ta
     session.run()
     warned = [said for kind, _, _, said in session.controls if kind == "warning"
               and said.startswith("answer-window-reaches-objects")]
-    assert len(warned) == 1 and "on a ring as small as 4° about it" in warned[0]
-    assert "its radius up to 4.5° and theirs up to 1.5°" in warned[0]
+    # Once for each structure scoring the discs: the search, and the probe of the odd one alone.
+    assert [said.split(": ")[1] for said in warned] == ["in structure 'search'",
+                                                       "in structure 'odd_one_alone'"], warned
+    assert all("on a ring as small as 4° about it" in said for said in warned)
+    assert all("its radius up to 4.5° and theirs up to 1.5°" in said for said in warned)
 
 
 def _play_at(task, moves, **values):
@@ -1881,13 +1980,21 @@ def test_a_margin_that_can_reach_a_bars_count_is_warned_at_load_and_live(task, t
 #: number -- the set size, the pool's value, the bars' windows, the margin, the staircases' counts,
 #: Crowd's step and floor -- and nothing legitimately fractional.
 WHOLE = ("set_size", "pairings", "move_up_window", "move_back_window", "suggestion_margin",
-         "staircase_down", "staircase_up", "crowd_step", "crowd_floor")
-#: The units that count, each held whole.
-COUNTS = ("objects", "answers", "pairings")
+         "staircase_down", "staircase_up", "crowd_step", "crowd_floor", "target_absent_percent",
+         "odd_place_empty_percent", "distractor_alone_percent", "odd_one_alone_percent")
+#: The units that count, each held whole: a special kind's share of trials among them since the
+#: pop-out's revision (its plan's Amendments, item 4: "each share `whole=True`").
+COUNTS = ("objects", "answers", "pairings", "percent")
 #: **The training rules as the trainer reads them** (the design's goal 8; its own example, "Move up
 #: when at least [80]% of the last [50] answers are right"): each group's title, its settings in
 #: its box's order, and its sentence. The PI reviews the words on the wl-xtasks branch.
 GROUPS = (
+    # The special trials' (the pop-out revision's plan, Amendments, item 4), right after Timing.
+    ("Special trials", ("target_absent_percent", "odd_place_empty_percent",
+                        "distractor_alone_percent", "odd_one_alone_percent", "catch_hold"),
+     "Of every 100 trials: {target_absent_percent} target absent, {odd_place_empty_percent} odd "
+     "place empty, {distractor_alone_percent} a distractor alone, {odd_one_alone_percent} the odd "
+     "one alone; a catch is held {catch_hold}"),
     ("Move up", ("move_up_bar", "move_up_window"),
      "Move up when at least {move_up_bar} of the last {move_up_window} answers at the hardest "
      "step are right"),
@@ -1957,8 +2064,10 @@ def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
     """The design's goal 8 (the PI, 2026-11-19, "One box after Timing"): **the bars and the
     staircases read as three rules, each one box with one Apply** -- *Move up*, *Move back* and
     *Staircase* (`GROUPS`), their settings sharing a section, none a reward size (the load's
-    `bad-group`); **the two bars are percents**, with the distractors' brightness and Fade-in's
-    step and floor (the PI, 2026-11-19), and no other setting is; at the starts the rules
+    `bad-group`), after the special trials' one box (the pop-out's revision, its plan's Amendments,
+    item 4); **the two bars are percents**, with the distractors' brightness and Fade-in's
+    step and floor (the PI, 2026-11-19), and the fixation point's saturations, and no other
+    setting is; at the starts the rules
     read "Move up when at least 80% of the last 50 answers at the hardest step are right". **The
     path to the page**: a session on the task sends each group and each setting's plain name, help,
     wholeness and percent, and the Training tab draws each rule as one box whose sentence holds its
@@ -1973,13 +2082,17 @@ def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
     # The PI, 2026-11-19 (asked in the UI): the distractors' brightness and Fade-in's step and
     # floor, fractions of full, read as percents too.
     assert {param.name for param in task.params if param.percent} == {
-        "move_up_bar", "move_back_bar", "distractor_fraction", "fade_in_step", "fade_in_floor"}
+        "move_up_bar", "move_back_bar", "distractor_fraction", "fade_in_step", "fade_in_floor",
+        # The fixation point's saturations, fractions of full chroma (the pop-out's revision).
+        "fix_saturation", "fix_act_saturation"}
     assert "bad-group" not in {f.code for f in check_task(
         task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT, calibration=measured(),
         deployment=Deployment.RIG_FIXED, source=TASK_FILE)}
     starts = {param.name: (f"{param.start * 100:g}%" if param.percent else f"{param.start:g}")
-              for param in task.params if param.start is not None}
+              for param in task.params if isinstance(param.start, (int, float))}
     assert [group.sentence.format(**starts) for group in task.groups] == [
+        "Of every 100 trials: 0 target absent, 0 odd place empty, 0 a distractor alone, 0 the odd "
+        "one alone; a catch is held 0.5",
         "Move up when at least 80% of the last 50 answers at the hardest step are right",
         "Move back when fewer than 50% of the last 50 answers are right",
         "One level harder after 3 right in a row, one level easier after 1 wrong in a row"]
@@ -1987,6 +2100,9 @@ def test_the_popouts_training_rules_read_as_sentences(task, tmp_path):
     session = Session(_spec(tmp_path, seed=1), card=Card(), pump=Pump())
     groups = tuple(GroupRow(*group) for group in session.groups)
     assert [(group.name, group.settings, group.section) for group in groups] == [
+        ("Special trials", ("target_absent_percent", "odd_place_empty_percent",
+                            "distractor_alone_percent", "odd_one_alone_percent", "catch_hold"),
+         "Special trials"),
         ("Move up", ("move_up_bar", "move_up_window"), "Training/bars"),
         ("Move back", ("move_back_bar", "move_back_window"), "Training/bars"),
         ("Staircase", ("staircase_down", "staircase_up"), "Training/staircases")]

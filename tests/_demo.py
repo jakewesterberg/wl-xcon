@@ -77,9 +77,11 @@ REPORT_EVERY_S = 0.1
 #: disc's on the 8° ring.
 REST = (0.0, -5.0)
 FIX = (0.0, 0.0)
-#: The states a pop-out trial passes through to the fixation hold, and on to the answer.
+#: The states a pop-out trial passes through to the fixation hold, and on to the answer: since
+#: the pop-out's revision the discs come on as the trial enters `delay`, which at `go_delay` 0 it
+#: passes on that frame into `go` (TSK-78), the world told both began.
 FIXATED_STATES = ("between", "await_fix", "hold_fix")
-ANSWERED_STATES = (*FIXATED_STATES, "go", "flight")
+ANSWERED_STATES = (*FIXATED_STATES, "delay", "go", "flight")
 #: How long the panel waits for a frame it expects before the test fails: well past any trial the
 #: tests play, so a slow computer is never read as a fault, and a hang is.
 PATIENCE_S = 30.0

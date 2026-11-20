@@ -60,7 +60,7 @@ from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, 
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
 from wl_xcon.task import (
-    BELOW_ZERO, CEILINGS, OTHER, TRAINING_SECTION, Family, Outcome, at_hardest,
+    BELOW_ZERO, CEILINGS, OTHER, SPECIAL_UNIT, TRAINING_SECTION, Family, Outcome, at_hardest,
 )
 from wl_xcon.warnlist import HEAD_FREE, UNLISTED
 
@@ -3104,7 +3104,8 @@ def _summary_value(row) -> str:
     "the summary's value is the rig's: rendered in Python from the same row the box uses"), plain
     text: a pool's "2 of 12"; a color's hue, or "from pairings" where its pool draws it; a value
     the training switch holds, in its words ("frozen at 0.60 s"); a position or an appearance in
-    the rig's words; a draw in force as its range, "0.5–1.25 s" (`_drawn_said`); a value each
+    the rig's words, a choice among segments as its segment says it (`_choice_label`); a draw in
+    force as its range, "0.5–1.25 s" (`_drawn_said`); a value each
     trial gives its own, in short (`_PER_TRIAL_SHORT`); else the number at its box's decimals with
     its unit (`_number_said`), a ceiling's too, or the value as written."""
     if row.members is not None:
@@ -3125,6 +3126,11 @@ def _summary_value(row) -> str:
         return f"{held[0]} {_number_said(row, row.value)}"
     if row.position is not None:
         return row.position
+    if row.words is not None and row.words in row.choices:
+        # A look picked among its segments says what its segment says, "Annulus" for "Annulus:
+        # inner fix_act_hole, outer ...", its words whole in the line's title (the pop-out
+        # revision's Amendments, item 6: the summary still fits).
+        return _choice_label(row.words, row.choices)
     if row.words is not None:
         return row.words
     drawn = _drawn_said(row)
@@ -3154,6 +3160,9 @@ def _waits(row, change, now: str) -> str:
     if change is None:
         return now
     becomes = _plain(_becomes(change, row))
+    if not change.hands_back and becomes in row.choices:
+        # A choice picked among segments, as its segment says it (`_summary_value`).
+        becomes = _choice_label(becomes, row.choices)
     if (not change.hands_back and isinstance(change.now, (int, float))
             and not isinstance(change.now, bool) and row.members is None
             and now == _number_said(row, row.value)):
@@ -3162,7 +3171,8 @@ def _waits(row, change, now: str) -> str:
 
 
 def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, said: str,
-          drawn: bool, changed: bool, bounded: bool, words: str, unit: str | None = None) -> str:
+          drawn: bool, changed: bool, bounded: bool, words: str, unit: str | None = None,
+          whole: str = "") -> str:
     """**One summary line** (the summary and editor design's goal 1), a button that opens its
     setting in the editor (`data-open`, its box's `data-card`): its marks (`span.mk`), its plain
     name (`span.ln`) and its value in force (`span.lv`, the in force alone in `data-now`), with
@@ -3170,8 +3180,8 @@ def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, s
     ◷ a change waiting (`waiting`), else ! a refusal (`refused`), else ⚠ a warning (`warned`), as
     the box's status line ranks them (`_status`), then ◆ a value drawn each trial (`drawn`); and
     the classes `changed` (it differs from the task's start) and `ceiling`. Its `title` says
-    every state in words: the whole name, the value, the status line whole, how it is drawn,
-    changed, a ceiling.
+    every state in words: the whole name, the value -- and a choice's words whole (`whole`) where
+    the line says it in short -- the status line whole, how it is drawn, changed, a ceiling.
 
     **What the page reads to add what it alone knows** (the summary and editor build's Task 2,
     `markLine` in the script): `data-now`, the value in force alone, for "in force → draft";
@@ -3185,7 +3195,7 @@ def _line(name: str, label: str, codes: str, now: str, shown: str, state: str, s
                                          "changed" if changed else "",
                                          "ceiling" if bounded else "") if word)
     named = label if label == codes else f"{label} ({codes})"
-    told = [named, shown]
+    told = [named, shown] + ([whole] if whole and whole != shown else [])
     status = _whole_say(state, said) if state else ""
     if status:
         told.append(status)
@@ -3232,7 +3242,8 @@ def _summary(frame, view: View, training: bool) -> str:
             lines.append((section, 1 if row.changed else 0, _line(
                 row.name, row.label or row.name, row.name, now, shown,
                 state, said, drawn, row.changed, row.bounded, words,
-                _line_unit(row) if number else None), 1))
+                _line_unit(row) if number else None,
+                row.words if row.words is not None and row.words in row.choices else ""), 1))
             continue
         state, said = _group_state(members, frame, staged)
         values = [_summary_value(member) for member in members]
@@ -3460,6 +3471,41 @@ def _editor(row, frame, view: View) -> tuple[str, str]:
 
 #: **What a group's box says at rest** (the console interface design's goal 8), its status line.
 GROUP_REST = "applied together, by one Apply"
+#: **The trials a special trials group leaves normal**, said after its sentence (the console
+#: interface design's goal 8: "the remainder shown as "normal search""; the pop-out revision's
+#: Amendments, item 4). The words are the pop-out's, the one task that declares special trials:
+#: a frame names no task's default structure, and a second task's words wait for a field that
+#: carries them (XC-544).
+NORMAL_REST = "normal search"
+
+
+def _rest_said(total: float) -> str:
+    """**A special trials group's remainder**, from its shares' sum (`check.special_share` each,
+    as the draw reads them): "N normal search" below 100, "none normal search" at 100, and past it
+    the `specials-over-100` warning's words after it (`check.IN_PROPORTION`). The script says the
+    same from the box's fields while a draft is open (`restOf`)."""
+    from wl_xcon.check import IN_PROPORTION
+
+    if total < 100:
+        return f"{100 - total:g} {NORMAL_REST}"
+    return f"none {NORMAL_REST}" + (f": {IN_PROPORTION}" if total > 100 else "")
+
+
+def _rest(rows: list) -> str:
+    """**The remainder a group holding special trials' shares says after its sentence**
+    (`_rest_said`), on a line of its own naming the shares (`data-shares`) and carrying the words
+    the script needs (`data-words`, `data-over`); "" for a group holding no share. A share is a
+    setting in `task.SPECIAL_UNIT`, the unit `check`'s `bad-special` holds every special kind's
+    share to."""
+    from wl_xcon.check import IN_PROPORTION, special_share
+
+    shares = [row for row in rows if row.unit == SPECIAL_UNIT]
+    if not shares:
+        return ""
+    total = sum(special_share(row.value) for row in shares)
+    names = " ".join(row.name for row in shares)
+    return (f'<div class="gr" data-shares="{_e(names)}" data-words="{_e(NORMAL_REST)}" '
+            f'data-over="{_e(IN_PROPORTION)}">{_e(_rest_said(total))}</div>')
 
 
 def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -> str:
@@ -3504,7 +3550,7 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
             if field is not None:
                 pieces.append(entries[field][1] if field in by_name
                               else f'<span class="gs code">{_e(field)}</span>')
-        editor = f'<div class="sentence">{"".join(pieces)}</div>'
+        editor = f'<div class="sentence">{"".join(pieces)}</div>{_rest(rows)}'
     else:
         editor = "".join(f'<div class="gm"><span class="gl">{_e(row.label or row.name)}</span>'
                          f"{entries[row.name][1]}</div>" for row in rows)
@@ -4609,6 +4655,7 @@ body.drafted > .wrap { padding-bottom: 56px; }
 .box .pairs .tick { width: 16px; height: 16px; margin: 0; cursor: pointer; }
 .box.group .sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; min-width: 0; font-size: 13px; }
 .box.group .sentence .gs { overflow-wrap: anywhere; min-width: 0; }
+.box.group .gr { margin-top: 4px; overflow-wrap: anywhere; min-width: 0; font-size: 13px; }
 .box.group .gm { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; flex: 1 1 100%; min-width: 0; }
 .box.group .gl { font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
 .box .gmore { display: grid; gap: 2px; min-width: 0; }
@@ -5991,8 +6038,27 @@ _SCRIPT = """
     box.classList.toggle("cannot", Boolean(draft && draft.error) && !sending);
     hold(box.querySelector("[data-apply]"), !draft || Boolean(draft.error) || sending);
     hold(box.querySelector("[data-discard]"), sending ? !answeredLong(out[name]) : !draft);
+    restOf(box);
     mirrorOne(name);
     markLine(name);
+  }
+  // **A special trials group's remainder, from its fields** (`web._rest`; the pop-out revision's
+  // Amendments, item 4): the shares its span names, as typed, each one counted as the draw counts
+  // it -- a number above 0, anything else none -- so a draft says what it leaves normal before it
+  // is applied; with no draft the fields hold the values in force, and it says what the rig drew.
+  function restOf(box) {
+    var rest = box.querySelector(":scope > .editor > .gr[data-shares]");
+    if (!rest) { return; }
+    var total = 0;
+    rest.getAttribute("data-shares").split(" ").forEach(function (name) {
+      var field = box.querySelector(':scope > .editor input[data-param="' + CSS.escape(name) + '"]');
+      var typed = field ? field.value.trim() : "";
+      var value = typed === "" ? NaN : Number(typed);
+      if (isFinite(value) && value > 0) { total += value; }
+    });
+    var words = rest.getAttribute("data-words");
+    rest.textContent = total < 100 ? String(Math.round((100 - total) * 1e9) / 1e9) + " " + words
+      : "none " + words + (total > 100 ? ": " + rest.getAttribute("data-over") : "");
   }
   // **What only the page knows, on a summary line** (the summary and editor design's goal 3 and
   // its call "when states combine"; the plan's Global Constraints): the rig's line (`_line`) is
@@ -6066,8 +6132,15 @@ _SCRIPT = """
     var kinds = values.length + (formed ? 1 : 0) + (ranged ? 1 : 0) + (moved.indexOf("hue") !== -1 ? 1 : 0) +
       chosen.length;
     if (kinds !== 1) { return EDITED; }
-    // A choice pressed among its segments: its words, as its segment's title says them.
-    if (chosen.length) { return now[chosen[0]]; }
+    // A choice pressed among its segments: as its segment says it, "Annulus" for a look's long
+    // words (`web._choice_label`), as the line says the choice in force; its words whole where
+    // no segment says them.
+    if (chosen.length) {
+      var words = now[chosen[0]];
+      var said = Array.prototype.filter.call(box.querySelectorAll(":scope > .editor [data-choice]"),
+        function (segment) { return segment.getAttribute("data-choice") === words; })[0];
+      return said ? said.textContent : words;
+    }
     if (values.length) {
       var setting = values[0].slice(2);
       var field = null;

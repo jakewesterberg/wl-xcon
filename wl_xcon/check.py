@@ -2622,6 +2622,11 @@ def _special_faults(task: Task) -> list[Finding]:
     return findings + ([over] if over is not None else [])
 
 
+#: **What shares past 100 do**, as `SPECIALS_OVER_100` says it and a special trials group's box
+#: says it after its remainder (`web._rest_said`; the pop-out revision's Amendments, item 4).
+IN_PROPORTION = "each kind is then drawn in proportion to its percentage, and no trial is normal"
+
+
 def _over_100(task: Task, values: dict) -> "Finding | None":
     """**`SPECIALS_OVER_100` where the special kinds' percentages add past 100**, each read from
     `values` over the task's starts as the draw reads it (`special_share`), or `None`: at load
@@ -2645,8 +2650,8 @@ def _over_100(task: Task, values: dict) -> "Finding | None":
                      for special, share in shares)
     where = "at the task's starts" if started else "at the values set"
     return Finding(SPECIALS_OVER_100, (
-        f"the special trials' percentages add to {total:g} {where} ({each}), past 100: each kind "
-        f"is then drawn in proportion to its percentage, and no trial is normal"),
+        f"the special trials' percentages add to {total:g} {where} ({each}), past 100: "
+        f"{IN_PROPORTION}"),
         blocking=False, accepted_in=SESSION_KINDS,
         subjects=tuple(f"setting {special.share.name!r}" for special, _ in shares))
 

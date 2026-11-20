@@ -3530,10 +3530,12 @@ def test_a_looks_shape_is_picked_on_its_box_and_applied(rig):
     Task 5b): a setting whose choices are looks, none a color-set light, shows them as segments,
     each saying its kind and its words whole in its title, the one in force pressed. Pressing the
     square is a draft, as a swatch is -- nothing sent, a frame arriving meanwhile leaving it, the
-    summary line "in force → the square's words" -- and the box's Apply sends a `choice` of the
-    square's words as the signed-in member's; the box then waits, and is in force with the square
-    pressed. The ring pressed and a hold typed ride one Apply all, and *withdraw* takes the act
-    back. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    summary line "in force → the square", **each said as its segment says it** ("Disc → Square",
+    the words whole in the line's title; the pop-out revision's Amendments, item 6: a look's words
+    run too long for a line) -- and the box's Apply sends a `choice` of the square's words as the
+    signed-in member's; the box then waits, its line "Disc → Square" again, and is in force with
+    the square pressed. The ring pressed and a hold typed ride one Apply all, and *withdraw* takes
+    the act back. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
     from wl_xcon.actor import Box
     from wl_xcon.link import Applied, ApplyMany, SetChoice, Staged, Withdraw
 
@@ -3553,8 +3555,9 @@ def test_a_looks_shape_is_picked_on_its_box_and_applied(rig):
     _arrived(page, 41)
     assert rig.dispatch.seen == [] and _say(page, "fix_look") == "not sent"
     assert page.get_attribute(f'{segments}[data-choice="{square}"]', "aria-pressed") == "true"
-    mark, said, _ = _marked(page, "fix_look")
-    assert (mark, said) == ("●", f"{disc} → {square}"), (mark, said)
+    mark, said, title = _marked(page, "fix_look")
+    assert (mark, said) == ("●", "Disc → Square"), (mark, said)
+    assert disc in title, title
     page.click(f'{_b("fix_look")} [data-apply]')
     rig.wait_for(lambda: rig.dispatch.seen)
 
@@ -3564,6 +3567,7 @@ def test_a_looks_shape_is_picked_on_its_box_and_applied(rig):
     _offer(rig, 42, params=_task6_rows() + (row,),
            staged=(Staged("fix_look", disc, square, jake, False, cid=sent.cid),))
     _says(rig, page, "fix_look", "waiting · you")
+    assert _marked(page, "fix_look")[:2] == ("◷", "Disc → Square")
     held, _ = _looks_row(looks[2], applied=Applied(43, str(jake)))
     _offer(rig, 43, params=_task6_rows() + (held,))
     _says(rig, page, "fix_look", "in force from trial 43")
@@ -4030,7 +4034,9 @@ def test_no_text_passes_its_box_at_three_widths(rig, tmp_path):
         assert page.locator(f"{root} > .summary .line").count() > 0, (tab, "the summary's lines")
         if root == "#params":
             assert page.locator("#params .box .clr").count() >= 2, "the color boxes are measured"
-            assert page.locator("#params > .summary .line.newcolor").count() == 1
+            # One for each section holding a color card: Colors, and the fixation point's since
+            # the pop-out's revision gave its two looks their hues.
+            assert page.locator("#params > .summary .line.newcolor").count() == 2
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": LAPTOP_H})
             assert page.evaluate(_LINE_OVERRUNS, root) == [], (tab, width)
@@ -4123,6 +4129,51 @@ def test_every_popout_line_is_above_the_fold_at_1280x800(rig, tmp_path):
     assert columns == 2, columns
 
 
+def test_the_special_trials_line_says_the_rest_are_normal_search(rig, tmp_path):
+    """The pop-out revision's plan, Amendments, item 4 (the console interface design's goal 8:
+    "the remainder shown as "normal search""; the PI, 2026-11-19, "One box after Timing"): **the
+    special trials are one box, its section right after Timing**, read as one sentence, and after
+    it the trials it leaves normal -- "70 normal search" from the shares in force, as the rig
+    renders it -- and while a draft is open, from the box's own fields as they are typed: "40
+    normal search", "none normal search" at 100, and past 100 the warning's own words after it; a
+    field emptied counts none, and Discard says the values in force again. Through the wire, in a
+    real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon import web
+    from wl_xcon.check import IN_PROPORTION
+    from wl_xcon.link import decode, encode
+
+    made = _popout_own(tmp_path)
+    shares = {"target_absent_percent": 20, "odd_place_empty_percent": 10}
+    made = dataclasses.replace(made, params=tuple(
+        dataclasses.replace(row, value=shares[row.name]) if row.name in shares else row
+        for row in made.params))
+    rig.hub.offer(decode(encode(made)))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params > .summary .line", state="visible")
+    sections = page.eval_on_selector_all("#params > .summary > .ssec", "(all) => all.map((one) => "
+                                         "one.getAttribute('data-section'))")
+    assert sections[:3] == ["Timing", "Special trials", "Gaze windows"], sections
+    _open(page, "Special trials")
+    box = _b("Special trials")
+    rest = f"{box} > .editor > .gr"
+    assert page.text_content(rest) == "70 normal search"
+    assert web._rest_said(30) == "70 normal search"
+
+    page.fill(f'{box} input[data-param="distractor_alone_percent"]', "30")
+    assert page.text_content(rest) == "40 normal search"
+    page.fill(f'{box} input[data-param="odd_one_alone_percent"]', "40")
+    assert page.text_content(rest) == "none normal search" == web._rest_said(100)
+    page.fill(f'{box} input[data-param="odd_one_alone_percent"]', "45")
+    assert page.text_content(rest) == f"none normal search: {IN_PROPORTION}" == web._rest_said(105)
+    page.fill(f'{box} input[data-param="odd_one_alone_percent"]', "")
+    assert page.text_content(rest) == "40 normal search"
+    page.click(f"{box} [data-discard]")
+    page.wait_for_function(f"() => document.querySelector({rest!r}).textContent === "
+                           f"'70 normal search'")
+
+
 def _rects(page, root: str = "#params") -> list:
     """Where everything above the editor stands: each summary line, each section's header, the
     legend and the find box, in page coordinates."""
@@ -4149,8 +4200,8 @@ def test_a_click_opens_a_setting_and_nothing_above_moves(rig, tmp_path):
     page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
     page.click('label[for="t-task"]')
     lines = page.locator("#params > .summary .line[data-open]")
-    assert lines.count() == page.locator("#params > .editing > .box").count() + 1, (
-        "a line for every box, and the Colors section's New color…")
+    assert lines.count() == page.locator("#params > .editing > .box").count() + 2, (
+        "a line for every box, and the New color… of Colors and of the fixation point")
     assert _opened(page) == ["click a setting above to change it"]
     before = _rects(page)
     editor_top = before[-1][2]

@@ -7,15 +7,18 @@ rules; a suggestion to move up a stage is answered from the panel and moves the 
 demo's record reads back through wl-preproc's own code.
 
 **The pop-out's timings, shortened by its settings** (as `wlx demo --set` gives them, demo mode
-§5): a quarter second between trials, a 0.05 s hold on the fixation point, a 0.1 s hold on the
-odd disc, no blank after an error, and in the suggestion's run a bar read over the last 5 answers,
-so a trial takes well under a second. **The time between trials stays past the saccade
+§5): a quarter second between trials, a 0.1 s hold on the odd disc, no blank after an error, and
+in the suggestion's run a bar read over the last 5 answers, so a trial takes little more than its
+fixation hold. **The fixation hold is the task's draw**, non-aging from 0.75 to 1.25 s since the
+pop-out's revision (its design's §6), which a run's starting value does not replace (a person's
+value or draw on its card does), so every hold here is at least 0.75 s. **The time between trials stays past the saccade
 detector's warm-up**: each trial's detector is fresh and reports nothing before
 `saccade.Params.warmup_samples` velocities, one a frame (50, 0.21 s at 240 Hz), so a scripted
 hand's answer sooner after a trial's start is never a saccade, and the `flight` state's bound
-scores it a look elsewhere (XC-505). Where a scripted hand must leave inside a hold (an early
-saccade, tracker loss by B, a target break), that hold is lengthened instead, so a slow computer
-never turns the trial into another outcome; where a trial waits on nothing (no response, no
+scores it a look elsewhere (XC-505). Where a scripted hand must leave inside a hold (a target
+break), that hold is lengthened instead, and the fixation hold's 0.75 s at least leaves an early
+saccade's and tracker loss by B's two reports inside it, so a slow computer never turns the trial
+into another outcome; where a trial waits on nothing (no response, no
 fixation), its wait is shortened. Each is a setting the task declares, inside its range; the
 task's own numbers are not changed (demo mode §3.3). Engine test material: no timing claim rests
 on the frames counted here (CLAUDE.md).
@@ -29,7 +32,7 @@ import os
 import pytest
 
 from _demo import (
-    BY, FIX, REST, Demo, Person, distractor, empty_space, target, toward_target,
+    BY, FIX, REST, Demo, Person, distractor, empty_space, shown_names, target, toward_target,
 )
 from wl_xcon import pointer
 from wl_xcon.link import NextBlock, Stop, Telemetry
@@ -37,7 +40,7 @@ from wl_xcon.saccade import HALF_WINDOW, Params
 from wl_xcon.task import Outcome
 
 #: The shortened timings every run here takes (the module docstring).
-SHORT = {"inter_trial": 0.25, "fix_hold": 0.05, "target_hold": 0.1, "timeout": 0.0}
+SHORT = {"inter_trial": 0.25, "target_hold": 0.1, "timeout": 0.0}
 #: `tasks/eight_hour_bounds.py`'s `reward_correct`, mL, which REFERENCE's demo pays.
 REWARD_ML = 0.05
 #: The codes read here, `tasks/allocation.py`'s as the pop-out strobes them: the odd one held, the
@@ -136,28 +139,28 @@ class TrackerLoss(Person):
         return (*FIX, True)
 
 
-#: The states each trial passes through, as far as the answer.
+#: The states each trial passes through, as far as the answer (`_demo.ANSWERED_STATES`).
 FIXATED = ("between", "await_fix", "hold_fix")
-ANSWERED = (*FIXATED, "go", "flight")
+ANSWERED = (*FIXATED, "delay", "go", "flight")
 
 #: **Each outcome**: who plays it, the values its run takes over `SHORT`, the states its trial
-#: passes through, and the trial line's outcome. The long holds (1.0 s, inside `fix_hold`'s
-#: 0.05-2.0 and `target_hold`'s 0.05-1.0) leave a scripted hand's leaving inside them; the short
+#: passes through, and the trial line's outcome. The long hold (1.0 s, inside `target_hold`'s
+#: 0.05-1.0) and the drawn fixation hold leave a scripted hand's leaving inside them; the short
 #: waits (`response_deadline` at 0.2 of 0.1-3.0, `fix_acquisition` at its lowest, 0.5) end a trial
 #: that waits on nothing.
 CASES = {
     "correct": (Correct, {}, (*ANSWERED, "on_target"), Outcome.CORRECT),
-    "early saccade": (Early, {"fix_hold": 1.0}, (*FIXATED, "early"), Outcome.FIXATION_BREAK),
+    "early saccade": (Early, {}, (*FIXATED, "early"), Outcome.FIXATION_BREAK),
     "wrong disc": (WrongDisc, {}, (*ANSWERED, "wrong"), Outcome.WRONG_TARGET),
     "empty space": (EmptySpace, {}, (*ANSWERED, "astray"), Outcome.ABORT),
     "second look": (SecondLook, {}, (*ANSWERED, "astray"), Outcome.ABORT),
     "target break": (TargetBreak, {"target_hold": 1.0}, (*ANSWERED, "on_target", "broke"),
                      Outcome.TARGET_BREAK),
-    "no response": (NoResponse, {"response_deadline": 0.2}, (*FIXATED, "go"),
+    "no response": (NoResponse, {"response_deadline": 0.2}, (*FIXATED, "delay", "go"),
                     Outcome.NO_RESPONSE),
     "no fixation": (NoFixation, {"fix_acquisition": 0.5}, ("between", "await_fix"),
                     Outcome.NO_FIXATION),
-    "tracker loss by B": (TrackerLoss, {"fix_hold": 1.0}, FIXATED, Outcome.TRACKER_LOST),
+    "tracker loss by B": (TrackerLoss, {}, FIXATED, Outcome.TRACKER_LOST),
 }
 #: The outcomes that end on the error's blank (`TIMEOUT_ON`), each the pop-out's error.
 TIMED_OUT = {Outcome.FIXATION_BREAK, Outcome.WRONG_TARGET, Outcome.ABORT, Outcome.TARGET_BREAK}
@@ -261,6 +264,65 @@ def test_a_pointer_already_at_the_center_as_the_fixation_point_comes_on_has_ente
     entered = {state: frame for _, state, frame in began}
     assert entered["hold_fix"] == entered["await_fix"] + 1, "entered on await_fix's first frame"
     assert person.before_go > 0 and person.go_drawn is not None
+
+
+# --- A catch, by the pointer (the pop-out revision's §4) ---------------------------------------
+
+#: A catch's codes, `tasks/allocation.py`'s: its hold kept, and its outcome's reason.
+CATCH_FIXATION_HELD, OUTCOME_CORRECT_REJECT = 4140, 4123
+
+
+class Holds(Person):
+    """Fixates, and from the go keeps looking at the fixation point: on a catch, the right answer.
+    **A catch's go is the frame its discs are first drawn**, read from the screen's items, since a
+    catch scores no disc and so has no disc windows for `Person` to read (`_demo.discs`).
+    `discs_seen` keeps each go screen's drawn discs and their windows flagged the target."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.discs_seen: list = []
+
+    def seen(self, drawn) -> None:
+        super().seen(drawn)
+        if self.go_drawn is None and not self.ended and any(
+                name.startswith("search.") for name in shown_names(drawn)):
+            self.go_drawn = drawn
+
+    def go(self, drawn):
+        if self.since_go == 1:
+            items = sorted(name for name in shown_names(drawn) if name.startswith("search."))
+            self.discs_seen.append((items, [w.name for w in drawn.windows if w.target]))
+        return (*FIX, False)
+
+
+def test_a_catch_played_with_the_mouse_is_held_for_its_reward(tmp_path, zmq_cleanup, began):
+    """The pop-out revision's §4, through the path the PI plays it on: **a run of target-absent
+    catches only**, its share at 100, a scripted pointer over the gaze endpoint that fixates and
+    keeps looking at the fixation point after the go. The discs it reads are all distractors, none
+    flagged the target; the trial passes the delay and the go, and holding `catch_hold` is a correct
+    reject, paid the task's own reward once on the simulated pump, its hold, its reason and the
+    reward's command strobed; its line names its kind and says it stepped nothing."""
+    person = Holds()
+    with Demo(tmp_path, person, zmq_cleanup) as demo:
+        demo.open()
+        demo.start({**SHORT, "target_absent_percent": 100})
+        demo.ended_run()
+        session = demo.service.session
+        demo.end()
+
+    (line,) = demo.rows("trials.jsonl")
+    assert (line["trial_kind"], line["outcome"]) == ("target_absent",
+                                                     Outcome.CORRECT_REJECT.value), line
+    assert line["stepped"] in (None, False)
+    assert tuple(state for _, state, _ in began) == (*FIXATED, "delay", "go")
+    assert person.discs_seen, "the pointer read no go screen"
+    items, flagged = person.discs_seen[0]
+    assert len(items) == line["params"]["set_size"] and flagged == [], person.discs_seen[0]
+    assert session.pump.delivered == [REWARD_ML] and line["fluid_ml"] == REWARD_ML
+    codes = session.card.codes
+    at = codes.index(CATCH_FIXATION_HELD)
+    assert codes[at:at + 3] == [CATCH_FIXATION_HELD, OUTCOME_CORRECT_REJECT, REWARD_COMMANDED]
+    assert TIMEOUT_ON not in codes
 
 
 # --- A suggestion answered from the trainer's panel ------------------------------------------

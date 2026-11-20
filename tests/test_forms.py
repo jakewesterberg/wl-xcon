@@ -183,11 +183,13 @@ if XTASKS is None and os.environ.get("WLX_REQUIRE_XTASKS") == "1":  # pragma: no
 @pytest.mark.skipif(XTASKS is None, reason="no wl-xtasks checkout holding the pop-out search")
 def test_a_timing_setting_switched_to_drawn_is_drawn_from_the_next_trial(tmp_path):
     """The design's §3 on the PI's own task: in a simulated pop-out run, the trainer switches
-    `fix_hold` to drawn, non-aging 0.75 to 1.25 s, before trial 1. Trial 1 runs as it was, at the
-    task's 0.5 s; from trial 2 every trial draws it fresh from the form, inside its range and not
+    `inter_trial` to drawn, non-aging 0.75 to 1.25 s, before trial 1. Trial 1 runs as it was, at the
+    task's 1.0 s; from trial 2 every trial draws it fresh from the form, inside its range and not
     all alike, its line naming the form row's id; the row is a `form` row, its `was` the run's
-    value, since only the run gave the setting."""
-    link = _Drained({2: [_form()], 9: [Stop(by=JAKE)]})
+    value, since only the run gave the setting. **The gap between trials, not the fixation hold**,
+    since the pop-out revision (its design's §6) draws `fix_hold` itself, non-aging from 0.75 to
+    1.25 s, so a person's switch of it no longer starts from a fixed value."""
+    link = _Drained({2: [_form(name="inter_trial")], 9: [Stop(by=JAKE)]})
     spec = SessionSpec(
         task=str(XTASKS / "tasks" / "popout_search.py"), allocation="tasks/allocation.py",
         root=tmp_path, session_id="2027-01-14_01", subject="A", trials=1, frame_period=1 / 240,
@@ -204,16 +206,20 @@ def test_a_timing_setting_switched_to_drawn_is_drawn_from_the_next_trial(tmp_pat
     assert session.refusals == []
     lines = _lines(session)
     assert len(lines) >= 6
-    assert [_held(line) for line in lines[:2]] == [0.5, 0.5]
-    assert all("fix_hold" not in line["drawn"] for line in lines[:2])
+
+    def gap(line: dict) -> float:
+        return line["params"]["inter_trial"]
+
+    assert [gap(line) for line in lines[:2]] == [1.0, 1.0]
+    assert all("inter_trial" not in line["drawn"] for line in lines[:2])
     later = lines[2:]
-    assert all(0.75 <= _held(line) <= 1.25 for line in later)
-    assert len({_held(line) for line in later}) > 1
-    assert [_held(line) for line in later] == [
-        variation.draw(WAIT, SEED, line["index"], PERSON) for line in later]
+    assert all(0.75 <= gap(line) <= 1.25 for line in later)
+    assert len({gap(line) for line in later}) > 1
+    assert [gap(line) for line in later] == [
+        variation.draw(WAIT, SEED, line["index"], ("person", "inter_trial")) for line in later]
     (row,) = [row for row in _changes(session) if row["kind"] == "form"]
-    assert all(line["drawn"]["fix_hold"] == row["change"] for line in later)
-    assert (row["was"], row["now"], row["shape"]) == (0.5, variation.recorded(WAIT), "non_aging")
+    assert all(line["drawn"]["inter_trial"] == row["change"] for line in later)
+    assert (row["was"], row["now"], row["shape"]) == (1.0, variation.recorded(WAIT), "non_aging")
 
 
 #: What gives `fix_hold` in the block: its conditions, its own draw, or its staircase.

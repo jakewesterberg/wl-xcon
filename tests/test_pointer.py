@@ -1179,7 +1179,9 @@ def test_the_drawn_windows_are_those_tracked_scores_with_the_target_flagged():
     drawn = _drawing().drawn(world, visible, values, trial, 0, 1)
 
     names = [window.name for window in drawn.windows]
-    assert names == ["fix", "center", *(f"search.{i}" for i in range(12))]
+    # The fixation point's own window scores it throughout since the pop-out's revision (its
+    # design's §2: the point stays on), no remembered `center` beside it.
+    assert names == ["fix", *(f"search.{i}" for i in range(12))]
     for window in drawn.windows:
         assert (window.x_deg, window.y_deg, window.radius_deg) == world._judged[window.name]
         assert window.eye == "both"

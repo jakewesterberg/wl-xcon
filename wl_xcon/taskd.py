@@ -626,6 +626,12 @@ class SessionSpec:
     accuracy: float = 0.85
     rt_median_s: float = 0.2
     early_rate: float = 0.05
+    #: **How often the simulated eye looks away on a catch's go** (`simeye.Eye`'s
+    #: `false_alarm_rate`; the pop-out revision's Task 6), 0 to 1: a catch's hold kept is
+    #: correct, so an eye that never breaks one never makes a false alarm, and a session's
+    #: catches go untested. 0, the default, draws nothing, so a session without catches, or
+    #: one at 0, plays as it did before the rate existed.
+    false_alarm_rate: float = 0.0
     #: The gap between trials, in seconds, added to the frame clock (`Session.now()`)
     #: after each trial. The animal is out of its cage and in the chair for it, and
     #: the welfare clocks count it as they count everything: on the wall (P4d-2a
@@ -7305,6 +7311,7 @@ class Session:
             early_rate=self.spec.early_rate,
             seed=run.seed,
             engagement=self.spec.engagement,
+            false_alarm_rate=self.spec.false_alarm_rate,
         )
         return agent(subject, eye, self.spec.frame_period)
 
