@@ -1844,6 +1844,69 @@ def test_a_blocks_time_waits_for_a_drummed_trial_to_be_right():
     assert scheduler.ends == TIME and not scheduler.done
 
 
+def test_a_frozen_stage_ends_on_nothing_until_on_again_and_a_frozen_plain_block_ends_as_declared():
+    """**Frozen, a training progression's stage moves on of itself by nothing** (`freeze`; the
+    console settings design's §8: "no moves ... until it is on again"): S1's rule met, it ends at no
+    boundary while frozen, nor once its time has run out too, and on again it ends on its rule, a
+    met rule counting before the time; S2's fall-back met, frozen, it does not fall back, and on
+    again it does. **In a plan that is no progression a frozen block still ends as declared**
+    (`clock_held`), on its rule and on its time."""
+    scheduler = _stages()
+    _answer(scheduler, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    assert scheduler.ends == RULE
+    scheduler.freeze(True)
+    assert scheduler.ends is None
+    scheduler.expire()
+    assert scheduler.ends is None
+    scheduler.freeze(False)
+    assert scheduler.ends == RULE
+
+    falling = _stages()
+    _answer(falling, Outcome.CORRECT, Outcome.CORRECT, Outcome.CORRECT)
+    falling.advance(falling.ends)
+    _answer(falling, *[Outcome.WRONG_TARGET] * 4)
+    assert falling.ends == FALL_BACK
+    falling.freeze(True)
+    assert falling.ends is None
+    falling.freeze(False)
+    assert falling.ends == FALL_BACK
+
+    plain = Scheduler([_one("A", target=1), _one("B")], seed=1)
+    _answer(plain, Outcome.CORRECT)
+    plain.freeze(True)
+    assert plain.ends == RULE
+    timed = Scheduler([_one("A", target=5), _one("B")], seed=1)
+    timed.freeze(True)
+    timed.expire()
+    assert timed.ends == TIME
+
+
+def test_the_full_task_ends_on_nothing_and_draws_its_conditions_past_their_targets():
+    """**The full task plays with no move** (`play_full`; the console settings design's §8): its
+    block's every target used up, neither its rule nor its time ends it, and its conditions are
+    drawn on past their targets; the same block played as itself ends on its rule, nothing drawn
+    past it. In a training progression a stage played as the full task ends on nothing either."""
+    full = Scheduler([_one("A", target=1), _one("B")], seed=1)
+    assert full.play_full(0).name == "A" and full.full
+    _answer(full, Outcome.CORRECT)
+
+    assert full.finished and full.owed("a") == 0
+    assert full.ends is None
+    assert full.past_targets and full.drawable and full.next_trial().name == "a"
+    full.expire()
+    assert full.ends is None and not full.done
+
+    itself = Scheduler([_one("A", target=1), _one("B")], seed=1)
+    _answer(itself, Outcome.CORRECT)
+    assert itself.ends == RULE and not itself.past_targets
+
+    stage = _stages()
+    assert stage.play_full(1).name == "S2"
+    _answer(stage, *[Outcome.WRONG_TARGET] * 4)
+    stage.expire()
+    assert stage.ends is None
+
+
 def test_a_block_with_a_number_of_trials_ends_once_it_has_run_them_drummed_repeats_inside():
     """Engine spec §13.5's "a number of trials" (the PI, 2026-10-07), counted as the PI counts
     trials (2026-10-18: "200 trials; drummed repeats inside them"): a trial and its drummed repeats

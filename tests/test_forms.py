@@ -542,3 +542,77 @@ def test_a_resume_reads_a_form_row_back(tmp_path):
     restoration = resume.read(session.directory, session.welfare.left_cage_wall_at)
 
     assert (restoration.change, restoration.sequence) == (2, 2)
+
+
+# --- Kept out of moving up ----------------------------------------------------------------------
+
+
+def test_a_draw_reaching_anything_easier_keeps_its_trials_out_of_the_blocks_rule(tmp_path):
+    """**A person's draw is judged as a whole, at its extremes** (`Session._form_eases`), against
+    what the trial would otherwise have had, here the run's fixation hold, 0.3 s, a longer hold
+    harder: uniform from 0.1 to 0.4 s reaches shorter holds, so its every trial is kept out, and
+    non-aging from 0.75 to 1.25 s, longer at both ends, keeps none out. Each line names what kept it out (`eased`), and the block's "three right
+    in a row" reads only the trials no draw eased: trial 0's, then trials 4 and 5, so it ends after
+    trial 5, not trial 2."""
+    easier = _form("uniform", {"low": 0.1, "high": 0.4})
+    link = _Drained({1: [easier], 4: [_form()]})
+    session = _session(_plain(tmp_path, blocks=[
+        Block("b", [Condition("c", {}, target=1)], criterion=(1.0, 3))]), link)
+
+    session.run()
+
+    assert session.refusals == []
+    lines = _lines(session)
+    assert [(line["drawn"].get("fix_hold"), line["eased"]) for line in lines] == [
+        (None, []), (1, ["fix_hold"]), (1, ["fix_hold"]), (1, ["fix_hold"]), (2, []), (2, [])]
+    (ended,) = [row for row in _rows(session, "runs.jsonl") if row["event"] == "end"]
+    assert [(end["block"], end["ended"], end["after_trial"])
+            for end in ended["block_ends"]] == [("b", "rule", 5)]
+
+
+def test_a_draw_over_the_blocks_draw_is_judged_against_the_draw_written(tmp_path):
+    """**Where the block draws the setting, a person's draw is judged against that draw as the
+    task writes it** (`variation.easier_range`): over the fixation hold drawn uniform from 0.2 to
+    0.4 s, uniform from 0.3 to 0.5 s, longer at both ends, keeps nothing out; non-aging, a draw of
+    another kind, cannot be read either way, so its trials are kept out on doubt; and uniform from
+    0.1 to 0.4 s, its shortest shorter, keeps them out."""
+    block = ('Block("b", [Condition("c", {}, target=11)], '
+             'draws={"fix_hold": Uniform(0.2, 0.4, repeat=FRESH)})')
+    path = _sessions.varied_task(tmp_path, plans=f'{{"p": Plan([{block}])}}', name="over_draw")
+    link = _Drained({2: [_form("uniform", {"low": 0.3, "high": 0.5})], 5: [_form()],
+                     8: [_form("uniform", {"low": 0.1, "high": 0.4})]})
+    session = _session(_spec(tmp_path, path, plan="p", trials=11), link)
+
+    session.run()
+
+    assert session.refusals == []
+    out = ["fix_hold"]
+    assert [(line["drawn"].get("fix_hold"), line["eased"]) for line in _lines(session)] == (
+        [("block", [])] * 2 + [(1, [])] * 3 + [(2, out)] * 3 + [(3, out)] * 3)
+
+
+@pytest.mark.parametrize("meaning, eased", [
+    ("Meaning(EXPECTED, CRITERION, raising=HARDER, note='held as the task expects it', "
+     "overrides='read as expected here')", ["fix_hold"]),
+    ("Meaning(NOT_DIFFICULTY, CRITERION, note='no harder or easier here', "
+     "overrides='read as no difficulty here')", []),
+])
+def test_a_draw_of_an_expected_setting_keeps_its_trials_out_and_of_no_difficulty_none(
+        tmp_path, meaning, eased):
+    """**An expected setting's draw keeps its trials out whatever it draws** (the PI, "No, after
+    any change"), here non-aging from 0.75 to 1.25 s, which a clear-cut reading of the fixation
+    hold would call harder; **a setting that is no difficulty setting keeps none out**, here uniform
+    from 0.1 to 0.4 s, which a clear-cut reading would call easier."""
+    path = _sessions.varied_task(tmp_path, name="meant")
+    path.write_text(path.read_text() + (
+        "from wl_xcon.task import CRITERION, EXPECTED, HARDER, NOT_DIFFICULTY, Meaning\n"
+        f"TASK = _dataclasses.replace(TASK, meanings={{'fix_hold': {meaning}}})\n"))
+    drawn = _form() if eased else _form("uniform", {"low": 0.1, "high": 0.4})
+    link = _Drained({2: [drawn]})
+    session = _session(_spec(tmp_path, path, trials=4), link)
+
+    session.run()
+
+    assert session.refusals == []
+    assert [(line["drawn"].get("fix_hold"), line["eased"]) for line in _lines(session)] == [
+        (None, []), (None, []), (1, eased), (1, eased)]

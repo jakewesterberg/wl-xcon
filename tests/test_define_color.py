@@ -257,6 +257,56 @@ def test_a_preview_names_why_it_defines_no_color():
         assert code == 400 and answer["x"] is None and said in answer["said"], answer
 
 
+def test_a_served_preview_answers_on_the_latest_frame_and_bounds_its_fields():
+    """**`GET /color-preview` is served** (`serve.make_handler`'s `_color_preview`) on a real
+    loopback socket with no ZMQ, no sign-in and no token, as any viewer asks: on the latest frame
+    the hub holds, its answer is `color_preview`'s on that frame and the query's fields, as JSON,
+    200 for a color it defines and 400 with the sentence for one it does not; a query of more than
+    16 fields is refused before it is read (TSK-75), its numbers null."""
+    import http.client
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from _frames import ENDPOINT
+
+    hub = serve.Hub(steady=lambda: 0.0, endpoint=ENDPOINT)
+    hub.offer(_frame_of(ISOHUE))
+    server = ThreadingHTTPServer(("127.0.0.1", 0),
+                                 serve.make_handler(hub, token="t0ken", stale_after_s=30.0))
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
+                              daemon=True)
+    thread.start()
+
+    def asked(path: str) -> tuple[int, str, dict]:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        try:
+            connection.request("GET", path)
+            response = connection.getresponse()
+            return response.status, response.getheader("Content-Type"), json.loads(response.read())
+        finally:
+            connection.close()
+
+    try:
+        latest = hub.snapshot(on_box=True, stale_after_s=30.0)[0]
+        defined = asked("/color-preview?set=isohue&method=hue_angle&hue_deg=290")
+        assert defined == (200, "application/json", serve.color_preview(
+            latest, {"set": ["isohue"], "method": ["hue_angle"], "hue_deg": ["290"]})[1])
+        assert defined[2]["x"] is not None and defined[2]["said"].startswith(
+            f"{colordef.SAID['hue_angle']} (")
+        refused = asked("/color-preview?set=isohue&method=xy&x=a&y=0.3")
+        assert refused[:2] == (400, "application/json")
+        assert refused[2]["x"] is None and "not a number" in refused[2]["said"]
+        many = "&".join(f"f{n}=1" for n in range(17))
+        assert asked(f"/color-preview?{many}") == (400, "application/json", {
+            "x": None, "y": None, "srgb": None, "in_srgb": None,
+            "said": "a color preview takes at most 16 fields"})
+    finally:
+        hub.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 # --- The record and the card ------------------------------------------------------------------
 
 def test_a_sets_design_is_in_the_record_and_on_its_card(tmp_path, monkeypatch):
