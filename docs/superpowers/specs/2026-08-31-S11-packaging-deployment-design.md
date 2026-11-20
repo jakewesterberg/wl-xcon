@@ -26,6 +26,9 @@ and registry entries resolve. Public as of 2026-09-05, when ADR-0004 settled the
 | `rig/task` | Task PC | **Ubuntu 24.04 LTS**, dual-boot Windows (S0 §2) |
 | kiosk | Cage-side | S13; class not yet named in `wl-stack`'s vocabulary |
 
+**Settled 2026-11-20:** the kiosk's class is now named; wl-stack's machine-classes
+design added the `kiosk` class (open item 3, below).
+
 Both need a **`wl-stack` playbook**, and the `rig/*` role vocabulary (S0 §1) needs `wl-stack` to
 adopt it before the manifest's `runs_on` means anything. The task PC's deviation from Fedora is
 recorded as a rig-class decision, not a drift.
