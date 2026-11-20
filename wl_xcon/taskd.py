@@ -7649,7 +7649,9 @@ class Session:
         # its trials would have nothing to draw. **And a luminance the panel cannot show its color
         # set at** (`check.unshowable`; XC-494): its first trial could not be drawn.
         unset += unpooled(task, {**starts, **given})
-        unset += unshowable(task, {**starts, **given}, self.spec.calibration)
+        # Each named by its setting (the re-review's N4), as the pre-flight names it.
+        unset += [(name, f"{name!r}: {said}")
+                  for name, said in unshowable(task, {**starts, **given}, self.spec.calibration)]
         if unset:
             raise SystemExit("task refused, run not started: "
                              + "; ".join(_printable(said) for _, said in unset))

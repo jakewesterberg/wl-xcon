@@ -51,11 +51,16 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   6. **One whole-build review of 3 to 5** (`final-review.md` in the revision's ledger: with fixes, 0 Critical, 2
      Important, 12 Minor) **and its fix wave, done** (`fix-wave-report.md`): the summary sized from what each setting
      can show, so turning special trials on moves nothing (I1); the simulated eye holds through a delay (I2); one
-     finding per kind naming its structures (XC-545); a saturation judged at its start at load; a luminance start the
-     panel cannot show warned at load, refused as a value (the dim panel, XC-494's rule); the feed says "Annulus →
-     Square"; a pre-flight note for a `--set` the draw beats; XC-547 probed, no gap (P28 withdrawn); XC-549 to XC-554
-     filed.
-  Head `7d18b6e6` and the commit of this page. **6647 passed**, none skipped; WebKit's browser file 178 passed;
+     finding per kind naming its structures (XC-545); a saturation judged at its start at load; the feed says "Annulus →
+     Square"; a pre-flight note for a `--set` the draw beats; XC-547 probed, no gap (P28 keeps only its zero-wait
+     lesson); XC-549 to XC-554 filed. Then a scoped re-review (`re-review.md`) and its closing round: a staircase's line
+     says the level its staircase is at, from the frame's staircase row; a run-start refusal names each setting.
+     **The dim panel, as it is**: a panel that cannot show the fixation point's 40 cd/m² now *loads* the pop-out with
+     a warning (`color-set-unreachable`, naming the reachable top), but **Start is refused** by the pre-flight, since
+     the run would begin at 40, and **the page cannot set the point's starting brightness** (its start form sends only
+     staircase starts and the pool, and a setting sent between runs is refused); only `wlx run --set` or `wlx demo
+     --set` starts it. That is a question for the PI, not a told fix.
+  Head: the commit of this page. **6648 passed**, none skipped; WebKit's browser file 178 passed;
   welfare diff against `89f7b94` all SAME (nothing to read). Ledgers, git-ignored, in
   `.superpowers/sdd/`: `2026-11-16-popout-revision/` (`progress.md`, a report per task), `2026-11-19-params-summary-editor/`,
   `2026-11-19-console-interface/`, `2026-11-16-console-settings/`.
@@ -65,8 +70,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
   PI's review** (tables in `task-9-report.md` of the rework's ledger and `task-7-report.md` of the revision's), with
   questions in `.superpowers/questions-for-pi.md` (distractor brightness and Fade-in's step and floor as percents; the
   hue line saying "blue" at 0% saturation; saturations as percents; "Annulus" or "ring"; words for `reward_correct`,
-  XC-554; and, told not asked, the dim panel back to XC-494's rule and the reward-size guards outside the welfare
-  list, `fix-wave-report.md`).
+  XC-554; the dim panel, asked as it is (above; his choice: a run starts at the panel's reachable top with a warning,
+  the page offers the point's starting brightness, or the refusal at Start stays); and, told, the
+  reward-size guards outside the welfare list, `fix-wave-report.md`).
 - **`tryout-design-2026-11-17`** is superseded: its plan was amended and built on the branch above.
 
 ## What exists
@@ -93,7 +99,8 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
 **The PI asked, 2026-11-19, not to be asked for more input until the pop-out revision is built**: it is built, so his
 questions are collected, not yet asked. In order:
 1. **The PI**: his Safari try-out of the page and the demo, his review of wl-xtasks `popout-revision-2026-11-16`
-   (its labels and sentences), and the collected questions, asked in the UI.
+   (its labels and sentences), and the collected questions, asked in the UI, the dim panel among them. Tell him with
+   the try-out: the Special trials line may cut its values with an ellipsis once shares are on (whole in its title).
 2. **Push, then CI** (a mutation sweep by hand on the branch), then **the merge ask: merge only on his yes by name**
    after clean CI.
 3. **The XC-505 warning**, then **the display (build E)**, designed with the PI; "done" includes a real screen.

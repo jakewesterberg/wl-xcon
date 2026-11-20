@@ -2022,9 +2022,10 @@ def main(argv: list[str] | None = None) -> int:
         unset += unpooled(
             task, {**{p.name: p.start for p in task.params if p.start is not None}, **values})
         # And a luminance the panel cannot show a color set at (`check.unshowable`; XC-494).
-        unset += unshowable(
+        # Each named by its setting (the re-review's N4), as the pre-flight names it.
+        unset += [(name, f"{name!r}: {said}") for name, said in unshowable(
             task, {**{p.name: p.start for p in task.params if p.start is not None}, **values},
-            calibration)
+            calibration)]
         if unset:
             raise SystemExit(
                 "task refused, session not started, nothing recorded: "

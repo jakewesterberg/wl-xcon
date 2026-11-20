@@ -32,6 +32,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P25** | **A range proof that fails closed once its cap goes** | Medium | A check that proved a setting safe from its declared cap is judged at the values the setting can take, not at the cap: remove the cap and the proof refuses (or silently passes) everything; test at the values — see expanded note |
 | **P26** | **A page that sends on a timer records half-way values** | Medium | A console control sends nothing until its box's Apply: a value typed or stepped is a draft the box says is *not sent*, and one Apply sends the box's change under one command id, so the record never holds a number a person was still reaching for (the console interface rework, 2026-11-19; the PI: "an apply button in each box") |
 | **P27** | **An answer read from absence** | Medium | A page says an outcome only on the rig's word for it -- a refusal carrying the act's command id, the act's id in `Telemetry.withdrawals` -- never because something stopped being on the frame, which a change applied does too; and an act answered *sent* the rig never answers is let go after a bound, saying so. Each end of the withdraw button passed its tests while the run loop read every press after the boundary had applied its change (the console interface rework's whole-build review, C1 and I1): test a two-ended feature through `Session.run` with the press a frame later, as a page makes it |
+| **P28** | **A zero wait that lasts a frame** | Medium | A state whose wait is 0 lasted a frame, so the pop-out's array and its go fell a frame apart at `go_delay` 0; a zero wait is now passed on the frame its entering edge is taken (TSK-78) |
 | **P29** | **A rule for a stream applied to a coincidence** | Medium | A rule keyed on how close two reports arrive says whether they *are* the regular stream it was made for, not only whether these two came close: a flick's report the frame after a still pointer's was taken as a one-a-frame report, in one frame, a jump no saccade detector confirms -- see expanded note |
 
 ## Expanded notes
@@ -408,6 +409,19 @@ silently and every trial after it no fixation (I1, now `bad-window-radius`). Mit
 values a setting can take (`laid_out`, `check.LAYOUT`), where an open side is held at its start; give every
 value that cannot be a structure check of its own rather than leaving it to a bound; and test it at the values
 with the cap or the floor removed, not with it in place.
+
+**P28 — A zero wait that lasts a frame.** The trial loop took one edge a frame, so a state whose wait was 0
+lasted a frame: with `go_delay` at 0 the pop-out's array appeared on one frame and the fixation point's change to its
+act look (the go) came on the next, though the PI had asked for one (the revision design §3 item 5). TSK-78 now
+takes a zero wait's edge on the frame that enters the state, so the array and the go share a frame, and a reaction
+time measured from the go is not a frame short or long by construction. A one-frame gap this was once thought to
+leave beside `Exited`'s edge against the frame before was probed with the rig's tracked gaze world on 2026-11-19
+and is not there: an eye leaving on any frame about the hold's end is scored, a fixation break then the answer
+(`tests/test_popout_revision.py`, `test_an_eye_leaving_on_any_frame_about_the_holds_end_is_scored_by_an_edge`).
+Mitigation: the loop's rule is pinned (`tests/test_run.py`, TSK-78's section, and
+`test_exited_at_a_states_start_is_still_an_edge_against_the_frame_before`; `tests/test_popout_revision.py`,
+`test_leaving_on_the_frame_the_delay_ends_is_early`). A wait of 0 is a state that should judge no frame of its own;
+test it on the frame it is entered, not the one after.
 
 **P29 — A rule for a stream applied to a coincidence.** Demo mode eases each pointer report's move over the
 time since the report before, and `pointer.EASE_SLACK_S` more, so a hand's move reaches the saccade detector

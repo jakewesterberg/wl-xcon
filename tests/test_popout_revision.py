@@ -765,9 +765,10 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
         tmp_path):
     """The whole-build review's M8 and M9, and the catch hold's unit (the controller's ruling on
     Task 7's concern 8), on the pop-out's own rows: **the Special trials line says its shares
-    with %**, "0% · 0% · 0% · 0% · 0.50 s"; **a line its staircase gives says the level in force
-    after its words**, "by its staircase · 4", which the frame carries (`spec.values`), and its
-    widest, the staircase's highest, sizes the columns (`web._widest`, I1); **and the special
+    with %**, "0% · 0% · 0% · 0% · 0.50 s"; a line its staircase gives says its words, the level
+    after them where the frame's staircase gives one
+    (`test_a_staircases_line_follows_its_level_as_it_steps`), and its widest, the staircase's
+    highest, sizes the columns (`web._widest`, I1); **and the special
     trials' sentence shows the catch hold's unit**, "a catch is held [0.50] s", where the shares
     show their own `%`."""
     import dataclasses
@@ -781,7 +782,9 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
     assert ">0% · 0% · 0% · 0% · 0.50 s<" in summary, summary[:200]
     rows = {row.name: row for row in made.params}
     stepped = dataclasses.replace(rows["set_size"], source="staircase")
-    assert web._summary_value(stepped) == "by its staircase · 4"
+    # With no level from the frame's staircase, its words alone (the re-review's N1).
+    assert web._summary_value(stepped) == "by its staircase"
+    assert web._summary_value(stepped, 9) == "by its staircase · 9"
     assert web._widest(stepped) == "by its staircase · 36"
     assert web._widest(rows["target_absent_percent"]) == "100%"
 
@@ -791,3 +794,33 @@ def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_
     assert after.startswith('<span class="unit">s</span>'), after[:120]
     share = box[box.index('data-param="target_absent_percent"'):].split("</button></span>", 1)[1]
     assert not share.startswith('<span class="unit">'), share[:120]
+
+
+def test_a_staircases_line_follows_its_level_as_it_steps(tmp_path):
+    """The re-review's N1: a staircase's summary line said the run's start as its level ("by its
+    staircase · 4") while the staircase stood at 9, its row's value never stepped. **The line takes
+    the level from the frame's own staircase row** (`Telemetry.staircase`), so on a session of
+    Crowd whose staircase steps, each frame's line for `set_size` says the value at the level that
+    frame's staircase is at, and over the session it says more than one."""
+    from _frames import view
+    from wl_xcon import web
+    from wl_xcon.link import Telemetry
+
+    session, lines = _session(tmp_path, stop=60)
+    frames = [frame for frame in session.link.published
+              if isinstance(frame, Telemetry) and frame.staircase is not None and frame.params]
+    assert frames, "no frame of the run carried its staircase"
+    said = []
+    for frame in frames:
+        assert frame.staircase.setting == "set_size"
+        (row,) = [row for row in frame.params if row.name == "set_size"]
+        if row.source != "staircase":
+            continue
+        level = frame.staircase.levels[frame.staircase.level]
+        summary = web._summary(frame, view(can_write=True), False)
+        line = summary[summary.index('data-open="set_size"'):]
+        line = line[:line.index("</button>")]
+        assert f">by its staircase · {web._number_said(row, level)}<" in line, (level, line)
+        said.append(level)
+    assert len(set(said)) >= 2, said
+    assert len({line["params"]["set_size"] for line in lines}) >= 2

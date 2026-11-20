@@ -3103,7 +3103,7 @@ def _drawn_said(row) -> str | None:
     return f"{_significant(float(ends[0]))}–{_significant(float(ends[1]))}{_line_unit(row)}"
 
 
-def _summary_value(row) -> str:
+def _summary_value(row, level: object = None) -> str:
     """**The value in force as a summary line says it** (the summary and editor design's call:
     "the summary's value is the rig's: rendered in Python from the same row the box uses"), plain
     text: a pool's "2 of 12"; a color's hue, or "from pairings" where its pool draws it; a value
@@ -3140,12 +3140,14 @@ def _summary_value(row) -> str:
     drawn = _drawn_said(row)
     if drawn is not None:
         return drawn
-    if (row.source == "staircase" and isinstance(row.value, (int, float))
-            and not isinstance(row.value, bool)):
-        # **A staircase's value in force after its words** (the pop-out revision's whole-build
-        # review, M8: "by its staircase · 4"): the frame carries the level the staircase holds
-        # (`spec.values`); a condition's or a pool's each trial's own, which no frame carries.
-        return f"{_PER_TRIAL_SHORT['staircase']} · {_number_said(row, row.value)}"
+    if (row.source == "staircase" and isinstance(level, (int, float))
+            and not isinstance(level, bool)):
+        # **A staircase's level in force after its words** (the pop-out revision's whole-build
+        # review, M8, and its re-review, N1: "by its staircase · 9"): `level`, the value at the
+        # level the frame's own staircase row is at (`Telemetry.staircase`, `_stepped`), never the
+        # row's value, which is the run's start; a condition's or a pool's each trial's own, which
+        # no frame carries, says its words alone.
+        return f"{_PER_TRIAL_SHORT['staircase']} · {_number_said(row, level)}"
     if row.source in _PER_TRIAL_SHORT:
         return _PER_TRIAL_SHORT[row.source]
     if isinstance(row.value, (int, float)) and not isinstance(row.value, bool):
@@ -3183,6 +3185,19 @@ def _widest(row) -> str:
                 if row.source in _HELD_BY:
                     said.append(f"{_HELD_BY[row.source][0]} {number}")
     return max(said, key=len)
+
+
+def _stepped(frame) -> tuple:
+    """**The setting the frame's staircase steps and the value at its level in force**
+    (`Telemetry.staircase`: its setting, its levels and the level it is at), or `("", None)` with
+    none, for `_summary_value`. Formatting, not derivation."""
+    row = getattr(frame, "staircase", None)
+    if row is None:
+        return "", None
+    try:
+        return row.setting, row.levels[row.level]
+    except (IndexError, TypeError):
+        return "", None
 
 
 def _drawn(row) -> bool:
@@ -3270,11 +3285,12 @@ def _summary(frame, view: View, training: bool) -> str:
     entries = [entry for entry in _entries(frame) if _training(entry[0]) == training]
     lines = []
     widths = [_line_width(NEW_COLOR_LINE, "")]
+    stepped, level = _stepped(frame)
     for section, row, group, members in entries:
         if group is None:
             change = staged.get(row.name)
             state, said = _status(row, change, refused.get(row.name), peers)
-            now = _summary_value(row)
+            now = _summary_value(row, level if row.name == stepped else None)
             drawn = _drawn(row)
             words = _plain(_PER_TRIAL[row.source][0]) if drawn else ""
             number = (row.members is None and row.color is None and row.position is None
@@ -3288,7 +3304,8 @@ def _summary(frame, view: View, training: bool) -> str:
                 row.words if row.words is not None and row.words in row.choices else ""), 1))
             continue
         state, said = _group_state(members, frame, staged)
-        values = [_summary_value(member) for member in members]
+        values = [_summary_value(member, level if member.name == stepped else None)
+                  for member in members]
         now = " · ".join(values)
         shown = " · ".join(_waits(member, staged.get(member.name), value)
                            for member, value in zip(members, values))

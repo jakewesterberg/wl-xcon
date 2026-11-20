@@ -1389,9 +1389,13 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
 
     point = starting_values(_load_task(TASK_FILE), {}, (), "training", calibration=DIM)
     assert point.result == FAIL and "at 40 cd/m²" in point.said and "reachable top" in point.said
+    # Each setting named once, so the trainer sees both must come down (the re-review's N4).
+    assert point.said.count("'fix_luminance': calibration") == 1, point.said
+    assert point.said.count("'fix_act_luminance': calibration") == 1, point.said
     as_written = _opened(replace(_spec(tmp_path / "written", seed=5, start_block="Fade-in"),
                                  calibration=DIM), Simulated())
-    with pytest.raises(SystemExit, match="task refused, run not started: .*at 40 cd/m²"):
+    with pytest.raises(SystemExit, match="task refused, run not started: 'fix_luminance': "
+                                         ".*at 40 cd/m².*'fix_act_luminance': "):
         as_written.run()
 
     refused = _Locks("color_luminance", 25.0, stop_at=5)

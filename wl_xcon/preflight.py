@@ -550,7 +550,9 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
     # apex** (`check.unshowable`; XC-494): the load only warns of the range's unreachable part,
     # and a run starting at such a value is refused here, naming the reachable top.
     try:
-        wrong += [said for _, said in unshowable(task, merged, calibration)]
+        # Each named by its setting (the re-review's N4: two settings at one value said one
+        # sentence twice, naming neither).
+        wrong += [f"{name!r}: {said}" for name, said in unshowable(task, merged, calibration)]
     except Exception as broken:  # noqa: BLE001 -- as above
         wrong.append(f"the task's color sets could not be checked: {type(broken).__name__}: "
                      f"{broken}")
