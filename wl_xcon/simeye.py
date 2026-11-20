@@ -29,6 +29,11 @@ draws (`Seeing.display`, before the frame's sample is polled) and told each stat
 - **Early, before the go, at its early rate**: on a trial drawn early (`early_rate`), the eye
   holding a fixation window it is asked to stay in leaves it once, after a latency from when the
   hold began, as an answer would go; so a hold shorter than the latency answers the go instead.
+- **A false alarm, at its false-alarm rate**: a state that is a catch's go (`_read`: a `Hold` on a
+  window that is no target, ending the trial in a right outcome, `CORRECT_REJECT`) is answered, on
+  a trial drawn to false-alarm (`false_alarm_rate`), by the eye leaving that window once, after a
+  latency from the state's first frame, to a drawn object, else to empty space. At a rate of 0 it
+  draws nothing for it, so every draw a trial made before is made in the same order.
 - **Not at all, at `1 - engagement`**: a trial drawn disengaged looks at empty space and nothing
   else, staying there if it already does, so a task's no-fixation path is reachable, as the hazard
   animal's engagement made it.
@@ -128,6 +133,7 @@ _FIXATE = 1
 _ANSWER = 2
 _EARLY = 3
 _AWAY = 4
+_ALARM = 5
 
 
 class Eye:
@@ -138,9 +144,9 @@ class Eye:
     looked last."""
 
     def __init__(self, accuracy: float, rt_median_s: float, early_rate: float, seed: int,
-                 engagement: float = 1.0) -> None:
+                 engagement: float = 1.0, false_alarm_rate: float = 0.0) -> None:
         for name, value in (("accuracy", accuracy), ("early_rate", early_rate),
-                            ("engagement", engagement)):
+                            ("engagement", engagement), ("false_alarm_rate", false_alarm_rate)):
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"a simulated eye's {name} is a probability, from 0 to 1, "
                                  f"not {value!r}")
@@ -151,6 +157,7 @@ class Eye:
         self.rt_median_s = rt_median_s
         self.early_rate = early_rate
         self.engagement = engagement
+        self.false_alarm_rate = false_alarm_rate
         self.seed = seed
         #: **Two generators from the one seed**: what it decides (engaged, early, each latency,
         #: where an answer goes) and its samples' noise, so how many frames a trial ran never moves
@@ -204,10 +211,14 @@ class Eye:
         self._duration = DURATION_S
         self._engaged = True
         self._early = False
+        self._alarm = False
+        self._alarmed = False
+        self._catch = ""
         if trial is None:
             self._asks: dict = {}
             self._targets: tuple = ()
             self._distractors: tuple = ()
+            self._lures: tuple = ()
             self._plain: dict = {}
             self._family: dict = {}
             self._arrays: dict = {}
@@ -217,6 +228,9 @@ class Eye:
         self._read(trial, values)
         self._engaged = self._rng.random() < self.engagement
         self._early = self._rng.random() < self.early_rate
+        if self.false_alarm_rate > 0.0:
+            # Drawn only above 0, and after the two draws above: at 0 no draw is added or moved.
+            self._alarm = self._rng.random() < self.false_alarm_rate
         if self._samples == 0:
             # Its first trial: the animal has not yet found the fixation point.
             self._empty()
@@ -246,6 +260,8 @@ class Eye:
                 if other not in distractors:
                     distractors.append(other)
         self._distractors = tuple(distractors)
+        # What a false alarm can land on: the error windows, and every array's distractors.
+        lures = list(distractors)
         asks: dict = {}
         for state in trial.states:
             seek: list = []
@@ -253,8 +269,12 @@ class Eye:
             left: list = []
             aims: list = []
             answers = False
+            catch = ""
             for edge in state.go:
                 guard = edge.guard
+                if (isinstance(guard, Hold) and isinstance(edge.to, Outcome)
+                        and edge.to in RIGHT and guard.window not in targets and not catch):
+                    catch = guard.window
                 if isinstance(guard, (Entered, Hold)) and guard.window not in seek:
                     seek.append(guard.window)
                 if isinstance(guard, Hold):
@@ -277,13 +297,14 @@ class Eye:
             if answers and not aims:
                 aims = list(targets)
             asks[state.name] = (tuple(seek), any(name not in targets for name in held), answers,
-                                tuple(aims))
+                                tuple(aims), catch)
         self._asks = asks
         # Where each window is: a plain one once; an array's objects in every placement the trial
         # can draw it in, each placement's centers built now (as `gaze.Tracked` builds its own).
         self._family = {}
         self._arrays = {}
         every: list = []
+        self._lures = ()
         for of, options in placements(trial, values).items():
             built = []
             for placement in options:
@@ -296,6 +317,9 @@ class Eye:
                 for alias in placement.members:
                     self._family[alias] = of
             self._arrays[of] = tuple(built)
+            if f"{of}.distractor" not in lures:
+                lures.append(f"{of}.distractor")
+        self._lures = tuple(lures)
         declared, _ = expand_windows(trial, values)
         self._plain = {}
         for window in declared:
@@ -338,6 +362,7 @@ class Eye:
         self._fixating = asks[1]
         self._answers = asks[2]
         self._aims = asks[3]
+        self._catch = asks[4]
         self._plan_kind = _NONE
 
     def see(self, visible, frame: int) -> None:
@@ -382,6 +407,12 @@ class Eye:
             if len(self._aims) == 0 or self._aimed(self._aims):
                 self._plan(_ANSWER, frame)
             return
+        if self._catch and self._alarm and not self._alarmed:
+            window = self._plain.get(self._catch)
+            if (window is not None
+                    and separation_deg(self._x, self._y, window[0], window[1]) <= window[2]):
+                self._plan(_ALARM, frame)
+                return
         seek = self._seek
         index = 0
         while index < len(seek):
@@ -413,6 +444,17 @@ class Eye:
         if kind == _AWAY:
             self._away = True
             self._empty()
+            self._go(frame, self._wx, self._wy)
+            return
+        if kind == _ALARM:
+            # A catch's false alarm: off the window to an object drawn, else to empty space.
+            self._alarmed = True
+            count = self._distractor(-1, self._lures)
+            if count > 0:
+                pick = int(self._rng.random() * count)
+                self._distractor(pick if pick < count else count - 1, self._lures)
+            else:
+                self._empty()
             self._go(frame, self._wx, self._wy)
             return
         if kind == _ANSWER:
@@ -514,11 +556,12 @@ class Eye:
                 return option
         return None
 
-    def _distractor(self, pick: int) -> int:
+    def _distractor(self, pick: int, names: "tuple | None" = None) -> int:
         """How many distractors are drawn now, and the `pick`th of them into `_wx`, `_wy`, `_wr`
         (none for a `pick` of -1): each window an error saccade is scored on, an alias's objects
         each one."""
-        names = self._distractors
+        if names is None:
+            names = self._distractors
         count = 0
         index = 0
         while index < len(names):

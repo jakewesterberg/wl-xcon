@@ -34,7 +34,7 @@ from wl_xcon.geometry import separation_deg
 from wl_xcon.photometry import SRGB
 from wl_xcon.run import Recorded, run_trial
 from wl_xcon.saccade import Detector, detect
-from wl_xcon.task import (After, Entered, Exited, On, Outcome, Pressed, SaccadeTo, State, Trial,
+from wl_xcon.task import (After, Entered, Exited, Hold, On, Outcome, Pressed, SaccadeTo, State, Trial,
                           Window)
 from wl_xcon.taskd import Session, SessionSpec
 from wl_xcon.welfare import Deployment, Simulated as Pump
@@ -439,3 +439,112 @@ def test_a_timer_from_a_window_edge_never_ends_its_state_through_the_eye_as_on_a
     census = simulate.simulate(timed, hazards, 200, FRAME, {"target_index": 0},
                                effects=Recorded())
     assert census.outcomes[Outcome.EARLY_RESPONSE] > 0
+
+
+#: A catch trial, built here and not the pop-out's own: fixate, hold 0.3 s, four items (no target,
+#: `found_by="none"`) come on beside the dot, the go; holding the fixation window 0.5 s is the
+#: right answer (`CORRECT_REJECT`), leaving it a false alarm.
+_CATCH = '''
+from wl_xcon.photometry import Gray
+from wl_xcon.task import (
+    After, Array, Disc, Entered, Exited, Hold, ObjectWindows, On, Outcome, Show, Square, State,
+    Stimulus, Task, Trial, Window,
+)
+
+FIX = Stimulus("fix", at=(0.0, 0.0), looks=Disc(size=0.3, color=Gray(40.0)))
+ITEMS = Stimulus("ring", at=(0.0, 0.0), looks=Array(
+    n=4, radius=8.0, target=0, looks=Square(size=1.0, color=Gray(40.0)),
+    among=Square(size=1.0, color=Gray(40.0)), found_by="none"))
+
+catch = Trial(
+    start="await_fix",
+    windows=[Window("fix", at=(0.0, 0.0), radius=2.0, on="fix"),
+             ObjectWindows(of="ring", radius=1.5)],
+    states=[
+        State("await_fix", enter=[Show(FIX)],
+              go=[On(Entered("fix"), "hold_fix"), On(After(2.0), Outcome.NO_FIXATION)]),
+        State("hold_fix",
+              go=[On(Hold("fix", 0.3), "go", do=[Show(ITEMS)]),
+                  On(Exited("fix"), Outcome.FIXATION_BREAK),
+                  On(After(10.0), Outcome.NO_FIXATION)]),
+        State("go", go=[On(Hold("fix", 0.5), Outcome.CORRECT_REJECT),
+                        On(Exited("fix"), Outcome.FALSE_ALARM)]),
+    ],
+)
+
+TASK = Task({"catch": catch}, default="catch", needs_fixed_head=True)
+'''
+
+
+@pytest.fixture(scope="module")
+def catch(tmp_path_factory) -> Trial:
+    path = tmp_path_factory.mktemp("simeye_catch") / "catch.py"
+    path.write_text(_CATCH)
+    return _load_task(path).trial
+
+
+def test_at_its_false_alarm_rate_the_eye_leaves_a_catch_and_the_rig_scores_it_false_alarm(
+        catch):
+    """**A false alarm, scored by `gaze.Tracked`**: an eye that false-alarms on every trial leaves
+    the fixation window in the catch's go, to an item drawn, and the rig scores FALSE_ALARM every
+    time; one that false-alarms on about 30% is scored so on about that share. The landing is
+    where the display draws an item (a distractor, the array having no target)."""
+    always = simeye.Eye(accuracy=1.0, rt_median_s=0.2, early_rate=0.0, seed=3, false_alarm_rate=1.0)
+    landed = []
+    for _ in range(30):
+        world = always.world(catch, {}, FRAME)
+        result = run_trial(catch, world, FRAME, values={}, effects=Recorded())
+        assert result.outcome is Outcome.FALSE_ALARM, result.outcome
+        landed.append((round(always._to_x, 3), round(always._to_y, 3)))
+        assert separation_deg(0.0, 0.0, always._to_x, always._to_y) == pytest.approx(8.0, abs=1e-6)
+    assert len(set(landed)) <= 4, landed
+
+    some = _played(catch, simeye.Eye(accuracy=1.0, rt_median_s=0.2, early_rate=0.0, seed=3,
+                                     false_alarm_rate=0.3), 400, {})
+    assert set(some) == {Outcome.FALSE_ALARM, Outcome.CORRECT_REJECT}, some
+    assert 0.24 <= some[Outcome.FALSE_ALARM] / 400 <= 0.36, some
+
+
+def test_otherwise_it_holds_a_catch_and_is_rewarded(catch):
+    """At a false-alarm rate of 0 the eye holds the fixation window through the catch's go, and the
+    rig scores CORRECT_REJECT on every trial (the right outcome a reward follows)."""
+    eye = simeye.Eye(accuracy=0.5, rt_median_s=0.2, early_rate=0.0, seed=3, false_alarm_rate=0.0)
+    assert _played(catch, eye, 30, {}) == Counter({Outcome.CORRECT_REJECT: 30})
+    assert Outcome.CORRECT_REJECT in simeye.RIGHT
+
+
+#: A seeded eye's 60 trials of the pop-out search as the eye played them before it had a false-alarm
+#: rate (captured at 9fe57bcb), and the next draw of each of its two generators after them.
+_BEFORE = (
+    "correct wrong_target correct correct correct correct wrong_target correct fixation_break "
+    "correct no_fixation fixation_break no_fixation correct no_fixation correct wrong_target "
+    "correct correct no_fixation wrong_target wrong_target correct fixation_break no_fixation "
+    "wrong_target correct correct correct fixation_break fixation_break correct correct correct "
+    "fixation_break no_fixation correct correct correct fixation_break correct wrong_target "
+    "correct correct fixation_break wrong_target fixation_break correct correct correct "
+    "wrong_target correct correct fixation_break correct correct correct correct correct correct"
+).split()
+
+
+def test_a_false_alarm_rate_of_0_moves_no_earlier_session(search):
+    """**Nothing before moves at 0**: a seeded eye's 60 trials (engaged 90%, early 15%, accurate
+    80%) score as they did before the rate existed, and each generator is where it was, so no draw
+    was added or moved. The rate unset is the rate of 0."""
+    for kwargs in ({}, {"false_alarm_rate": 0.0}):
+        eye = simeye.Eye(accuracy=0.8, rt_median_s=0.2, early_rate=0.15, seed=11,
+                         engagement=0.9, **kwargs)
+        played = []
+        for index in range(60):
+            values = {"target_index": index % 4}
+            world = eye.world(search, values, FRAME)
+            played.append(run_trial(search, world, FRAME, values=values,
+                                    effects=Recorded()).outcome.value)
+        assert played == _BEFORE, kwargs
+        assert eye._rng.random() == 0.07055165467659386
+        assert eye._noise.random() == 0.8441510596975613
+
+
+def test_a_false_alarm_rate_is_a_probability():
+    for bad in (-0.1, 1.5):
+        with pytest.raises(ValueError, match="false_alarm_rate"):
+            simeye.Eye(accuracy=1.0, rt_median_s=0.2, early_rate=0.0, seed=1, false_alarm_rate=bad)

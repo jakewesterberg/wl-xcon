@@ -897,11 +897,14 @@ animal knows them, read from the trial between trials: it fixates the fixation p
 shown; it answers once at the go, landing on the target at its `accuracy`, otherwise on a
 distractor if one is drawn, else on empty space, after a log-normal latency about its
 `rt_median_s`; on `early_rate` of trials it leaves fixation before the go; on `1 - engagement` it
-looks away. Its saccades have a minimum-jerk profile with Gaussian noise on every sample, ones the
+looks away; on `false_alarm_rate` of trials (default 0, which adds no draw) it leaves the fixation window
+in a catch's go, a `Hold` ending the trial in a right outcome, to an object drawn else empty space,
+and `gaze.Tracked` scores it `FALSE_ALARM`. Its saccades have a minimum-jerk profile with Gaussian noise on every sample, ones the
 detector confirms at the session's 240 Hz; its map is the identity (`simeye.MAPPING`). Its numbers
 are engineering defaults with no published source sought, but the 85% correct of the engine spec's
 "normal" animal (TSK-40), and are `taskd.SessionSpec`'s (`accuracy`, `rt_median_s`, `early_rate`,
-`engagement`), set in code (XC-146). A trial with no gaze guard, or one asking a guard no gaze
+`engagement`), set in code (XC-146); `false_alarm_rate` is the eye's alone until the pop-out's catch
+trial (the pop-out revision's Task 7) gives `SessionSpec` a use for it. A trial with no gaze guard, or one asking a guard no gaze
 world answers (a lever, a touch, the photodiode; `simulate.gazes`), stays with the hazard
 `simulate.Subject`, as does a census given one (`simulate.simulate`). Until then every simulated
 trial was the `Subject`'s, which fires a guard by a hazard rate and has no gaze: the XC-410
