@@ -33,6 +33,10 @@ machine, so this spec proposes the role vocabulary and asks `wl-stack` to adopt 
 `wl-orchestrator`'s registry only once `wl-stack` agrees them, since host identity is
 that repository's to define.
 
+> **Note, 2026-11-20.** wl-stack adopted these roles (machine-classes design §6.1), plus `cam`.
+> The class list in the first paragraph is also overtaken: `rws` is retired and `kiosk` added,
+> so the classes are `dws`, `mws`, `serv`, `rig`, `kiosk`. This section is otherwise left as written.
+
 **Open:** whether `rig/intan` and `rig/sglx` are the same physical machine. RHX and
 SpikeGLX both want CPU headroom, and P14 makes an RHX client that falls behind an
 acquisition-halting fault — so co-tenancy is a measurement (V8), not a preference.
