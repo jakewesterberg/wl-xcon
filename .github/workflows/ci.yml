@@ -96,11 +96,13 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - name: Check out wl-xtasks's main inside the workspace
+      - name: Check out wl-xtasks inside the workspace
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
-          ref: main
+          # The branch's own wl-xtasks (its revised pop-out) until both merge; back to main in
+          # the merge commit, after wl-xtasks's main takes popout-revision-2026-11-16.
+          ref: popout-revision-2026-11-16
           path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since
@@ -193,11 +195,13 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - name: Check out wl-xtasks's main inside the workspace
+      - name: Check out wl-xtasks inside the workspace
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
-          ref: main
+          # The branch's own wl-xtasks (its revised pop-out) until both merge; back to main in
+          # the merge commit, after wl-xtasks's main takes popout-revision-2026-11-16.
+          ref: popout-revision-2026-11-16
           path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since
@@ -305,11 +309,13 @@ jobs:
         with:
           repository: jakewesterberg/wl-preproc
           path: wl-preproc
-      - name: Check out wl-xtasks's main inside the workspace
+      - name: Check out wl-xtasks inside the workspace
         uses: actions/checkout@v7
         with:
           repository: jakewesterberg/wl-xtasks
-          ref: main
+          # The branch's own wl-xtasks (its revised pop-out) until both merge; back to main in
+          # the merge commit, after wl-xtasks's main takes popout-revision-2026-11-16.
+          ref: popout-revision-2026-11-16
           path: wl-xtasks
       - name: Install wl-sync at wl-preproc's own pin
         # wl-preproc's contract readers import wl_sync at module level (since

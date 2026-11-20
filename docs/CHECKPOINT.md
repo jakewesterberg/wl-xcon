@@ -66,8 +66,9 @@ if the box cannot be reached the rig refuses to open and says why. Its client is
 - **wl-xtasks `popout-revision-2026-11-16`** (worktree `/Users/jakewesterberg/GitHub/wl-xtasks-worktrees/console-settings-2026-11-16`,
   `d74c251`, on `console-settings-2026-11-16` `c30ca28`, from wl-xtasks `64929fe`; **not merged, not pushed**): the
   tasks' bounds, sections, plain labels and sentences, and the revised pop-out, unchanged by the answers of
-  2026-11-20 (the ring's word is the rig's). Questions collected for the PI and not among his 2026-11-20 answers
-  stay in `.superpowers/questions-for-pi.md`.
+  2026-11-20 (the ring's word is the rig's). Every question collected for the PI was answered on 2026-11-20. Until
+  both merge, CI checks out this wl-xtasks branch (`ci.yml`'s `ref:`); the merge sets it back to `main` after
+  wl-xtasks's main takes the branch.
 - **`tryout-design-2026-11-17`** is superseded: its plan was amended and built on the branch above.
 
 ## What exists
