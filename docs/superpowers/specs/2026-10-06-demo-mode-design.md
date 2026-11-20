@@ -687,7 +687,11 @@ review, by number):
    about a rig): the eye trails the hand by about 21 ms more; a stop of 50 ms or less between two
    moves can merge them into one saccade; a 600 ms glide meets the landing bound 5 or 6 times in
    100, not 2, its flight 4.5 ms longer on average; and 1 in 100 jittered 600 ms glides still
-   splits.)*
+   splits.)* *(2026-11-19: only a report continuing a stream of one a frame, every report since
+   the eye was found a frame after the one before, is taken without the slack. A flick reported
+   the frame after a still pointer's 100 ms report had been taken in that one frame, a jump the
+   detector never confirms, so the pop-out ended a look at the odd disc astray; the slack's
+   measurement is unchanged by it, rerun.)*
 10. **The apparatus and field rule**: decided in `Service._open` (on the welfare list) and passed
     to `_build`; **a simulation is never resumed, only ended** (`resume.read` reads the flag;
     `_resume` refuses it), so a crashed simulation cannot come back as a live session. Both go

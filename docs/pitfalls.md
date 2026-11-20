@@ -33,6 +33,7 @@ the moment it becomes someone's active job. Review this file at every milestone 
 | **P26** | **A page that sends on a timer records half-way values** | Medium | A console control sends nothing until its box's Apply: a value typed or stepped is a draft the box says is *not sent*, and one Apply sends the box's change under one command id, so the record never holds a number a person was still reaching for (the console interface rework, 2026-11-19; the PI: "an apply button in each box") |
 | **P27** | **An answer read from absence** | Medium | A page says an outcome only on the rig's word for it -- a refusal carrying the act's command id, the act's id in `Telemetry.withdrawals` -- never because something stopped being on the frame, which a change applied does too; and an act answered *sent* the rig never answers is let go after a bound, saying so. Each end of the withdraw button passed its tests while the run loop read every press after the boundary had applied its change (the console interface rework's whole-build review, C1 and I1): test a two-ended feature through `Session.run` with the press a frame later, as a page makes it |
 | **P28** | **A zero wait that lasts a frame, and an edge that needs the frame before** | Medium | A state whose wait is 0 is passed on the frame its entering edge is taken (TSK-78); an `Exited` is an edge against the frame before, so a state that begins with the eye already out sees nothing leave -- the one-frame gap is stated, not closed |
+| **P29** | **A rule for a stream applied to a coincidence** | Medium | A rule keyed on how close two reports arrive says whether they *are* the regular stream it was made for, not only whether these two came close: a flick's report the frame after a still pointer's was taken as a one-a-frame report, in one frame, a jump no saccade detector confirms -- see expanded note |
 
 ## Expanded notes
 
@@ -422,3 +423,22 @@ read from the code, not measured, and it is one frame wide; whether it should co
 filed (XC-547). Mitigation: the loop's rule is pinned (`tests/test_run.py`, TSK-78's section, and
 `test_exited_at_a_states_start_is_still_an_edge_against_the_frame_before`; `tests/test_popout_revision.py`,
 `test_leaving_on_the_frame_the_delay_ends_is_early`); the one-frame gap above is not closed.
+
+**P29 — A rule for a stream applied to a coincidence.** Demo mode eases each pointer report's move over the
+time since the report before, and `pointer.EASE_SLACK_S` more, so a hand's move reaches the saccade detector
+as motion; a report the frame after the last was taken exactly, for a page reporting one a frame. The page
+reports a still pointer every 100 ms and a moving one at most once an animation frame, so a report a frame
+after the last was never that stream: it was a flick made just after the page's still report, the two
+reaching the rig a frame apart. Taken in its one frame, the 8° flick was a jump the detector never confirmed
+(under its six samples outside the threshold), the pop-out's `flight` saw no landing, and its 0.3 s landing
+bound ended a look at the odd disc as `astray`, an abort, with the eye in the target's window
+(`tests/test_page_browser.py::test_the_popout_played_with_the_mouse_is_correct`, about one full-suite run in
+several from 2026-11-16 to 2026-11-19). It looked like a test that load breaks, and load only made the
+coincidence likelier: the suite slowed the test's sight of the report it times its flick from, moving the
+flick onto the page's next still report; flicked the moment a report went, on a quiet machine, 3 of 12 runs
+aborted, every one with the two reports a frame apart. A hand flicks whenever it flicks. Probed by recording
+the rig's frames, each report the rig took and each the server forwarded beside the suite's load (the
+session's own record says only `abort`). Mitigation: a report is taken exactly only in a stream of one a
+frame since the eye was found (`pointer.Source._adopt`); `tests/test_pointer.py`'s
+`test_a_flick_reported_the_frame_after_a_still_pointers_report_is_still_a_saccade`. When a test flakes only
+under load, read what the system saw on the failing frame before deciding the test is what is wrong.

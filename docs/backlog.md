@@ -15,7 +15,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 
 **Finding one.** Grep the ID, a package (`P9`, `b3`), a repository (`wl-sync`) or a file. The sections: brainstorms the PI asked to have later; features no plan covers yet; defects and review findings deliberately not fixed; debt (cleanup, stale wording, test hygiene); anything that needs the rig or other hardware, measurements included; and asks of, or waits on, other repositories.
 
-**Next free ID: XC-548.**
+**Next free ID: XC-549.**
 
 ## Brainstorms queued for the PI
 
@@ -320,6 +320,7 @@ No ` — ` inside a field. Link a section, not a file, where one exists. `tests/
 - **XC-541** Watch `tests/test_page_browser.py::test_a_press_during_frames_acts_once[stepper]` in WebKit by name: it failed once under `-n 6` in the whole-build review's loaded run, its message not captured, then passed 50 times (whole-build review M9). — 2026-11-19, [console interface plan, the whole-build review](superpowers/plans/2026-11-19-console-interface.md#review-focus) — waits on: nothing
 - **XC-546** Each named stimulus kind says its own extent and its expansion to blocks in one place, so a new kind is taught once: today `screen.as_look` (screen.py ~224-265), check's look and width reading (`check._light` ~5929-5933, `check._narrowest` ~7775-7782) and the demo's outline (`pointer._extent` ~754-767) each list Disc/Square/Bar/Cross/Polygon/Annulus/Gabor/Grating by type or by field name, and a kind left out of one would be misread by the layout warnings. Origin: the PI, 2026-11-19, asked whether the build stays flexible for new stimulus types. — 2026-11-19, [pop-out revision plan](superpowers/plans/2026-11-16-popout-revision.md) — waits on: nothing
 - **XC-547** Whether an eye that left the fixation window on the very frame the hold completed counts as an exit at the go: with `go_delay` 0 the `delay` state lasts no frame and `go`'s `Exited` is an edge against the frame before, so that departure is seen by neither (pitfall P28); a one-frame case, settled from the PI's principles and told to him, or by a rule that an eye outside as the go begins has left. — 2026-11-19, [pitfalls.md P28](pitfalls.md) — waits on: a ruling
+- **XC-548** Under heavy CPU load the demo page can stop reporting past `pointer.LIVE_S`, which the rig rightly scores as tracker loss, and a browser test of the pop-out then fails on it: probed once in 20 runs of `test_the_popout_played_with_the_mouse_is_correct` beside 14 busy processes, its glide to the point cut by a 1.13 s gap in the page's reports and the trial ending `tracker_lost` ("no the ring within 30 s"); whether the page or the test should ride such a stall is open. — 2026-11-19, [pitfalls.md P29](pitfalls.md) — waits on: nothing
 
 ## Needs the rig
 

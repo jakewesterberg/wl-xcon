@@ -412,6 +412,34 @@ def test_a_still_pointers_report_during_its_flick_leaves_the_flick_one_saccade(m
         assert len(flicks) == 1 and confirmed[-1] is flicks[0], (seed, confirmed)
 
 
+def test_a_flick_reported_the_frame_after_a_still_pointers_report_is_still_a_saccade(monkeypatch):
+    """**A flick a frame behind a still pointer's report** (2026-11-19): the page reports a still
+    pointer every 100 ms, and a hand moves when it moves, so a flick's report can reach the rig the
+    frame after a still one's, or after two that came a frame apart (`tests/test_page_browser.py`'s
+    pop-out played with the mouse, an abort in about one suite run in several; pitfall P29). Taken
+    in that one frame, as a report in a stream of one a frame is, the flick was a jump the detector
+    never confirms -- under its six samples outside the threshold -- so the look landed nowhere,
+    and the pop-out ended it astray on its landing bound with the eye in the target's window.
+    **Only a report continuing a stream of one a frame is taken exactly**; this one is eased over
+    its gap and `pointer.EASE_SLACK_S`: one saccade, landing in the window there."""
+    confirmed = _count_saccades(monkeypatch)
+    for bunched in (1, 2):
+        for seed in range(10):
+            confirmed.clear()
+            clock, page, source, pace = _rig(seed=seed)
+            _still(page, 0.0, 0.0, range(1, 121))
+            for frame in range(141 - bunched, 141):
+                page.pointer(frame_at(T0, frame), 0.0, 0.0)
+            page.pointer(frame_at(T0, 141), 8.0, 0.0)
+            for frame in range(165, 480, 24):
+                page.pointer(frame_at(T0, frame), 8.0, 0.0)
+            world, result = _play(_LOOK, source, pace)
+            flicks = [found for found in confirmed if found.amplitude_deg > 1.0]
+            assert result.outcome is Outcome.CORRECT, (bunched, seed, result)
+            assert len(flicks) == 1 and confirmed[-1] is flicks[0], (bunched, seed, confirmed)
+            assert world.in_window("flick", result.frames)
+
+
 # --- Keys, touch and the light sensor ---------------------------------------------------------
 
 
