@@ -684,3 +684,78 @@ def test_a_session_spec_carries_the_false_alarm_rate_to_the_eye(tmp_path, monkey
     assert not [line for line in zero if line["outcome"] == "false_alarm"]
     broken = Counter(line["outcome"] for line in half)
     assert broken["false_alarm"] >= 5, broken
+
+
+# --- The whole-build review's fix wave (2026-11-19) -----------------------------------------------
+
+
+def test_a_share_and_a_shape_set_from_the_console_are_said_and_recorded_as_they_are(tmp_path):
+    """The whole-build review's M1 and M4: **a whole setting set from the console is recorded
+    whole** -- the wire carries 100 as 100.0 (`link._setting`), and the lines and the change row
+    hold the integer 100, as they held 0 before it (`Session._whole`) -- and **the changes feed and
+    the moments of the run say a value as the box does**: a share "0 → 100", never "0.00 →
+    100.00", and a look's shape by its segment's words, "Annulus → Square", never a Python repr
+    (`Session._said`, `link.choice_label`)."""
+    from wl_xcon.link import SetChoice, SetParameter, choice_label, choice_words
+
+    act = _param(popout._load_task(popout.TASK_FILE), "fix_act_look")
+    words = choice_words(act.choices)
+    square = next(said for said, choice in words.items() if isinstance(choice, Square))
+    session, lines = _session(tmp_path, stop=8, commands={2: [
+        SetParameter("target_absent_percent", 100.0, JAKE),
+        SetChoice(name="fix_act_look", choice=square, by=JAKE)]})
+
+    assert session.refusals == []
+    shares = [line["params"]["target_absent_percent"] for line in lines]
+    assert shares[0] == 0 and shares[-1] == 100 and all(type(one) is int for one in shares), shares
+    rows = {row["name"]: row for row in popout._rows(session, "parameter_changes.jsonl")}
+    assert type(rows["target_absent_percent"]["now"]) is int
+    said = [text for kind, _, _, text in session.controls if kind == "set"]
+    assert "target_absent_percent 0 → 100, from trial 2" in said, said
+    assert choice_label(square, tuple(words)) == "Square"
+    assert "fix_act_look Annulus → Square, from trial 2" in said, said
+    assert not [text for text in said if "(" in text.partition(",")[0]], said
+
+
+def test_a_starting_value_given_for_a_drawn_setting_is_said_to_do_nothing(task):
+    """The whole-build review's M5 (Task 7's concern 6): a run's `--set fix_hold=...` was silently
+    beaten by the task's draw. **The pre-flight's starting values item says so**, naming the
+    setting and why, and passes ("warnings over refusals"); a value given for a setting nothing
+    draws says nothing of it. `wlx demo` prints the item (`tests/test_demo_command.py`)."""
+    from wl_xcon.preflight import DRAWN_GIVEN, PASS, values
+
+    drawn = values(task, {"fix_hold": 0.7}, (), "training", calibration=SRGB)
+    assert drawn.result == PASS
+    assert f"{DRAWN_GIVEN} ('fix_hold'): the run draws it every trial" in drawn.said, drawn.said
+    plain = values(task, {"fix_hold": 0.7}, (), None, calibration=SRGB)
+    assert DRAWN_GIVEN in plain.said
+    fixed = values(task, {"timeout": 2.5}, (), "training", calibration=SRGB)
+    assert fixed.result == PASS and DRAWN_GIVEN not in fixed.said
+
+
+@pytest.mark.parametrize("go_delay", [0.0, 0.25])
+@pytest.mark.parametrize("structure", ["search", "target_absent"])
+def test_an_eye_leaving_on_any_frame_about_the_holds_end_is_scored_by_an_edge(task, structure,
+                                                                              go_delay):
+    """XC-547, probed with the tracked world (the whole-build review's M6): the rig's own gaze
+    world (`gaze.Tracked`), its tracker a scripted eye whose saccades its detector finds, the eye
+    leaving the fixation point on each frame from 14 before the hold's end to 6 after the go, at
+    `go_delay` 0 and 0.25, on the search and on a catch. **Every trial is scored by an edge**: a
+    fixation break while the hold or the delay lasts, then from one frame on, the answer (the
+    search's `flight`, a catch's false alarm) -- no frame between them where a departure is seen by
+    neither and the trial waits out its deadline. The one-frame gap P28 described was read from
+    the code; measured, there is none, and XC-547 and P28 are withdrawn."""
+    trial = task.structures[structure]
+    bound = {**popout._values(task), "go_delay": go_delay, "fix_hold": 0.5}
+    hold, delay = round(0.5 * HZ), round(go_delay * HZ)
+    answered = Outcome.CORRECT if structure == "search" else Outcome.FALSE_ALARM
+    seen = []
+    for frames in range(hold - 14, hold + delay + 6):
+        eye = popout._Eye([popout.LOOK, ("hold_fix", frames, popout.ODD_ONE)])
+        result = run_trial(trial, popout._Seen(eye, trial, bound), FRAME, values=dict(bound),
+                           effects=Recorded())
+        seen.append(result.outcome)
+    assert set(seen) == {Outcome.FIXATION_BREAK, answered}, seen
+    switched = seen.index(answered)
+    assert seen[:switched] == [Outcome.FIXATION_BREAK] * switched
+    assert seen[switched:] == [answered] * (len(seen) - switched)

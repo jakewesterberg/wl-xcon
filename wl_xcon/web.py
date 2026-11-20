@@ -57,6 +57,8 @@ from wl_xcon.actor import Actor, Member
 from wl_xcon.cli import _clock, _moment, _setup_words
 from wl_xcon.demoscreen import GAZE_EVERY_MS
 from wl_xcon.link import RECENT_OUTCOMES, ConditionRow, Counts, Idle, Question, Telemetry
+# The segments' bound, said where a choice is said in short (`link.choice_label`).
+from wl_xcon.link import CHOICE_LABEL_LIMIT, choice_label  # noqa: F401
 from wl_xcon.pointer import KEYS as _KEYS
 from wl_xcon.pointer import LIVE_S as _LIVE_S
 from wl_xcon.task import (
@@ -3398,21 +3400,10 @@ def _entry(row, view: View, unit: bool = True) -> tuple[str, str]:
     return label, entry
 
 
-#: **The longest a choice's segment says it** before it says only what kind of look it is
-#: (`_choice_label`): a display bound, so three looks fit one box, not a measurement.
-CHOICE_LABEL_LIMIT = 24
-
-
 def _choice_label(words: str, choices: tuple) -> str:
-    """**What a choice's segment says** (`_choice_segments`): its words, or -- where they run past
-    `CHOICE_LABEL_LIMIT` -- what comes before their first ": ", the look's kind ("Disc" of "Disc:
-    size fix_size, color ..."), where that tells it from every other choice of the setting; else
-    its words whole. Its title says the words whole either way. Formatting, not derivation."""
-    if len(words) <= CHOICE_LABEL_LIMIT or ": " not in words:
-        return words
-    kinds = [choice.partition(": ")[0] for choice in choices]
-    kind = words.partition(": ")[0]
-    return kind if kinds.count(kind) == 1 else words
+    """**What a choice's segment says** (`_choice_segments`): `link.choice_label`, which the
+    changes feed and the moments say a choice by too. Formatting, not derivation."""
+    return choice_label(words, choices)
 
 
 def _choice_segments(row, view: View) -> str:

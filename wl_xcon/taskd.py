@@ -3397,8 +3397,7 @@ class Session:
             said.append(f"{name} → drawn: "
                         f"{variation.words(form, '' if declared is None else declared.unit)}")
         for name in sorted(restored):
-            choices = self._declared[name].choices if name in self._declared else ()
-            said.append(f"{name} → {_shown(restored[name], choices)}")
+            said.append(f"{name} → {self._said(name, restored[name])}")
         return tuple(said)
 
     @property
@@ -5796,8 +5795,7 @@ class Session:
             else:
                 name, was, would, sent_by, _ = offer
                 kind = "set"
-                choices = self._declared[name].choices if name in self._declared else ()
-                said = f"{name} {_shown(was, choices)} → {_shown(would, choices)}"
+                said = f"{name} {self._said(name, was)} → {self._said(name, would)}"
             held = None if self._given_by(name, playing) else self.spec.values.get(name)
             if self._record is not None:
                 self._record.change(
@@ -6239,11 +6237,11 @@ class Session:
                 )
             # A pair as a position only for a setting whose choices declare one (XC-401's fix
             # round, M2): a ceiling's name is no setting the task declares.
-            choices = () if bounded or name not in self._declared else self._declared[name].choices
             # Where the record writes no `was`, the feed says what gave the setting, not a value no
-            # trial held (the controller's ruling on Task 19's review, Minor 4).
-            held = f"its {given}" if given else _shown(was, choices)
-            said = f"{name} {held} → {_shown(now, choices)}"
+            # trial held (the controller's ruling on Task 19's review, Minor 4). A pair as a
+            # position only for a setting whose choices declare one (`_said`).
+            held = f"its {given}" if given else self._said(name, was, bounded)
+            said = f"{name} {held} → {self._said(name, now, bounded)}"
             back = "" if moment is None else f", reverting to {_back_to(moment)}"
             self._feed(
                 kind,
@@ -6404,22 +6402,21 @@ class Session:
                     f"{_SWITCH_SAID.get(act.now, act.now)}")
         declared = self._declared.get(act.name)
         unit = "" if declared is None else declared.unit
-        choices = () if declared is None else declared.choices
         if act.kind == "hand_back":
             if act.to != "run":
                 to = f"its {act.to}"
             elif act.now is None:
                 to = "the run, which gives it no value"
             else:
-                to = f"the run's {_shown(act.now, choices)}"
-            was = (_shown(act.was, choices) if act.form is None
+                to = f"the run's {self._said(act.name, act.now)}"
+            was = (self._said(act.name, act.was) if act.form is None
                    else f"drawn {variation.words(act.form, unit)}")
             return f"{act.name} {was} handed back to {to}"
         if act.kind == "form":
             # A person's draw (the console settings build): what gave the setting, then the draw.
             was = ("its draw or its conditions" if act.was is None
                    else "a person's draw" if isinstance(act.was, dict)
-                   else _shown(act.was, choices))
+                   else self._said(act.name, act.was))
             how = "scaled" if isinstance(act.form, Scaled) else "drawn"
             return f"{act.name} {was} → {how}: {variation.words(act.form, unit)}"
         drawn = "as declared" if act.draw is None else variation.words(act.draw, unit)
@@ -6721,18 +6718,41 @@ class Session:
             self._climb.resume(handed[self._climb.staircase.setting])
         return self._climb
 
+    def _said(self, name: str, value: object, bounded: bool = False) -> str:
+        """**A setting's value as the changes feed, the moments and a withdrawal say it** (the
+        pop-out revision's whole-build review, M1: a shape picked read as its Python repr, a share
+        as `0.00 → 100.00`): a choice that has words by its short words, as its segment says it
+        (`link.choice_label`, "Annulus → Square"); a whole setting's number whole ("0 → 100");
+        else as `cli._shown` says it -- a ceiling's (`bounded`) always so."""
+        declared = None if bounded else self._declared.get(name)
+        if declared is None:
+            return _shown(value, ())
+        if declared.choices:
+            words = _link.choice_words(declared.choices)
+            for said, choice in (words or {}).items():
+                if choice == value:
+                    return _link.choice_label(said, tuple(words))
+        elif (declared.whole and isinstance(value, (int, float)) and not isinstance(value, bool)
+              and math.isfinite(value) and float(value).is_integer()):
+            return str(int(value))
+        return _shown(value, declared.choices)
+
     def _whole(self, name: str, value: object) -> object:
         """**A whole value of a setting the task reads as whole, kept whole** (the build's review,
         M8: a pool's value read `pairings: 66`, then `67.0` after a `set`): the wire carries every
         number as a float (`link._setting`), so a person's 67 arrives as 67.0; for the task's
         pool's setting and each an array reads as a whole number (`check._whole_numbers`), a float
-        that is a whole number is applied as the integer it is. Any other value as given."""
+        that is a whole number is applied as the integer it is. **And a setting declared whole**
+        (`Param.whole`; the pop-out revision's whole-build review, M4: a share set from the console
+        read `100.0` on its lines, `0` before), likewise. Any other value as given."""
         task = self._task
         if (task is None or isinstance(value, bool) or not isinstance(value, float)
                 or not value.is_integer()):
             return value
         pool = task.pool
-        if (pool is not None and name == pool.setting) or name in _whole_numbers(task):
+        declared = self._params().get(name)
+        if ((pool is not None and name == pool.setting) or name in _whole_numbers(task)
+                or (declared is not None and declared.whole)):
             return int(value)
         return value
 
@@ -7498,12 +7518,12 @@ class Session:
                            f"{self.run_index + 1} ended first")
                 continue
             name, was, now, by, bounded = offer
-            choices = () if bounded or name not in self._declared else self._declared[name].choices
             self._feed(
                 "set",
                 by,
                 self.wall_now(),
-                f"{name} {_shown(was, choices)} → {_shown(now, choices)} was not applied: run "
+                f"{name} {self._said(name, was, bounded)} → {self._said(name, now, bounded)} "
+                f"was not applied: run "
                 f"{self.run_index + 1} ended first",
             )
         self._staged.clear()

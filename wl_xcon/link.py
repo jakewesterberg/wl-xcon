@@ -306,6 +306,24 @@ SCHEMA = 23
 CHOICES_LIMIT = 30
 
 
+#: **The longest a choice's segment says it** before it says only what kind of look it is
+#: (`choice_label`): a display bound, so three looks fit one box, not a measurement.
+CHOICE_LABEL_LIMIT = 24
+
+
+def choice_label(words: str, choices) -> str:
+    """**What a choice is said by in short** (the console's segments, `web._choice_segments`; the
+    changes feed and the moments, `taskd`): its words (`choice_words`), or -- where they run past
+    `CHOICE_LABEL_LIMIT` -- what comes before their first ": ", the look's kind ("Annulus" of
+    "Annulus: inner fix_act_hole, outer ..."), where that tells it from every other choice of the
+    setting (`choices`, each by its words); else its words whole. Formatting, not derivation."""
+    if len(words) <= CHOICE_LABEL_LIMIT or ": " not in words:
+        return words
+    kinds = [choice.partition(": ")[0] for choice in choices]
+    kind = words.partition(": ")[0]
+    return kind if kinds.count(kind) == 1 else words
+
+
 def choice_words(choices) -> "dict[str, object] | None":
     """**A setting's declared choices by the words its box shows them by** (`ParamRow.choices`; the
     pop-out revision's Task 5b): each choice by its words, in the order declared -- a word as

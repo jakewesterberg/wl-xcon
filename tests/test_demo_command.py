@@ -299,9 +299,16 @@ def test_a_scripted_pointer_drives_a_trial_through_its_wlx_serve(wlx, zmq_cleanu
     with the field drawn** -- no trial begins while nobody steers, and no trial is scored (this
     task's call: before the first screen there is nothing to point at) -- and is then played by a
     scripted pointer posting to its `wlx serve` as the box's page does, reading the screens the rig
-    publishes: the rig's own eye rules score the look to the odd disc correct."""
+    publishes: the rig's own eye rules score the look to the odd disc correct. **Its pre-flight
+    says that `--set fix_hold=` does nothing** (the pop-out revision's whole-build review, M5): the
+    task draws `fix_hold` every trial."""
+    from wl_xcon.preflight import DRAWN_GIVEN
+
     demo = wlx.demo(str(_popout()), "--no-browser", "--trials", "1", *SHORT)
     started = _started(demo)
+    (values,) = [line for line in demo.out if line.startswith("wlx demo: pre-flight pass    "
+                                                              "starting values: ")]
+    assert f"{DRAWN_GIVEN} ('fix_hold')" in values, values
     trials = started["folder"] / "demo" / "sessions" / started["session"] / "xcon" / "trials.jsonl"
     screens = zmq_cleanup(ZmqConsole(started["link"][0], None, settle_s=0.0,
                                      receive_timeout_s=0.05))

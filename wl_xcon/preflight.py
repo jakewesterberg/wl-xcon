@@ -66,6 +66,9 @@ DEMO_INPUTS = "demo inputs"
 #: code of its own so the starting values item and the warnings record name no cause nobody found
 #: (the console settings build's whole-build review, m2).
 LAYOUT_UNJUDGED = "layout-unjudged"
+#: **What the starting-values item says of a value given for a setting the run draws** (`values`;
+#: the pop-out revision's whole-build review, M5): a warning in words, never a refusal.
+DRAWN_GIVEN = "a starting value given for a setting the run draws is not used"
 
 
 def _said(refused: SystemExit, path: Path) -> str:
@@ -475,6 +478,16 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
         merged = {**starts, **given}
         # Each place nothing gives a value, by its setting's name (XC-415).
         unset = dict(unplaced(task, merged, blocks))
+        # **A starting value given for a setting the run draws** (the pop-out revision's
+        # whole-build review, M5: `wlx demo --set fix_hold=...` was silently beaten by the draw):
+        # every trial takes its own drawn value, so the one given does nothing; said, never
+        # refused ("warnings over refusals"). A plain run's draws are the task's; a plan's, those
+        # in force in every block it plays.
+        if blocks is None:
+            overdrawn = sorted(name for name in given if name in task.draws)
+        else:
+            overdrawn = sorted(name for name in given
+                               if blocks and all(name in in_force(task, block) for block in blocks))
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         return PreflightItem(
             STARTING_VALUES,
@@ -542,15 +555,20 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
         wrong.append(f"the task's color sets could not be checked: {type(broken).__name__}: "
                      f"{broken}")
     wrong += [f"{f.code}: {f.detail}" for f in refused]
+    unused = "" if not overdrawn else (
+        f"; {DRAWN_GIVEN} ({', '.join(repr(name) for name in overdrawn)}): the run draws "
+        f"{'it' if len(overdrawn) == 1 else 'each'} every trial, so the value given does nothing; "
+        f"set a value live, or change the draw, to hold one")
     if wrong:
-        return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong))
+        return PreflightItem(STARTING_VALUES, FAIL, "; ".join(wrong) + unused)
     if outside:
         return PreflightItem(STARTING_VALUES, PASS, (
             f"{len(merged)} starting value(s), each declared; {len(outside)} outside its declared "
             f"range ({', '.join(repr(name) for name in outside)}), a warning the warnings item "
-            f"asks to accept"))
+            f"asks to accept{unused}"))
     return PreflightItem(
-        STARTING_VALUES, PASS, f"{len(merged)} starting value(s), each declared and in range"
+        STARTING_VALUES, PASS,
+        f"{len(merged)} starting value(s), each declared and in range{unused}"
     )
 
 
