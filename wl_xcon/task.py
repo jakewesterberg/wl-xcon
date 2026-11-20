@@ -890,6 +890,22 @@ class Dots(Appearance):
     color: "Color | P | None" = None
 
 
+#: **A look's kind in people's words, where its class's name is not** (the PI, 2026-11-20, from his
+#: try-out of the page: "ring" everywhere, not "Annulus"): what a console's segment, a summary line,
+#: the changes feed, the moments of a run, a warning and the review say a look of the class by
+#: (`kind_words`; `review.appearance_words`). **The class keeps its name** in a task file and in the
+#: record, which writes an appearance as `{"class": "Annulus", ...}` (`record`), so what wl-preproc
+#: reads is unchanged.
+KIND_WORDS = {"Annulus": "Ring"}
+
+
+def kind_words(looks: object) -> str:
+    """**What people call a look of `looks`'s class** (`KIND_WORDS`), else its class's name.
+    Formatting, not derivation."""
+    name = type(looks).__name__
+    return KIND_WORDS.get(name, name)
+
+
 @dataclass(frozen=True, slots=True)
 class Annulus(Appearance):
     inner: "float | P" = 1.0

@@ -5630,10 +5630,11 @@ def test_the_editor_has_words_for_a_setting_find_hides_and_runtime_has_its_own_e
 def test_a_looks_line_says_its_segment_and_its_words_in_its_title():
     """The pop-out revision's plan, Amendments, item 6 ("check the real looks' line widths too: a
     look's words can be long"): a setting whose choices are looks, picked among segments (Task 5b),
-    says on its summary line what its segment says -- "Annulus" for "Annulus: inner fix_act_hole,
+    says on its summary line what its segment says -- "Ring" for "Ring: inner fix_act_hole,
     outer fix_act_size, color ..." -- its words whole in the line's title, and the line's width is
     taken from the short label, so the pop-out's two looks leave its summary's columns as they
-    were; a change waiting says the segment it goes to, "Annulus → Square". A choice short enough
+    were; a change waiting says the segment it goes to, "Ring → Square" (the PI, 2026-11-20: "ring"
+    everywhere, not "Annulus"). A choice short enough
     to stand whole says it whole."""
     from wl_xcon.link import ParamRow, Staged
     from wl_xcon.photometry import Gray
@@ -5648,18 +5649,18 @@ def test_a_looks_line_says_its_segment_and_its_words_in_its_title():
                       label="Fixation shape at go")
     disc, ring, square = row.choices
     assert len(ring) > web.CHOICE_LABEL_LIMIT and row.words == ring
-    assert web._summary_value(row) == "Annulus"
+    assert web._summary_value(row) == "Ring" and ring.startswith("Ring: ")
     summary = web._summary(frame(params=(row,)), view(), False)
     (line,) = re.findall(r'<button type="button" class="line[^"]*" data-open="fix_act_look".*?'
                          r"</button>", summary)
-    assert '<span class="lv" data-now="Annulus">Annulus</span>' in line
+    assert '<span class="lv" data-now="Ring">Ring</span>' in line and "Annulus" not in line
     assert html.escape(ring, quote=True) in line, "the words whole in its title"
-    assert web._line_width(row.label, "Annulus") < web._line_width(row.label, ring)
+    assert web._line_width(row.label, "Ring") < web._line_width(row.label, ring)
 
     # A pick is staged by its words, as the rig sends a look's change (Task 5b).
     staged = Staged("fix_act_look", ring, square, Box("jake"), False, cid="c-1")
     waiting = web._summary(frame(params=(row,), staged=(staged,)), view(), False)
-    assert ">Annulus → Square</span>" in waiting, waiting
+    assert ">Ring → Square</span>" in waiting, waiting
 
     short = ParamRow.of("side", "word", None, None, "left", False, choices=("left", "right"),
                         source="task")

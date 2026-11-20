@@ -773,13 +773,15 @@ def appearance_words(value: object) -> str | None:
     (`link.ParamRow.words`, a staged row's `was` and `now`). **A color-set light by its set and
     hue**, then each level not at full, in the order the light declares them: `isohue blue`,
     `isohue red at saturation 0.5`, `isohue blue at fraction distractor_fraction, luminance
-    color_luminance`; a gray by its cd/m²; any other
-    declaration by its class and each field not at its default, a setting by its name: `Disc: size
-    disc_size, color isohue blue at luminance color_luminance`. Cut at `APPEARANCE_WORDS_LIMIT`
+    color_luminance`; a gray by its cd/m²; any other declaration by its kind in people's words
+    (`task.kind_words`: a ring for an `Annulus`, the PI, 2026-11-20) and each field not at its
+    default, a setting by its name: `Disc: size disc_size, color isohue blue at luminance
+    color_luminance`. **These words are what a `choice` names a look by** (`link.choice_words`), a
+    wire word between the page and the rig that the record never writes. Cut at `APPEARANCE_WORDS_LIMIT`
     characters. `None` for any other value: a number, a word, a position (`position_words`)."""
     from wl_xcon.look import Edge, Fill, Outline, Shape
     from wl_xcon.photometry import Color, ColorSetLight, Contrast, Gray
-    from wl_xcon.task import Appearance
+    from wl_xcon.task import Appearance, kind_words
 
     def said(part: object) -> str:
         if isinstance(part, P):
@@ -800,7 +802,9 @@ def appearance_words(value: object) -> str | None:
         if is_dataclass(part) and not isinstance(part, type):
             shown = [f"{spec.name} {said(getattr(part, spec.name))}" for spec in fields(part)
                      if getattr(part, spec.name) != spec.default]
-            return f"{type(part).__name__}" + (f": {', '.join(shown)}" if shown else "")
+            # A look by its kind in people's words, a ring for an `Annulus` (`task.kind_words`;
+            # the PI, 2026-11-20).
+            return kind_words(part) + (f": {', '.join(shown)}" if shown else "")
         if isinstance(part, (tuple, list)):
             return "(" + ", ".join(said(item) for item in part) + ")"
         return str(part)

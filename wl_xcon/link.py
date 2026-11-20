@@ -314,8 +314,8 @@ CHOICE_LABEL_LIMIT = 24
 def choice_label(words: str, choices) -> str:
     """**What a choice is said by in short** (the console's segments, `web._choice_segments`; the
     changes feed and the moments, `taskd`): its words (`choice_words`), or -- where they run past
-    `CHOICE_LABEL_LIMIT` -- what comes before their first ": ", the look's kind ("Annulus" of
-    "Annulus: inner fix_act_hole, outer ..."), where that tells it from every other choice of the
+    `CHOICE_LABEL_LIMIT` -- what comes before their first ": ", the look's kind ("Ring" of
+    "Ring: inner fix_act_hole, outer ..."), where that tells it from every other choice of the
     setting (`choices`, each by its words); else its words whole. Formatting, not derivation."""
     if len(words) <= CHOICE_LABEL_LIMIT or ": " not in words:
         return words

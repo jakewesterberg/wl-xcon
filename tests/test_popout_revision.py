@@ -694,7 +694,7 @@ def test_a_share_and_a_shape_set_from_the_console_are_said_and_recorded_as_they_
     whole** -- the wire carries 100 as 100.0 (`link._setting`), and the lines and the change row
     hold the integer 100, as they held 0 before it (`Session._whole`) -- and **the changes feed and
     the moments of the run say a value as the box does**: a share "0 → 100", never "0.00 →
-    100.00", and a look's shape by its segment's words, "Annulus → Square", never a Python repr
+    100.00", and a look's shape by its segment's words, "Ring → Square", never a Python repr
     (`Session._said`, `link.choice_label`)."""
     from wl_xcon.link import SetChoice, SetParameter, choice_label, choice_words
 
@@ -713,8 +713,44 @@ def test_a_share_and_a_shape_set_from_the_console_are_said_and_recorded_as_they_
     said = [text for kind, _, _, text in session.controls if kind == "set"]
     assert "target_absent_percent 0 → 100, from trial 2" in said, said
     assert choice_label(square, tuple(words)) == "Square"
-    assert "fix_act_look Annulus → Square, from trial 2" in said, said
+    assert "fix_act_look Ring → Square, from trial 2" in said, said
     assert not [text for text in said if "(" in text.partition(",")[0]], said
+
+
+def test_the_fixation_points_ring_is_said_ring_and_picking_it_still_applies(tmp_path):
+    """The PI, 2026-11-20, from his try-out: **"ring" everywhere, not "Annulus"**. The fixation
+    point's shape segments, its summary line, the changes feed and the moments of the run say the
+    hollow look "Ring" (`task.kind_words`, through `review.appearance_words`); its words, which a
+    `choice` names it by, begin "Ring: "; and picking the ring for the hold look on the box still
+    sends, applies and draws it -- **the record writes the look as it always has**, its class
+    `Annulus`, so what wl-preproc reads is unchanged."""
+    import dataclasses
+
+    from _frames import view
+    from wl_xcon import web
+    from wl_xcon.link import ParamRow, SetChoice, choice_words
+
+    hold = _param(popout._load_task(popout.TASK_FILE), "fix_look")
+    words = choice_words(hold.choices)
+    (ring,) = [said for said, choice in words.items() if isinstance(choice, Annulus)]
+    assert ring.startswith("Ring: ") and "Annulus" not in "".join(words), list(words)
+    row = ParamRow.of("fix_look", "appearance", None, None, hold.start, False,
+                      choices=hold.choices, source="task", section="Stimuli/fixation point")
+    segments = web._choice_segments(row, view(can_write=True))
+    assert ">Ring</button>" in segments and "Annulus" not in segments, segments
+    assert web._summary_value(dataclasses.replace(row, words=ring)) == "Ring"
+
+    session, lines = _session(tmp_path, stop=8, commands={2: [
+        SetChoice(name="fix_look", choice=ring, by=JAKE)]})
+    assert session.refusals == []
+    said = [text for kind, _, _, text in session.controls if kind == "set"]
+    assert "fix_look Disc → Ring, from trial 2" in said, said
+    assert [moment for _, _, moment, _ in session.moments if "Ring" in moment], session.moments
+    assert not [text for text in said if "Annulus" in text], said
+    (change,) = [row for row in popout._rows(session, "parameter_changes.jsonl")
+                 if row["name"] == "fix_look"]
+    assert change["now"]["class"] == "Annulus", change["now"]
+    assert lines[-1]["params"]["fix_look"]["class"] == "Annulus", lines[-1]["params"]["fix_look"]
 
 
 def test_a_starting_value_given_for_a_drawn_setting_is_said_to_do_nothing(task):

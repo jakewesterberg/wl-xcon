@@ -3131,7 +3131,7 @@ def _summary_value(row, level: object = None) -> str:
     if row.position is not None:
         return row.position
     if row.words is not None and row.words in row.choices:
-        # A look picked among its segments says what its segment says, "Annulus" for "Annulus:
+        # A look picked among its segments says what its segment says, "Ring" for "Ring:
         # inner fix_act_hole, outer ...", its words whole in the line's title (the pop-out
         # revision's Amendments, item 6: the summary still fits).
         return _choice_label(row.words, row.choices)
@@ -6207,7 +6207,7 @@ _SCRIPT = """
     var kinds = values.length + (formed ? 1 : 0) + (ranged ? 1 : 0) + (moved.indexOf("hue") !== -1 ? 1 : 0) +
       chosen.length;
     if (kinds !== 1) { return EDITED; }
-    // A choice pressed among its segments: as its segment says it, "Annulus" for a look's long
+    // A choice pressed among its segments: as its segment says it, "Ring" for a look's long
     // words (`web._choice_label`), as the line says the choice in force; its words whole where
     // no segment says them.
     if (chosen.length) {

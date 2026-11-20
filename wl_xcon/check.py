@@ -50,6 +50,7 @@ from wl_xcon.photometry import (
 )
 from wl_xcon.run import LONGEST_TRIAL_S
 from wl_xcon.task import (
+    kind_words,
     ANSWERS,
     BY_CONDITIONS,
     CHOSEN_BY,
@@ -5086,7 +5087,7 @@ def _colors(trial: Trial, params: dict[str, Param]):
                        else f"{what} (a choice of parameter {color.name!r})"), choice
 
     for looks in _appearances(trial):
-        what = type(looks).__name__
+        what = kind_words(looks)
         chosen = f" ({', '.join(offered[id(looks)])})" if id(looks) in offered else ""
         if isinstance(looks, look.Look):
             for written in (looks.fill, looks.outline):
@@ -5528,7 +5529,7 @@ def _modulation_faults(trial: Trial, params: dict[str, Param], panel: Calibratio
         if light is None:
             continue
         kind, _, contrast, mean = light
-        what = type(looks).__name__
+        what = kind_words(looks)
         try:
             contrasts = [c for c in _options(contrast, params) if isinstance(c, (Weber, Michelson))]
             means = [None] if mean is None else _options(mean, params)
@@ -6218,7 +6219,7 @@ def _light_faults(trial: Trial) -> list[Finding]:
         except _Unbounded as unbounded:
             unread(f"the trial's {attr.replace('_', ' ')}", unbounded.args[0])
     for looks in _appearances(trial):
-        what = type(looks).__name__
+        what = kind_words(looks)
         # Only an `Outline` has a color to read: one of another kind is `_block_faults`' to
         # refuse, and one written as a parameter is read by no rule yet (XC-273).
         if isinstance(looks, look.Look) and isinstance(looks.outline, look.Outline):

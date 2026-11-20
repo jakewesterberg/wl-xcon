@@ -6722,7 +6722,7 @@ class Session:
         """**A setting's value as the changes feed, the moments and a withdrawal say it** (the
         pop-out revision's whole-build review, M1: a shape picked read as its Python repr, a share
         as `0.00 → 100.00`): a choice that has words by its short words, as its segment says it
-        (`link.choice_label`, "Annulus → Square"); a whole setting's number whole ("0 → 100");
+        (`link.choice_label`, "Ring → Square"); a whole setting's number whole ("0 → 100");
         else as `cli._shown` says it -- a ceiling's (`bounded`) always so."""
         declared = None if bounded else self._declared.get(name)
         if declared is None:

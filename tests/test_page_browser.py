@@ -3548,7 +3548,7 @@ def test_a_looks_shape_is_picked_on_its_box_and_applied(rig):
     assert page.eval_on_selector_all(segments, "(all) => all.map((one) => [one.textContent, "
                                      "one.parentElement.title, one.getAttribute('aria-pressed')])"
                                      ) == [
-        ["Disc", disc, "true"], ["Annulus", ring, "false"], ["Square", square, "false"]]
+        ["Disc", disc, "true"], ["Ring", ring, "false"], ["Square", square, "false"]]
 
     page.click(f'{segments}[data-choice="{square}"]')
     _offer(rig, 41, params=_task6_rows() + (row,))
