@@ -1113,9 +1113,14 @@ show the whole set moves every color toward the apex by one shared share, never 
 clipping one, and `check` warns by how much (`color-set-desaturated`); one that cannot show even the
 apex refuses it -- **but where a setting gives the luminance, the part of its range the panel cannot
 show at all is a warning naming the reachable top** (`color-set-unreachable`, `check.reachable_top`;
-the PI's warnings over refusals), and only a value above it is refused, as a person sets it live
-(`taskd.Session._impossible`, ahead of the listed `Session.set`) or a run starts with it
-(`check.unshowable`); over the range, `color-set-desaturated` says which part desaturates, and at a
+the PI's warnings over refusals), and only a value above it set live is refused
+(`taskd.Session._impossible`, ahead of the listed `Session.set`; `check.unshowable`); **a run
+starting above it starts at it**, with a warning a person accepts with the run's others,
+`start-at-reachable-top`, naming the setting, the value asked, the value used and why
+(`check.in_reach`, one function for the pre-flight, `Session.run` and `wlx run`; the PI,
+2026-11-20, from his try-out, "Start at the brightest it can, warn"), the value used recorded as
+the run's own start; a run is refused only where no value the setting allows shows the set (XC-494,
+which the load refuses first, `unrealizable-color`); over the range, `color-set-desaturated` says which part desaturates, and at a
 value set live the share given up there, each a layout warning naming its set (`check.LAYOUT`). The set is realized between trials, once for each luminance a run draws it at on
 each calibration (`photometry.realized`), never in a frame. **The record
 names a color-set light's set by its name alone** (`record._written`; REC-27, revised 2026-11-07 by

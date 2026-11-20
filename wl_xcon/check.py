@@ -364,8 +364,9 @@ def _reachable_starts(task: Task, pinned: Task,
     a panel too dim for the fixation point's 40 cd/m²): the load judges it at the panel's
     reachable top for the set (`reachable_top`, from the least it allows, its declared lowest or
     `DESATURATED_STEP`) and warns, `color-set-unreachable`, naming the top; a run starting at the
-    start is refused (`unshowable`: `preflight.values`, `Session.run`), as is a value set live
-    above the top (`taskd.Session._impossible`). One no value the setting allows shows is left as
+    start starts at the top instead, with a warning a person accepts (`in_reach`; the PI,
+    2026-11-20, "Start at the brightest it can, warn"), and a value set live above the top is
+    refused (`taskd.Session._impossible`). One no value the setting allows shows is left as
     it is, refused as a light (`_one_color`, `unrealizable-color`). Only a setting the load holds
     at its start (`_at_start`: an open side); one read over its declared range keeps the range's
     rule (`_within_reach`, `_desaturated_range`). At load, never in a frame."""
@@ -402,9 +403,9 @@ def _reachable_starts(task: Task, pinned: Task,
         f"calibration {name} cannot show color set{'s' if len(sets[setting]) > 1 else ''} "
         f"{', '.join(repr(one) for one in sets[setting])} at the start of setting {setting!r}, "
         f"{declared[setting].start:g} cd/m² of macaque luminance, not even the apex: this panel's "
-        f"reachable top for it is about {top:.3g} cd/m², and a run starting above that, or a value "
-        f"set live above it, is refused; the task is checked at that top and runs at any value up "
-        f"to it"), blocking=False, accepted_in=SESSION_KINDS,
+        f"reachable top for it is about {top:.3g} cd/m², a run starting above that starts at it, "
+        f"with a warning to accept, and a value set live above it is refused; the task is checked "
+        f"at that top and runs at any value up to it"), blocking=False, accepted_in=SESSION_KINDS,
         subjects=tuple(f"color set {one!r}" for one in sets[setting]))
         for setting, top in tops.items()]
     return at_values(pinned, tops), findings
@@ -897,7 +898,8 @@ def at_values(task: Task, values) -> Task:
 #: compared with those at the values in force. Off the field refuses; the rest are warnings.
 #: **A color set shown less saturated than asked at the luminance set** (`color-set-desaturated`)
 #: and **a drawn luminance whose upper part the panel cannot show** (`color-set-unreachable`, always
-#: a warning; a single value past the reachable top is refused as impossible, `unshowable`) are
+#: a warning; a single value set live past the reachable top is refused as impossible,
+#: `unshowable`, and a run starting past it starts at it, `in_reach`) are
 #: among them (the whole-build review's I2; XC-518): the load judges an open luminance at its start,
 #: so without them a trainer brightening the colors live was told nothing (the design's third
 #: anti-goal, "a color picked on the page that differs from what the rig draws, with nothing saying
@@ -5347,7 +5349,8 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
     **A range whose upper part the panel cannot show at all, not even the apex** (XC-494; the PI's
     "warnings over refusals"), is a warning too, `color-set-unreachable`, naming the reachable top
     (`reachable_top`): a value above it is refused only where a person sets it live
-    (`taskd.Session._impossible`) or a run starts with it (`unshowable`), never the task. One the
+    (`taskd.Session._impossible`, `unshowable`), never the task, and a run starting above it starts
+    at it, with a warning (`in_reach`; the PI, 2026-11-20). One the
     panel cannot show at any luminance of the range is refused where the lights are checked
     (`_one_color`, `unrealizable-color`). At load, never in a frame; each luminance probed is
     realized uncached (`photometry.realize`)."""
@@ -5370,9 +5373,10 @@ def _desaturated_range(colorset, panel: Calibration, values: list[float], names:
             f"calibration {name} cannot show color set {colorset.name!r} at all above about "
             f"{top:.3g} cd/m² of macaque luminance, of the {low:g} to {high:g} cd/m² setting {by} "
             f"allows, not even its apex ({colorset.apex[0]:.4f}, {colorset.apex[1]:.4f}): this "
-            f"panel's reachable top for it is about {top:.3g} cd/m², and a value above that is "
-            f"refused when a trainer sets it live or a run starts with it; the task runs at any "
-            f"value up to it; asked for by {'; '.join(whats)}"),
+            f"panel's reachable top for it is about {top:.3g} cd/m², a value above that is "
+            f"refused when a trainer sets it live, and a run starting above it starts at it, with "
+            f"a warning to accept; the task runs at any value up to it; asked for by "
+            f"{'; '.join(whats)}"),
             blocking=False, accepted_in=SESSION_KINDS,
             subjects=(f"color set {colorset.name!r}",)))
     shown_high = share(top)
@@ -5443,10 +5447,10 @@ def unshowable(task: Task, values: dict, calibration: Calibration | None) -> lis
     unreachable part, `color-set-unreachable`, and only such a value is refused), as `(setting,
     sentence)`, the sentence naming the panel's reachable top for the set (`reachable_top`); empty
     where every one shows, for a task with no color-set light whose luminance is a setting, and
-    with no calibration. One function for a person's live value (`taskd.Session._impossible`,
-    ahead of welfare-listed `Session.set`) and a run's starting values (`preflight.values`,
-    `Session.run`, `wlx run`), as `unpooled` is. Between trials or before a run, never in a
-    frame."""
+    with no calibration. **For a person's live value** (`taskd.Session._impossible`, ahead of
+    welfare-listed `Session.set`); a run's starting value past the top starts at the top instead,
+    with a warning (`in_reach`; the PI, 2026-11-20, "Start at the brightest it can, warn").
+    Between trials or before a run, never in a frame."""
     from wl_xcon.declarations import color_set_lights
 
     if calibration is None:
@@ -5475,6 +5479,84 @@ def unshowable(task: Task, values: dict, calibration: Calibration | None) -> lis
             f"reachable top")))
     return found
 
+
+#: **A run started at the panel's reachable top** (`in_reach`; the PI, 2026-11-20): the code of
+#: the warning that says a starting luminance was brought down to it.
+START_AT_REACHABLE_TOP = "start-at-reachable-top"
+
+
+def in_reach(task: Task, values: dict, calibration: Calibration | None
+                 ) -> tuple[dict, list[Finding], list[tuple[str, str]]]:
+    """**A run's starting luminances brought within the panel's reach** (the PI, 2026-11-20, from
+    his try-out of the page, asked in the UI: "Start at the brightest it can, warn"; his standing
+    "warnings over refusals"; XC-494): for each luminance setting whose value in `values` -- a
+    run's starting values, the task's under the run's -- `calibration` cannot show its color set
+    at, not even the apex, **the value the run starts at instead**, the panel's reachable top for
+    the set (`reachable_top`, searched from the least the setting allows, its declared lowest or
+    `DESATURATED_STEP`; the least over every set the setting lights), and **a warning saying so**,
+    `START_AT_REACHABLE_TOP`, naming the setting, the value asked, the value used and why, which
+    the run's warnings item asks a person to accept (`preflight.warnings`, as the page's start
+    shows it) and `wlx run --accept-warnings` accepts. **Where no value the setting allows shows
+    the set, the run is refused**, as `(setting, sentence)`: no trial could be drawn (XC-494's
+    other side; the load refuses such a task first, `_one_color`, `unrealizable-color`).
+
+    `(used, warnings, refused)`, each empty with no calibration. **One function for the three
+    starts** -- the pre-flight (`service.Service._preflight`, `preflight.values`), `Session.run` and
+    `wlx run` -- so each starts at the same value; the value used is the run's own, recorded as its
+    start. A value set live above the top is still refused (`unshowable`,
+    `taskd.Session._impossible`). Between trials or before a run, never in a frame; each luminance
+    probed is realized uncached."""
+    from wl_xcon.declarations import color_set_lights
+
+    if calibration is None:
+        return {}, [], []
+    declared = {param.name: param for param in task.params}
+    panel = calibration.id or calibration.measured_on
+    tops: dict = {}
+    sets: dict = {}
+    refused: list[tuple[str, str]] = []
+    seen: set = set()
+    for light in color_set_lights(task):
+        if not isinstance(light.luminance, P) or light.luminance.name not in values:
+            continue
+        setting, value = light.luminance.name, values[light.luminance.name]
+        if not (_is_number(value) and math.isfinite(value) and value > 0.0):
+            continue  # no luminance: refused as a value of the wrong kind elsewhere
+        key = (setting, light.colorset.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        asked = float(value)
+        if reachable_top(light.colorset, calibration, asked, asked) is not None:
+            continue  # shown as asked
+        param = declared.get(setting)
+        low = None if param is None else param.low
+        least = float(low) if _finite(low) and low > 0.0 else DESATURATED_STEP
+        top = None if least >= asked else reachable_top(light.colorset, calibration, least, asked)
+        if top is None:
+            refused.append((setting, (
+                f"calibration {panel} cannot show color set {light.colorset.name!r} at {asked:g} "
+                f"cd/m² of macaque luminance, not even its apex, nor at any value from {least:g} "
+                f"cd/m² the setting allows, so no trial could be drawn")))
+            continue
+        if setting not in tops or top < tops[setting]:
+            tops[setting] = top
+        sets.setdefault(setting, []).append(light.colorset.name)
+    for setting, _ in refused:
+        tops.pop(setting, None)
+    warnings = []
+    for setting, top in tops.items():
+        named = sets[setting]
+        asked = float(values[setting])
+        warnings.append(Finding(START_AT_REACHABLE_TOP, (
+            f"setting {setting!r} starts at {top:g} cd/m², not the {asked:g} cd/m² asked: "
+            f"calibration {panel} cannot show color set{'s' if len(named) > 1 else ''} "
+            f"{', '.join(repr(one) for one in named)} at {asked:g} cd/m² of macaque luminance, "
+            f"not even the apex, and {top:g} cd/m² is the brightest it can show "
+            f"{'them' if len(named) > 1 else 'it'} at, its reachable top; the run is recorded at "
+            f"{top:g}, and a value set live above it is refused"), blocking=False,
+            accepted_in=SESSION_KINDS, subjects=tuple(f"color set {one!r}" for one in named)))
+    return tops, warnings, refused
 
 def _spectra_faults(trial: Trial, params: dict[str, Param], panel: Calibration) -> list[Finding]:
     """Cone colors on a measured calibration without spectra, which convert as the default's do

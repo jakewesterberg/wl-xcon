@@ -51,8 +51,8 @@ from wl_xcon.actor import Actor, to_map_or_none
 from wl_xcon.bounds import Bounds, Exceeded, _finite
 from wl_xcon.check import (
     IMPOSSIBLE, PAST_LIMIT, _among, _outside, _staircase_levels, _whole_numbers,
-    beyond_range, check_task, impossible, laid_out, margin_reaches, start_at, undrawable, unplaced,
-    special_share, unpooled, unshowable, unstarted,
+    beyond_range, check_task, impossible, in_reach, laid_out, margin_reaches, start_at, undrawable,
+    unplaced, special_share, unpooled, unshowable, unstarted,
 )
 from wl_xcon.cli import _clock, _load_allocation, _load_task, _printable, _shown
 from wl_xcon.codes import BLOCK_END, RUN_END_MARKER, TRIAL_END, TRIAL_START, Allocation
@@ -7636,6 +7636,15 @@ class Session:
         given = dict(run.values)
         if going is not None and task.pool is not None:
             given[task.pool.setting] = going.pool
+        # **A starting luminance the panel cannot show its color set at starts at the panel's
+        # reachable top** (`check.in_reach`; the PI, 2026-11-20, from his try-out, "Start at
+        # the brightest it can, warn"; his "warnings over refusals"): the value the run starts at
+        # is the run's own, recorded as its start (the start row's `layers` and `resolved`, each
+        # line's `params`). Its warning is the pre-flight's to ask (`Service._preflight`, accepted
+        # with the run's warnings, written below) and `wlx run`'s flag's to accept. One no value
+        # its setting allows shows refuses the run below.
+        reached, _, unreachable = in_reach(task, {**starts, **given}, self.spec.calibration)
+        given.update(reached)
         # **A place with no value refuses the run before it starts** (XC-415; the PI, 2026-10-30,
         # "Refuse to start": "A stimulus that cannot be drawn is a case where the run cannot
         # proceed"): a setting placing a window, a stimulus, an update or an array's objects, or
@@ -7647,11 +7656,11 @@ class Session:
         unset = unplaced(task, {**starts, **given}, None if plain else self._plan(run, task).blocks)
         # **And a pool naming no pairing** (`check.unpooled`; the pop-out search build's Task 5):
         # its trials would have nothing to draw. **And a luminance the panel cannot show its color
-        # set at** (`check.unshowable`; XC-494): its first trial could not be drawn.
+        # set at, at any value its setting allows** (`check.in_reach`; XC-494): its first
+        # trial could not be drawn.
         unset += unpooled(task, {**starts, **given})
         # Each named by its setting (the re-review's N4), as the pre-flight names it.
-        unset += [(name, f"{name!r}: {said}")
-                  for name, said in unshowable(task, {**starts, **given}, self.spec.calibration)]
+        unset += [(name, f"{name!r}: {said}") for name, said in unreachable]
         if unset:
             raise SystemExit("task refused, run not started: "
                              + "; ".join(_printable(said) for _, said in unset))
@@ -7699,6 +7708,8 @@ class Session:
         if implied:
             for name, start in starts.items():
                 self.spec.values.setdefault(name, start)
+            # And a luminance brought within the panel's reach (`reached`, above).
+            self.spec.values.update(reached)
         else:
             self.spec.values = {**starts, **given}
         self.run_index = 0 if self.run_index is None else self.run_index + 1

@@ -109,6 +109,7 @@ from wl_xcon.cli import (
     _load_subject_settings,
     _printable,
 )
+from wl_xcon.check import in_reach
 from wl_xcon.codes import Allocation
 from wl_xcon.dio import Simulated as SimulatedCard
 from wl_xcon.geometry import NOMINAL_HALF_IPD_CM, Rig, stand_in_housings
@@ -1705,6 +1706,20 @@ class Service:
             checked = (item,)
         except Exception as broken:  # noqa: BLE001 -- see the docstring
             checked, loaded, findings = _unfinished((_preflight.TASK_CHECKS,), broken), None, []
+        # **A starting luminance the panel cannot show its color set at, at the panel's reachable
+        # top** (`check.in_reach`; the PI, 2026-11-20, "Start at the brightest it can, warn"):
+        # the run's values as `Session.run` starts them, which every item below judges, and each
+        # such a warning of the run's, asked with its others. One no value its setting allows
+        # shows is left as asked, for the starting values item to refuse; a fault here leaves them
+        # all as asked, that item saying what raised.
+        reached: list = []
+        if loaded is not None:
+            try:
+                used, reached, _ = in_reach(loaded, _preflight.starting(loaded, values),
+                                                session.spec.calibration)
+                values = {**values, **used}
+            except Exception:  # noqa: BLE001 -- see above
+                reached = []
         # Starting values outside their declared ranges, checked widened (XC-352's D2): its
         # warnings join the run's, and what breaks the run fails the starting values item.
         beyond = _preflight.beyond(loaded, values, self.allocation, session.spec.geometry,
@@ -1736,7 +1751,7 @@ class Service:
                     ),
                 )
             item, found = _preflight.warnings(
-                rig + warnlist.of_findings(findings + beyond),
+                rig + warnlist.of_findings(findings + beyond + reached),
                 session.spec.session_kind,
                 session.accepted_keys(),
             )

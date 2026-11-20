@@ -38,7 +38,7 @@ from wl_xcon.actor import Actor, Box, Member
 from wl_xcon.bounds import Exceeded
 from wl_xcon.check import (
     IMPOSSIBLE, _outside, _staircase_levels, beyond_range, check_task, impossible,
-    parameters_used, undrawable, unplaced, unpooled, unshowable, unstarted,
+    in_reach, parameters_used, undrawable, unplaced, unpooled, unstarted,
 )
 from wl_xcon.check import laid_out as check_laid_out
 from wl_xcon.cli import _load_bounds, _load_subject_settings, _load_task, _setup_words
@@ -547,12 +547,15 @@ def values(task: Task | None, given: dict, refused=(), plan: str | None = None,
     except Exception as broken:  # noqa: BLE001 -- a task's declarations are code's output
         wrong.append(f"the task's pool could not be checked: {type(broken).__name__}: {broken}")
     # **A luminance the session's panel (`calibration`) cannot show a color set at, not even its
-    # apex** (`check.unshowable`; XC-494): the load only warns of the range's unreachable part,
-    # and a run starting at such a value is refused here, naming the reachable top.
+    # apex, at any value its setting allows** (`check.in_reach`; XC-494): no trial could be
+    # drawn, so the run is refused here. One some lower value it allows shows starts at the
+    # panel's reachable top instead, with a warning the warnings item asks a person to accept
+    # (the PI, 2026-11-20, "Start at the brightest it can, warn"; `Service._preflight`), so it
+    # is never refused here.
     try:
         # Each named by its setting (the re-review's N4: two settings at one value said one
         # sentence twice, naming neither).
-        wrong += [f"{name!r}: {said}" for name, said in unshowable(task, merged, calibration)]
+        wrong += [f"{name!r}: {said}" for name, said in in_reach(task, merged, calibration)[2]]
     except Exception as broken:  # noqa: BLE001 -- as above
         wrong.append(f"the task's color sets could not be checked: {type(broken).__name__}: "
                      f"{broken}")

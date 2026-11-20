@@ -1347,6 +1347,20 @@ def test_the_prompt_names_the_hardest_step_in_plain_words_and_a_pool_stays_whole
     assert row["now"] == 67 and type(row["now"]) is int
 
 
+class _StopAt(Simulated):
+    """**A trainer who only stops the run**, at drain `at`."""
+
+    def __init__(self, at: int) -> None:
+        super().__init__()
+        self.at, self.drains = at, 0
+
+    def drain(self) -> list:
+        self.drains += 1
+        if self.drains == self.at:
+            self.queue(Stop(by=JAKE))
+        return super().drain()
+
+
 #: **A panel a tenth as bright as the test one** (XC-494): white about 20 cd/m², so it shows the
 #: four colors only up to about 18.85 cd/m² of macaque luminance, below what `color_luminance`
 #: may be set to (computed 2026-11-08 with `check.reachable_top`).
@@ -1360,43 +1374,62 @@ DIM = measured(**{name: xyY(x, y, Y * 0.1) for name, (x, y, Y) in PRIMARIES.item
 WITHIN_DIM = {"fix_luminance": 15.0, "fix_act_luminance": 15.0}
 
 
-def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_value(tmp_path):
-    """XC-494, by the PI's "warnings over refusals" (2026-10-11): on a panel that cannot show the
-    colors at all above about 18.9 cd/m², not even the set's apex, **the task loads**, its start,
-    15, being shown -- since the console settings plan's Task 11 `color_luminance`'s lowest is
-    open, so the load judges it at its start, and no reachable top is warned of there
+def test_a_panel_too_dim_for_the_colors_range_top_warns_and_starts_at_its_top(tmp_path):
+    """XC-494, by the PI's "warnings over refusals" (2026-10-11) and his answer of 2026-11-20 from
+    his try-out ("Start at the brightest it can, warn"): on a panel that cannot show the colors at
+    all above about 18.9 cd/m², not even the set's apex, **the task loads**, its start, 15, being
+    shown -- since the console settings plan's Task 11 `color_luminance`'s lowest is open, so the
+    load judges it at its start, and no reachable top is warned of there
     (`color-set-unreachable`), as it was over the old range of 1 to 30 -- **a trainer's live value
     above that top is refused**, the previous value standing, with a sentence naming it, while one
-    below it is taken; **and a run starting above it is refused** -- by the pre-flight and by
-    `Session.run` -- naming it too. **The fixation point's looks**, color-set lights at 40 cd/m²
-    since the pop-out's revision, which this panel cannot show either, **follow the same rule**
-    (the whole-build review, the controller's ruling; `check._reachable_starts`): the pop-out as
-    written loads with `color-set-unreachable` naming the point's brightness and the top, and a run
-    starting at the point's 40 is refused naming the top; given 15 (`WITHIN_DIM`), it runs."""
-    from wl_xcon.preflight import FAIL, values as starting_values
+    below it is taken. **The fixation point's looks**, color-set lights at 40 cd/m² since the
+    pop-out's revision, which this panel cannot show either (`check._reachable_starts`), load with
+    `color-set-unreachable` naming the point's brightness and the top, and **the pop-out as written
+    now starts** (until 2026-11-20 its run was refused): its point at the panel's reachable top,
+    18.85 cd/m², with a warning naming each setting, the value asked, the value used and why
+    (`check.in_reach`, `start-at-reachable-top`); the run's record shows the value used as its
+    start. A run given the colors at 25, above their top, starts them at it too."""
+    from wl_xcon.check import START_AT_REACHABLE_TOP, in_reach
+    from wl_xcon.preflight import PASS, values as starting_values
 
-    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)),
+    task = _load_task(TASK_FILE)
+    found = check_task(task, _load_allocation(Path(ALLOCATION)),
                        geometry=DIRECT, calibration=DIM, deployment=Deployment.RIG_FIXED,
                        source=TASK_FILE)
     assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
     unreached = [f.detail for f in found if f.code == "color-set-unreachable"]
     assert len(unreached) == 2 and all("40 cd/m²" in said and "about 18.9 cd/m²" in said
                                        for said in unreached), unreached
+    assert all("a run starting above that starts at it, with a warning" in said
+               for said in unreached), unreached
     assert {said.split("setting ")[1].split(",")[0] for said in unreached} == {
         "'fix_luminance'", "'fix_act_luminance'"}
     assert not [said for said in unreached if "'color_luminance'" in said]
     assert "color-set-desaturated" in {f.code for f in found}, "at 15, as written it is not shown"
 
-    point = starting_values(_load_task(TASK_FILE), {}, (), "training", calibration=DIM)
-    assert point.result == FAIL and "at 40 cd/m²" in point.said and "reachable top" in point.said
-    # Each setting named once, so the trainer sees both must come down (the re-review's N4).
-    assert point.said.count("'fix_luminance': calibration") == 1, point.said
-    assert point.said.count("'fix_act_luminance': calibration") == 1, point.said
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    used, warned, refused = in_reach(task, starts, DIM)
+    assert used == {"fix_luminance": 18.85, "fix_act_luminance": 18.85} and refused == [], used
+    assert [(f.code, f.blocking, f.accepted_in) for f in warned] == [
+        (START_AT_REACHABLE_TOP, False, SESSION_KINDS)] * 2
+    for finding, setting in zip(warned, ("fix_luminance", "fix_act_luminance")):
+        assert finding.detail.startswith(
+            f"setting {setting!r} starts at 18.85 cd/m², not the 40 cd/m² asked: calibration "
+            f"dim@2027-01-20 cannot show color set 'isohue' at 40 cd/m²"), finding.detail
+        assert "the brightest it can show it at, its reachable top" in finding.detail
+    point = starting_values(task, {}, (), "training", calibration=DIM)
+    assert point.result == PASS, point.said
+
     as_written = _opened(replace(_spec(tmp_path / "written", seed=5, start_block="Fade-in"),
-                                 calibration=DIM), Simulated())
-    with pytest.raises(SystemExit, match="task refused, run not started: 'fix_luminance': "
-                                         ".*at 40 cd/m².*'fix_act_luminance': "):
-        as_written.run()
+                                 calibration=DIM), _StopAt(4))
+    as_written.run()
+    lines = _rows(as_written, "trials.jsonl")
+    assert lines and all(line["params"]["fix_luminance"] == 18.85
+                         and line["params"]["fix_act_luminance"] == 18.85 for line in lines)
+    (start,) = [row for row in _rows(as_written, "runs.jsonl") if row["event"] == "start"]
+    assert start["resolved"]["fix_luminance"] == start["resolved"]["fix_act_luminance"] == 18.85
+    assert start["layers"]["run"]["fix_luminance"] == 18.85
+    assert start["layers"]["task"]["fix_luminance"] == 40.0, "the task's own start, as declared"
 
     refused = _Locks("color_luminance", 25.0, stop_at=5)
     session = _opened(replace(_spec(tmp_path / "live", seed=5, start_block="Fade-in"),
@@ -1419,15 +1452,16 @@ def test_a_panel_too_dim_for_the_colors_range_top_warns_and_refuses_only_the_val
     assert [line["params"]["color_luminance"] for line in _rows(within, "trials.jsonl")][1:] == (
         [18.0] * (len(_rows(within, "trials.jsonl")) - 1))
 
-    item = starting_values(_load_task(TASK_FILE), {**WITHIN_DIM, "color_luminance": 25.0}, (),
-                           "training", calibration=DIM)
-    assert item.result == FAIL and "its reachable top" in item.said
-    assert "about 18.9 cd/m²" in item.said
+    bright = {**WITHIN_DIM, "color_luminance": 25.0}
+    item = starting_values(task, bright, (), "training", calibration=DIM)
+    assert item.result == PASS, item.said
+    assert in_reach(task, {**starts, **bright}, DIM)[0] == {"color_luminance": 18.85}
     started = _opened(replace(_spec(tmp_path / "start", seed=5, start_block="Fade-in"),
-                              calibration=DIM, values={**WITHIN_DIM, "color_luminance": 25.0}),
-                      Simulated())
-    with pytest.raises(SystemExit, match="task refused, run not started: .*about 18.9 cd/m²"):
-        started.run()
+                              calibration=DIM, values=dict(bright)),
+                      _StopAt(4))
+    started.run()
+    assert {line["params"]["color_luminance"] for line in _rows(started, "trials.jsonl")} == {
+        18.85}
 
 
 #: A panel a twenty-fifth as bright as `DIM`: the four colors' reachable top on it, about 0.75
@@ -1440,38 +1474,175 @@ BLACK = measured(**{name: xyY(x, y, Y * 0.00002) for name, (x, y, Y) in PRIMARIE
                  id="black@2027-01-20")
 
 
-def test_a_panel_that_cannot_show_the_colors_at_their_start_warns_and_refuses_the_run(tmp_path):
-    """XC-494's rule at a start (the pop-out revision's whole-build review, the controller's ruling
-    on Task 7's concern 3, `check._reachable_starts`): where a panel cannot show the four colors at
-    `color_luminance`'s start, 15 cd/m², not even the set's apex, but can at a lower value the
-    setting allows, **the task loads with `color-set-unreachable`**, naming the start and the
-    panel's reachable top, about 0.75 cd/m², and is checked there; **a run starting at the start
-    is refused**, by the pre-flight and by `Session.run`, since its first trial could not be drawn.
-    Until 2026-11-19 the task was refused at load (`unrealizable-color`)."""
-    from wl_xcon.preflight import FAIL, values as starting_values
+class _StopsTheRun(Simulated):
+    """**The page's link to `wlx taskd`**, its trainer stopping the service's run at its `at`-th
+    drain while one runs."""
 
-    found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
+    def __init__(self, at: int) -> None:
+        super().__init__()
+        self.at, self.running, self.service = at, 0, None
+
+    def drain(self) -> list:
+        session = None if self.service is None else self.service.session
+        if session is not None and session.phase == "running":
+            self.running += 1
+            if self.running == self.at:
+                self.queue(Stop(by=JAKE))
+        return super().drain()
+
+
+def test_the_page_starts_the_popout_on_a_too_dim_panel_its_point_at_the_top(tmp_path):
+    """The PI's answer of 2026-11-20 ("Start at the brightest it can, warn"), **on the path the
+    page's Start takes** (`wlx taskd`'s service: `CheckRun`, then `StartRun` with the items
+    acknowledged by name, as the page's start form sends them; `Service._start` welfare-listed and
+    unchanged): on `DIM`, the pop-out as written, the fixation point at 40 cd/m², checks with its
+    starting values passing and its warnings item asking, among them one for each of the point's
+    brightnesses, `start-at-reachable-top`, naming the setting, the 40 asked and the 18.85 used;
+    the start runs, each trial at 18.85, and the warning is written as accepted at the start, by
+    whom. Until 2026-11-20 Start was refused, and the page could not set the point's starting
+    brightness."""
+    import shutil
+
+    from _rig import PATH as RIG_FILE, RIG
+    from _sessions import typed
+    from wl_xcon.check import START_AT_REACHABLE_TOP
+    from wl_xcon.link import CheckRun, OpenSession, StartRun
+    from wl_xcon.preflight import PASS, STARTING_VALUES, UNKNOWN, WARNINGS
+    from wl_xcon.service import Service
+
+    subjects, root = tmp_path / "subjects", tmp_path / "sessions"
+    (subjects / "REFERENCE").mkdir(parents=True)
+    shutil.copy("tasks/eight_hour_bounds.py", subjects / "REFERENCE" / "bounds.py")
+    shutil.copy("tasks/reference_subject.py", subjects / "REFERENCE" / "settings.py")
+    root.mkdir()
+    link = _StopsTheRun(4)
+    service = Service(rig=RIG, rig_path=RIG_FILE, subjects=subjects, tasks=TASK_FILE.parent,
+                      allocation=_load_allocation(Path(ALLOCATION)), allocation_path=ALLOCATION,
+                      root=root, link=link, seed=lambda: 5)
+    link.service = service
+    service.calibration = DIM  # the rig's panel, as its calibration record would load it
+
+    def step(command):
+        link.queue(command)
+        service.step()
+        return link.published[-1]
+
+    step(OpenSession(
+        by=JAKE, session_id="2027-01-14_01", animal="REFERENCE", deployment="rig_fixed",
+        view="direct", session_kind="training", departure=typed(60), delivered_today=0.0,
+        answer=None, amend_to=None, amend_reason="",
+        accepted=tuple(entry.key for entry in service.open_warnings(Deployment.RIG_FIXED))))
+    assert service.session is not None and service.session.spec.calibration == DIM
+    run = dict(task=TASK_FILE.name, values={}, plan="training", start_block="Fade-in")
+    checked = step(CheckRun(by=JAKE, **run)).preflight
+    items = {item.name: item for item in checked.items}
+    assert items[STARTING_VALUES].result == PASS, items[STARTING_VALUES].said
+    assert items[WARNINGS].result == UNKNOWN and START_AT_REACHABLE_TOP in items[WARNINGS].said
+    for setting in ("fix_luminance", "fix_act_luminance"):
+        assert (f"setting {setting!r} starts at 18.85 cd/m², not the 40 cd/m² asked"
+                in items[WARNINGS].said), items[WARNINGS].said
+    unknown = tuple(item.name for item in checked.items if item.result == UNKNOWN)
+    step(StartRun(by=JAKE, trials=1, acknowledged=unknown, **run))
+
+    folder = root / "2027-01-14_01" / "xcon"
+    lines = [json.loads(line) for line in (folder / "trials.jsonl").read_text().splitlines()]
+    assert lines and {(line["params"]["fix_luminance"], line["params"]["fix_act_luminance"])
+                      for line in lines} == {(18.85, 18.85)}
+    accepted = [json.loads(line) for line in (folder / "warnings.jsonl").read_text().splitlines()]
+    started = [row for row in accepted if row["code"] == START_AT_REACHABLE_TOP]
+    assert [(row["how"], row["by"]["name"]) for row in started] == [("start", "jake")] * 2, started
+
+
+def test_wlx_run_starts_the_popout_on_a_too_dim_panel_its_point_at_the_top(tmp_path, capsys):
+    """The PI's answer of 2026-11-20, by `wlx run`: on a rig whose calibration record is `DIM`'s,
+    the pop-out as written starts (until 2026-11-20 it was refused before the session opened), its
+    point at 18.85 cd/m², the warning for each of its brightnesses printed as accepted by
+    `--accept-warnings` and written as accepted; each trial is drawn at 18.85."""
+    import time
+
+    from _calibrations import BACKGROUND, LINEAR, OBSERVER, SPECTRA
+    from _rig import naming
+    from wl_xcon.check import START_AT_REACHABLE_TOP
+    from wl_xcon.cli import main
+
+    folder = tmp_path / "rig"
+    folder.mkdir()
+    (folder / "cal.json").write_text(json.dumps({
+        "id": DIM.id, "measured_on": DIM.measured_on, "observer": OBSERVER,
+        "primaries": {name: [x, y, Y * 0.1] for name, (x, y, Y) in PRIMARIES.items()},
+        "background": BACKGROUND,
+        "transfer": {c: [list(p) for p in zip(LINEAR.levels, LINEAR.fractions)]
+                     for c in ("red", "green", "blue")},
+        "spectra": {name: list(getattr(SPECTRA, name)) for name in ("nm", "red", "green", "blue")},
+    }))
+    rig = naming(folder, str(folder / "cal.json"))
+    root = tmp_path / "root"
+    main(["run", str(TASK_FILE), "--rig", str(rig), "--view", "direct", "--kind", "training",
+          "--accept-warnings", "--allocation", ALLOCATION, "--bounds",
+          "tasks/reference_bounds.py", "--root", str(root), "--session-id", "2027-01-14_01",
+          "--subject", "REFERENCE", "--out-of-cage-at", time.strftime("%H:%M"),
+          "--delivered-today", "0", "--trials", "2"])
+    printed = capsys.readouterr().out
+    for setting in ("fix_luminance", "fix_act_luminance"):
+        assert (f"warning accepted: {START_AT_REACHABLE_TOP}: setting {setting!r} starts at 18.85 "
+                f"cd/m², not the 40 cd/m² asked") in printed, printed
+    folder = root / "2027-01-14_01" / "xcon"
+    lines = [json.loads(line) for line in (folder / "trials.jsonl").read_text().splitlines()]
+    assert len(lines) == 2 and {line["params"]["fix_luminance"] for line in lines} == {18.85}
+    accepted = [json.loads(line)["code"]
+                for line in (folder / "warnings.jsonl").read_text().splitlines()]
+    assert accepted.count(START_AT_REACHABLE_TOP) == 2, accepted
+
+
+def test_a_panel_that_cannot_show_the_colors_at_their_start_warns_and_starts_at_its_top(tmp_path):
+    """XC-494's rule at a start (the pop-out revision's whole-build review, the controller's ruling
+    on Task 7's concern 3, `check._reachable_starts`; the PI, 2026-11-20, "Start at the brightest it
+    can, warn"): where a panel cannot show the four colors at `color_luminance`'s start, 15 cd/m²,
+    not even the set's apex, but can at a lower value the setting allows, **the task loads with
+    `color-set-unreachable`**, naming the start and the panel's reachable top, about 0.75 cd/m²,
+    and is checked there; **a run starting at the start starts at that top**, with a warning
+    (`start-at-reachable-top`), by the pre-flight's values and `Session.run` alike. Until 2026-11-19
+    the task was refused at load (`unrealizable-color`), and until 2026-11-20 its run at Start."""
+    from wl_xcon.check import in_reach
+    from wl_xcon.preflight import PASS, values as starting_values
+
+    task = _load_task(TASK_FILE)
+    found = check_task(task, _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
                        calibration=DARK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
     assert not [f for f in found if f.blocking], [f.detail for f in found if f.blocking]
     (colors,) = [f.detail for f in found if f.code == "color-set-unreachable"
                  and "'color_luminance'" in f.detail]
     assert "15 cd/m²" in colors and "about 0.75 cd/m²" in colors, colors
 
-    item = starting_values(_load_task(TASK_FILE), {}, (), "training", calibration=DARK)
-    assert item.result == FAIL and "at 15 cd/m²" in item.said and "reachable top" in item.said
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    used, warned, refused = in_reach(task, starts, DARK)
+    assert refused == [] and used["color_luminance"] == pytest.approx(0.75, abs=0.05), used
+    (said,) = [f.detail for f in warned if "'color_luminance'" in f.detail]
+    assert f"starts at {used['color_luminance']:g} cd/m², not the 15 cd/m² asked" in said, said
+    item = starting_values(task, {}, (), "training", calibration=DARK)
+    assert item.result == PASS, item.said
     started = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), calibration=DARK),
-                      Simulated())
-    with pytest.raises(SystemExit, match="task refused, run not started: .*at 15 cd/m²"):
-        started.run()
+                      _StopAt(4))
+    started.run()
+    assert {line["params"]["color_luminance"] for line in _rows(started, "trials.jsonl")} == {
+        used["color_luminance"]}
 
 
-def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_refuses_the_task():
+def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_refuses_the_task(
+        tmp_path):
     """XC-494's other side: where a panel cannot show the four colors at any luminance their
     setting allows, not even the set's apex at 0.05 cd/m², no trial could be drawn, so **the task
     is refused at load**, as a fixed luminance it cannot show is (`unrealizable-color`): every color
     the task can draw, at the start -- since the console settings plan's Task 11 its lowest is
     open, so the load judges it there -- the lights handed on as given (`check._within_reach`; CI's
-    sweep of run 42496196528, where it survived neutering, nothing else refusing them)."""
+    sweep of run 42496196528, where it survived neutering, nothing else refusing them). **And a
+    run is refused** (the PI's answer of 2026-11-20 starts a run at the panel's reachable top only
+    where one exists): its starting values no value the settings allow brings within reach
+    (`check.in_reach`), the pre-flight's starting values item failing on each, and `Session.run`
+    refusing the task."""
+    from wl_xcon.check import in_reach
+    from wl_xcon.preflight import FAIL, values as starting_values
+
     found = check_task(_load_task(TASK_FILE), _load_allocation(Path(ALLOCATION)), geometry=DIRECT,
                        calibration=BLACK, deployment=Deployment.RIG_FIXED, source=TASK_FILE)
     # The color set's own, the fixation point's lights at their 40 cd/m² among them since the
@@ -1484,6 +1655,21 @@ def test_a_panel_that_cannot_show_the_colors_at_any_value_their_setting_allows_r
         for end in ("luminance=15.0",):
             assert any(f"'isohue', '{color}'" in f.detail and end in f.detail for f in unshown), (
                 color, end)
+
+    task = _load_task(TASK_FILE)
+    starts = {param.name: param.start for param in task.params if param.start is not None}
+    used, warned, refused = in_reach(task, starts, BLACK)
+    assert (used, warned) == ({}, [])
+    assert {name for name, _ in refused} == {"color_luminance", "fix_luminance",
+                                             "fix_act_luminance"}, refused
+    assert all("so no trial could be drawn" in said for _, said in refused), refused
+    item = starting_values(task, {}, (), "training", calibration=BLACK)
+    assert item.result == FAIL and "'color_luminance': calibration black@2027-01-20" in item.said
+    session = _opened(replace(_spec(tmp_path, seed=5, start_block="Fade-in"), calibration=BLACK),
+                      _StopAt(4))
+    with pytest.raises(SystemExit, match="(?s)task refused, session not started:.*unrealizable-color"):
+        session.run()
+    assert _rows(session, "trials.jsonl") == []
 
 # --- The console settings plan's Task 11: its sections, its limits, its window as a ratio ----------
 
