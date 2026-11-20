@@ -55,7 +55,7 @@ from wl_xcon.review import render_task
 from wl_xcon.run import Scripted
 from wl_xcon.task import Pool, SaccadeTo
 from wl_xcon.taskd import RunSpec, Session, SessionSpec
-from wl_xcon.web import fragments
+from wl_xcon.web import _e, fragments
 from wl_xcon.welfare import Deployment, Simulated as Pump
 
 WALL_NOW = 1_700_000_000.0
@@ -883,8 +883,11 @@ def test_a_pools_number_names_its_pairings():
 
 def test_the_cards_say_the_pool_gives_the_two_looks(tmp_path):
     """Each look's card says where its value comes from (telemetry schema 19's `source`): drawn
-    each trial from its pool, in the value's place, with a field to hold a value over it; the
-    pool's own card shows its number."""
+    each trial from its pool, in the value's place; the pool's own card shows its number.
+    Rewritten for the pop-out revision's Task 5b: a look's card held a word field "a value over
+    its pool", which no look could be typed into; it now offers the setting's declared looks as
+    segments by their words (`ParamRow.choices`), none pressed while the pool gives the value, a
+    press holding one over the pool as a `choice`."""
     session = _session(tmp_path, [_stage("Crowd")], ["right"] * 2)
 
     session.run()
@@ -898,7 +901,12 @@ def test_the_cards_say_the_pool_gives_the_two_looks(tmp_path):
              or 'data-card="distractor_appearance"' in card]
     assert len(looks) == 2 and all(
         '<span class="pv">drawn each trial from its pool</span>' in card
-        and 'placeholder="a value over its pool"' in card for card in looks)
+        and 'data-choices="' in card and 'aria-pressed="true"' not in card
+        and 'placeholder="a value over its pool"' not in card for card in looks)
+    for name in ("target_appearance", "distractor_appearance"):
+        assert rows[name].choices and all(f'data-choice="{_e(words)}"' in card
+                                          for card in looks if f'data-card="{name}"' in card
+                                          for words in rows[name].choices), name
 
 
 def test_a_frame_with_a_widening_round_trips():

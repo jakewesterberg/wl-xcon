@@ -3321,8 +3321,8 @@ def _echoes(row) -> bool:
     the console interface rework's Task 8: "the head shows the value in force only when it differs
     from the field (a draft or a waiting change, e.g. "2.0 → 1.5"), not twice"): a number or a word
     in a field of its own, as `_entry`'s last branch draws it -- not a value held by the training
-    switch, given each trial, a position, an appearance, a color or a pool, whose head is the only
-    place the value in force is said. Its box carries `data-echo`, and the page's CSS hides the
+    switch, given each trial, a position, an appearance, a color, a pool, or a setting picked among
+    its choices' segments, whose head is the only place the value in force is said. Its box carries `data-echo`, and the page's CSS hides the
     head's value at rest while it does."""
     settable = row.value is None or isinstance(row.value, str) or (
         isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
@@ -3330,7 +3330,7 @@ def _echoes(row) -> bool:
               and row.shape.get("shape") == "scaled")
     return (settable and row.members is None and row.color is None and not scaled
             and _HELD_BY.get(row.source) is None and _PER_TRIAL.get(row.source) is None
-            and row.position is None and row.words is None)
+            and row.position is None and row.words is None and not row.choices)
 
 
 #: **What a box's *more* says on its ⋯** (the ledger's density ruling for Task 8: "*more* becomes a
@@ -3352,7 +3352,9 @@ def _entry(row, view: View, unit: bool = True) -> tuple[str, str]:
     (`_params`): a value held by the training switch, given by its conditions, its draw, its pool
     or its scaling in those words with a field to set one value over them (`_over`); a position or
     an appearance in the rig's words, with none; else the value and its unit, with its field
-    (`_field`; `unit`, as there) where it is a number or a word. Escaped markup, both."""
+    (`_field`; `unit`, as there) where it is a number or a word. **A setting whose row gives its
+    choices by their words** (`ParamRow.choices`) has its segments in place of any field
+    (`_choice_segments`; the pop-out revision's Task 5b). Escaped markup, both."""
     settable = row.value is None or isinstance(row.value, str) or (
         isinstance(row.value, (int, float)) and not isinstance(row.value, bool))
     per_trial = _PER_TRIAL.get(row.source)
@@ -3378,7 +3380,53 @@ def _entry(row, view: View, unit: bool = True) -> tuple[str, str]:
         label = (f'<span class="pv">{_e(_figure(row, row.value))} '
                  f'<span class="unit">{_e(_unit_of(row))}</span></span>')
         entry = _field(row, view, unit) if settable else ""
+    if row.choices and row.members is None and row.color is None:
+        # Its declared choices by their words, as segments (`ParamRow.choices`; the pop-out
+        # revision's Task 5b), in place of a field: a look, or a word, is picked, never typed.
+        entry = _choice_segments(row, view)
     return label, entry
+
+
+#: **The longest a choice's segment says it** before it says only what kind of look it is
+#: (`_choice_label`): a display bound, so three looks fit one box, not a measurement.
+CHOICE_LABEL_LIMIT = 24
+
+
+def _choice_label(words: str, choices: tuple) -> str:
+    """**What a choice's segment says** (`_choice_segments`): its words, or -- where they run past
+    `CHOICE_LABEL_LIMIT` -- what comes before their first ": ", the look's kind ("Disc" of "Disc:
+    size fix_size, color ..."), where that tells it from every other choice of the setting; else
+    its words whole. Its title says the words whole either way. Formatting, not derivation."""
+    if len(words) <= CHOICE_LABEL_LIMIT or ": " not in words:
+        return words
+    kinds = [choice.partition(": ")[0] for choice in choices]
+    kind = words.partition(": ")[0]
+    return kind if kinds.count(kind) == 1 else words
+
+
+def _choice_segments(row, view: View) -> str:
+    """**A setting's declared choices as segments** (`ParamRow.choices`, each choice by its words;
+    the pop-out revision's design §2, a look's shape "a setting on the console"; its plan's Task
+    5b): one button for each, in the order declared, saying it in short (`_choice_label`) and
+    whole in its title, the choice in force pressed -- the value's words, or the word it is, none
+    where each trial gives its own. Pressing one is a draft of its box, as a hue's swatch is,
+    which the box's Apply sends as `choice`, `link.SetChoice`, by the words, staged until the next
+    trial. Greyed away from the box."""
+    name, off = _e(row.name), _gate(view)
+    held = (None if _PER_TRIAL.get(row.source) is not None
+            else row.words if row.words is not None else row.value)
+    buttons = []
+    for words in row.choices:
+        on = words == held
+        # The title rides on a span: the sign-in takes a gated button's own (`applySignIn`).
+        buttons.append(
+            f'<span class="chw" title="{_e(words)}">'
+            f'<button type="button" class="btn small seg ch{" on" if on else ""}" '
+            f'data-name="{name}" data-choice="{_e(words)}" '
+            f'aria-pressed="{"true" if on else "false"}"{off}>'
+            f"{_e(_choice_label(words, row.choices))}</button></span>")
+    return (f'<div class="sw chs" role="group" data-choices="{name}" '
+            f'aria-label="{name}: its choices">{"".join(buttons)}</div>')
 
 
 def _editor(row, frame, view: View) -> tuple[str, str]:
@@ -4517,6 +4565,8 @@ body.drafted > .wrap { padding-bottom: 56px; }
 .box .sw .seg:first-child { border-radius: 4px 0 0 4px; }
 .box .sw .seg:last-child { border-radius: 0 4px 4px 0; }
 .box .sw .seg.on { background: var(--ink); color: var(--bg); }
+.box .chs { flex-wrap: wrap; gap: 4px; }
+.box .chs .chw .seg { border-radius: 4px; }
 .box .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex: 1 1 100%; min-width: 0; }
 .box .side[hidden], .box .shp[hidden] { display: none; }
 .box .prof { display: block; width: 100%; max-width: 280px; height: auto; margin-top: 6px; }
@@ -5630,7 +5680,8 @@ _SCRIPT = """
   function nameOf(box) { return box.getAttribute("data-card"); }
   // **A box's controls as they stand**, keyed by what each sends: the side open (`side`), each
   // value field shown (`p:` and the setting it sets), the shape chosen and its fields (`shape`,
-  // `f:`), the hue pressed (`hue`), and a draw's live numbers in its *more* (`n:`). A number is
+  // `f:`), the hue pressed (`hue`), each setting's choice pressed among its segments (`c:` and the
+  // setting), and a draw's live numbers in its *more* (`n:`). A number is
   // compared as a number -- `0.50` is `0.5`, as `1.250` is `1.25` -- a list as its numbers, and
   // what is no number as typed.
   function numberOf(raw) {
@@ -5675,6 +5726,15 @@ _SCRIPT = """
   function fromPercent(raw) {
     return /^[-+]?(\\d+\\.?\\d*|\\.\\d+)$/.test(raw) ? Number(raw + "e-2") : Number(raw) / 100;
   }
+  // **One choice pressed among a setting's segments** (`web._choice_segments`), `words` its words,
+  // or none pressed for `null`; nothing sent.
+  function pressChoice(group, words) {
+    Array.prototype.forEach.call(group.querySelectorAll(".ch[data-choice]"), function (segment) {
+      var on = words !== null && segment.getAttribute("data-choice") === words;
+      segment.classList.toggle("on", on);
+      segment.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
   function stateOf(box) {
     var state = {};
     var side = box.querySelector(":scope > .editor [data-switch].on");
@@ -5700,6 +5760,11 @@ _SCRIPT = """
     }
     var hue = box.querySelector(":scope > .editor .hue.on[data-color]");
     if (hue) { state.hue = hue.getAttribute("data-colorset") + "/" + hue.getAttribute("data-color"); }
+    // A setting's choices as segments, keyed by the setting (`c:`), the words of the one pressed.
+    Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor [data-choices]"), function (group) {
+      var on = group.querySelector(".ch.on[data-choice]");
+      if (on) { state["c:" + group.getAttribute("data-choices")] = on.getAttribute("data-choice"); }
+    });
     Array.prototype.forEach.call(box.querySelectorAll(".detail > .rng input[data-number]"), function (input) {
       state["n:" + input.getAttribute("data-number")] = numberOf(input.value.trim());
     });
@@ -5711,8 +5776,8 @@ _SCRIPT = """
       keys.every(function (key) { return a[key] === b[key]; });
   }
   // **A box's draft** (the controls review's §2, rules 1, 2 and 4): what its Apply would send, as
-  // changes -- each `{kind, name, ...}` by its own kind's fields, `set`, `range`, `form` or
-  // `color` (`link.APPLY_KINDS`) -- and why it cannot be sent (`error`, the page's own checks: a
+  // changes -- each `{kind, name, ...}` by its own kind's fields, `set`, `range`, `form`, `color`
+  // or `choice` (`link.APPLY_KINDS`) -- and why it cannot be sent (`error`, the page's own checks: a
   // number that is not one, a fraction for a whole setting); `null` where the box holds what it
   // is headed to, the value in force or what this page sent and the rig has not yet applied ("a
   // draft equal to what is in force is no draft"). A range sends the numbers that differ from
@@ -5783,6 +5848,11 @@ _SCRIPT = """
       changes.push({ kind: "color", name: name, colorset: hue.getAttribute("data-colorset"),
                      color: hue.getAttribute("data-color") });
     }
+    // A choice pressed among a setting's segments: a `choice` by its words (`link.SetChoice`).
+    Object.keys(now).forEach(function (key) {
+      if (key.indexOf("c:") !== 0 || now[key] === base[key]) { return; }
+      changes.push({ kind: "choice", name: key.slice(2), choice: now[key] });
+    });
     var ranged = {};
     var moved = Object.keys(now).some(function (key) {
       return key.indexOf("n:") === 0 && now[key] !== base[key];
@@ -5969,8 +6039,9 @@ _SCRIPT = """
   // **A box's draft as its summary line says it** (the plan's Global Constraints), read from the
   // box's own fields, never formatted again: one field, as typed with its unit -- a percent's `%`,
   // a whole number as typed -- or as typed alone where the draft cannot send; a draw, its two ends
-  // as typed, "0.5–1.25 s"; a pool, "N of 12" from its ticks; a color, a group, a shape or a switch
-  // alone, or more than one kind of change, "edited". What differs from the frame's box (`served`),
+  // as typed, "0.5–1.25 s"; a pool, "N of 12" from its ticks; a choice pressed among its segments,
+  // its words; a color, a group, a shape or a switch alone, or more than one kind of change,
+  // "edited". What differs from the frame's box (`served`),
   // so an act still sending says what it sent; "" where nothing does.
   function draftText(box) {
     var name = nameOf(box);
@@ -5989,8 +6060,14 @@ _SCRIPT = """
       return key === "side" || key === "shape" || key.indexOf("f:") === 0;
     });
     var ranged = moved.some(function (key) { return key.indexOf("n:") === 0; });
-    var kinds = values.length + (formed ? 1 : 0) + (ranged ? 1 : 0) + (moved.indexOf("hue") !== -1 ? 1 : 0);
+    var chosen = moved.filter(function (key) {
+      return key.indexOf("c:") === 0 && Object.prototype.hasOwnProperty.call(now, key);
+    });
+    var kinds = values.length + (formed ? 1 : 0) + (ranged ? 1 : 0) + (moved.indexOf("hue") !== -1 ? 1 : 0) +
+      chosen.length;
     if (kinds !== 1) { return EDITED; }
+    // A choice pressed among its segments: its words, as its segment's title says them.
+    if (chosen.length) { return now[chosen[0]]; }
     if (values.length) {
       var setting = values[0].slice(2);
       var field = null;
@@ -6194,6 +6271,18 @@ _SCRIPT = """
         hue.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
+    // Each setting's segments, as its hue's swatches: one a person has not pressed follows the frame.
+    var choiceOf = function (node, setting) {
+      var on = node.querySelector(':scope > .editor [data-choices="' + CSS.escape(setting) + '"] .ch.on[data-choice]');
+      return on ? on.getAttribute("data-choice") : null;
+    };
+    Array.prototype.forEach.call(box.querySelectorAll(":scope > .editor [data-choices]"), function (group) {
+      var setting = group.getAttribute("data-choices");
+      var then = choiceOf(before, setting);
+      var told = choiceOf(given, setting);
+      if (choiceOf(box, setting) !== then || told === then) { return; }
+      pressChoice(group, told);
+    });
   }
   // **A dirty box patched by zone** (the controls review's §3): its head and its status line's
   // news from the frame, its *withdraw* as the frame has it, its *more* -- but a draft's or a
@@ -8066,6 +8155,16 @@ _SCRIPT = """
         other.setAttribute("aria-pressed", on ? "true" : "false");
       });
       refresh(colored);
+      showBar();
+      return;
+    }
+    // A choice among a setting's segments: a draft of its box, as a swatch is, sent by its Apply as
+    // a `choice` by its words (the pop-out revision's Task 5b).
+    var chosen = e.target.closest(inCards(".box .ch[data-choice]"));
+    if (chosen && !chosen.disabled) {
+      pressChoice(chosen.closest("[data-choices]"), chosen.getAttribute("data-choice"));
+      var picked = chosen.closest(".box");
+      refresh(picked);
       showBar();
       return;
     }

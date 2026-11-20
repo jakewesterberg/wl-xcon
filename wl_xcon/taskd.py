@@ -781,9 +781,10 @@ _SWITCH_SAID = {"on": "on", "frozen": "frozen", "full": "the full task"}
 
 #: **The commands a setting's box sends** (`link.CID_KINDS`; telemetry schema 23), each carrying
 #: the command id its page made, which what it stages or refuses answers (`Session._answering_for`),
-#: and since the console interface plan's Task 4 an apply of several and a withdrawal.
+#: since the console interface plan's Task 4 an apply of several and a withdrawal, and since the
+#: pop-out revision's Task 5b a choice's pick.
 _BOX = (_link.SetParameter, _link.HandBack, _link.SetRange, _link.SetForm, _link.SetColor,
-        _link.ApplyMany, _link.Withdraw)
+        _link.SetChoice, _link.ApplyMany, _link.Withdraw)
 
 def _ahead(drained: list) -> tuple[list, list]:
     """**A boundary's drain, its withdrawals first** (`Session.run`; the console interface rework's
@@ -5157,6 +5158,59 @@ class Session:
                 f"pick is refused and the previous value stands; it offers {offered}")
         return choice
 
+    def _choice(self, command, index: int) -> None:
+        """**One of a setting's declared choices picked on its box by its words** (`link.SetChoice`;
+        the pop-out revision's design §2, a look's shape "a setting on the console"; its plan's Task
+        5b): mapped to the one choice the setting declares whose words those are
+        (`link.choice_words`, the words its row's `choices` give), then judged and staged **through
+        `_impossible` and `set`, unchanged, as the choice it names** -- as `_color` does -- so it is
+        validated, staged until the next trial and recorded as any value set is, its source a
+        person's from then. **Refused with the sentence, nothing staged**: a reward size, which
+        has no choices (and its refusal goes into the session record too, `_ceiling_refused`, as a
+        hand-back's and a range's do); a setting the task does not declare or whose box cannot pick
+        by words; words naming none of its choices, which are named; and whatever `_impossible` or
+        `set` refuses (`Exceeded`). **It never raises**: it runs outside `_command`'s listed `try`,
+        so a check that raises refuses the pick, saying it could not be checked, and the session
+        runs on. `index`, the trial about to run. Not welfare-critical: no ceiling has choices, so
+        no reward size is picked here, and `set` judges the value as ever."""
+        name, by = command.name, command.by
+        try:
+            choice = self._chosen(command)
+            self._impossible(name, choice, by=by)
+            self.set(name, choice, by=by)
+        except Exceeded as refused:
+            self._refuse(name, by, str(refused))
+            self._ceiling_refused(name, command.choice, by, str(refused), index)
+        except Exception as broken:  # noqa: BLE001 -- see the docstring
+            self._refuse(name, by, (
+                f"the pick of {_link.cut(command.choice, _link.TEXT_LIMIT)!r} for {name!r} could "
+                f"not be checked ({type(broken).__name__}: {broken}), so it is refused and the "
+                f"session runs on"))
+
+    def _chosen(self, command) -> object:
+        """**The one choice a pick by words names** (`_choice`, `_apply_many`): the choice setting
+        `command.name` declares whose words are `command.choice` (`link.choice_words`), or
+        `Exceeded` with its sentence -- for a reward size, which has no choices; a setting the task
+        does not declare, or whose box cannot pick by words; and words naming none of its choices,
+        the sentence naming each it offers. Between trials, never in a frame."""
+        name = command.name
+        if name in self.spec.bounds.ceilings:
+            raise Exceeded(
+                f"{name!r} is a reward size, a welfare ceiling, which has no choices, so no choice "
+                f"is picked for it; it is set alone, by its own box")
+        declared = self._params().get(name)
+        words = None if declared is None else _link.choice_words(declared.choices)
+        if words is None:
+            raise Exceeded(
+                f"{name!r} is no setting this task declares whose box picks among its choices by "
+                f"their words, so no choice is picked for it")
+        if command.choice not in words:
+            offered = "; ".join(repr(word) for word in words)
+            raise Exceeded(
+                f"{name!r} offers no choice {_link.cut(command.choice, _link.TEXT_LIMIT)!r}, so the "
+                f"pick is refused and the previous value stands; it offers {offered}")
+        return words[command.choice]
+
     def _declared_draw(self, key: tuple) -> Distribution:
         """The draw `key` names as the task declares it (`variation.in_force`'s keys): the task's,
         or a block's own, of the run's plan. What a range changed live is judged against
@@ -5481,7 +5535,8 @@ class Session:
           welfare ceiling's name, never applied with others (`REWARD_SENT_ALONE`; XC-527), its
           refusal written to the session record too, as a ceiling's always is (`_ceiling_refused`);
           then what each refuses alone -- a value's (`_value_faults`: a whole setting's fraction
-          among them), a color's pick (`_color_choice`), a range's (`_range_new`) and a draw's
+          among them), a color's pick (`_color_choice`), a choice's pick by its words
+          (`_chosen`), a range's (`_range_new`) and a draw's
           (`_form_new`), a whole setting's fractional end among them;
         - **each value through `set`, unchanged**, in the order sent, so each is judged by `set`'s
           own rules over what is offered ahead of it, a value past a declared bound refused
@@ -5512,7 +5567,7 @@ class Session:
             for place, change in enumerate(changes):
                 culprit, name = place, change.name
                 if not isinstance(change, (_link.SetParameter, _link.SetRange, _link.SetForm,
-                                           _link.SetColor)):
+                                           _link.SetColor, _link.SetChoice)):
                     raise Exceeded(f"a {change.KIND!r} is sent on its own, never in an apply of "
                                    f"several")
                 if name in names[:place]:
@@ -5525,6 +5580,9 @@ class Session:
                     values[name] = change.value
                 elif isinstance(change, _link.SetColor):
                     values[name] = self._color_choice(change)
+                    self._value_faults(name, values[name])
+                elif isinstance(change, _link.SetChoice):
+                    values[name] = self._chosen(change)
                     self._value_faults(name, values[name])
                 elif isinstance(change, _link.SetRange):
                     try:
@@ -5613,7 +5671,7 @@ class Session:
                 # is an attempt on a dose too).
                 asked = (change.value if isinstance(change, _link.SetParameter) else
                          dict(change.numbers) if isinstance(change, (_link.SetRange, _link.SetForm))
-                         else None)
+                         else change.choice if isinstance(change, _link.SetChoice) else None)
                 self._ceiling_refused(
                     name, asked if isinstance(asked, (int, float, str, dict)) else repr(asked),
                     by, said, index)
@@ -5899,6 +5957,14 @@ class Session:
         if isinstance(command, _link.SetColor):
             boxed = self._answering_for(command)
             self._color(command, index)
+            self._answered(boxed)
+            return
+        # **One of a setting's declared choices picked by its words** (the pop-out revision's Task
+        # 5b), beside `SetColor`'s, off the welfare list: no ceiling has choices, and the choice
+        # goes through `set`, unchanged.
+        if isinstance(command, _link.SetChoice):
+            boxed = self._answering_for(command)
+            self._choice(command, index)
             self._answered(boxed)
             return
         # **Several changes applied together, and a waiting act withdrawn** (the console interface

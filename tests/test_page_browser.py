@@ -3511,6 +3511,126 @@ def test_picking_a_hue_swatch_sends_color(rig):
         SetColor, "distractor_appearance", "isohue", "red", "Jake Westerberg")
 
 
+def _looks_row(look=None, **fields):
+    """The fixation point's look as the rig makes its row (`ParamRow.of`): a disc, a ring or a
+    square of one gray, `look` the one in force (the disc by default), its choices their words."""
+    from wl_xcon.link import ParamRow
+    from wl_xcon.task import Annulus, P, Square
+
+    gray = Gray(P("fix_luminance"))
+    looks = (Disc(size=0.3, color=gray), Annulus(inner=0.15, outer=0.3, color=gray),
+             Square(size=0.3, color=gray))
+    row = ParamRow.of("fix_look", "appearance", None, None, looks[0] if look is None else look,
+                      False, choices=looks, source="task", section="Stimuli")
+    return dataclasses.replace(row, **fields), looks
+
+
+def test_a_looks_shape_is_picked_on_its_box_and_applied(rig):
+    """The pop-out revision's design §2 (a look's shape is "a setting on the console"; its plan's
+    Task 5b): a setting whose choices are looks, none a color-set light, shows them as segments,
+    each saying its kind and its words whole in its title, the one in force pressed. Pressing the
+    square is a draft, as a swatch is -- nothing sent, a frame arriving meanwhile leaving it, the
+    summary line "in force → the square's words" -- and the box's Apply sends a `choice` of the
+    square's words as the signed-in member's; the box then waits, and is in force with the square
+    pressed. The ring pressed and a hold typed ride one Apply all, and *withdraw* takes the act
+    back. In a real browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.actor import Box
+    from wl_xcon.link import Applied, ApplyMany, SetChoice, Staged, Withdraw
+
+    jake = Box("Jake Westerberg")
+    row, looks = _looks_row()
+    disc, ring, square = row.choices
+    page = _task6_page(rig, params=_task6_rows() + (row,))
+    _open(page, "fix_look")
+    segments = f'{_b("fix_look")} [data-choices="fix_look"] .ch'
+    assert page.eval_on_selector_all(segments, "(all) => all.map((one) => [one.textContent, "
+                                     "one.parentElement.title, one.getAttribute('aria-pressed')])"
+                                     ) == [
+        ["Disc", disc, "true"], ["Annulus", ring, "false"], ["Square", square, "false"]]
+
+    page.click(f'{segments}[data-choice="{square}"]')
+    _offer(rig, 41, params=_task6_rows() + (row,))
+    _arrived(page, 41)
+    assert rig.dispatch.seen == [] and _say(page, "fix_look") == "not sent"
+    assert page.get_attribute(f'{segments}[data-choice="{square}"]', "aria-pressed") == "true"
+    mark, said, _ = _marked(page, "fix_look")
+    assert (mark, said) == ("●", f"{disc} → {square}"), (mark, said)
+    page.click(f'{_b("fix_look")} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert (type(sent), sent.name, sent.choice, sent.by.name) == (
+        SetChoice, "fix_look", square, "Jake Westerberg")
+    _offer(rig, 42, params=_task6_rows() + (row,),
+           staged=(Staged("fix_look", disc, square, jake, False, cid=sent.cid),))
+    _says(rig, page, "fix_look", "waiting · you")
+    held, _ = _looks_row(looks[2], applied=Applied(43, str(jake)))
+    _offer(rig, 43, params=_task6_rows() + (held,))
+    _says(rig, page, "fix_look", "in force from trial 43")
+    assert page.get_attribute(f'{segments}[data-choice="{square}"]', "aria-pressed") == "true"
+    assert "draft" not in _classes(page, "fix_look")
+
+    page.click(f'{segments}[data-choice="{ring}"]')
+    page.fill(f'{_b("fix_hold")} input[data-param="fix_hold"]', "0.5")
+    page.click("#drafts-apply")
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 2)
+    together = rig.dispatch.seen[-1]
+    assert type(together) is ApplyMany
+    assert sorted((type(change).__name__, change.name) for change in together.changes) == [
+        ("SetChoice", "fix_look"), ("SetParameter", "fix_hold")]
+    (picked,) = [change for change in together.changes if isinstance(change, SetChoice)]
+    assert picked.choice == ring
+    _offer(rig, 44, params=_task6_rows() + (held,),
+           staged=(Staged("fix_look", square, ring, jake, False, cid=together.cid),
+                   Staged("fix_hold", 0.3, 0.5, jake, False, cid=together.cid)))
+    _says(rig, page, "fix_look", "waiting · you")
+    page.click(f'{_b("fix_look")} [data-withdraw="{together.cid}"]')
+    rig.wait_for(lambda: len(rig.dispatch.seen) == 3)
+    assert (type(rig.dispatch.seen[-1]), rig.dispatch.seen[-1].cid) == (Withdraw, together.cid)
+
+
+def test_a_choice_in_a_group_box_follows_the_frame_and_rides_its_apply(rig):
+    """A setting's segments in a group's box (the console interface design's goal 8), its sentence
+    with the segments in their place: a hold's luminance typed is a draft, and a frame that moves
+    the look in force -- another person's change -- moves the segment pressed with it, the box kept
+    for the draft (`follow`), so no look the rig no longer holds becomes a draft of its own; the
+    ring pressed then rides the box's one Apply with the luminance, one `apply_many`. In a real
+    browser: run with `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import Applied, ApplyMany, GroupRow, ParamRow, SetChoice, SetParameter
+
+    def rows(look=None, **fields):
+        shown, looks = _looks_row(look, group="Fixation point", **fields)
+        luminance = ParamRow.of("fix_luminance", "cd/m2", 0.0, 80.0, 40.0, False, source="task",
+                                step=0.5, group="Fixation point", section="Stimuli")
+        return _task6_rows() + (shown, luminance), looks
+
+    groups = (GroupRow("Fixation point", ("fix_look", "fix_luminance"),
+                       "The point is {fix_look} at {fix_luminance} cd/m²", "Stimuli"),)
+    first, looks = rows()
+    page = _task6_page(rig, params=first, groups=groups)
+    _open(page, "Fixation point")
+    box = _b("Fixation point")
+    disc, ring, square = next(row for row in first if row.name == "fix_look").choices
+    segment = f'{box} [data-choices="fix_look"] .ch'
+
+    page.fill(f'{box} input[data-param="fix_luminance"]', "30")
+    moved, _ = rows(looks[2], source="person", changed=True, applied=Applied(42, "kim"))
+    _offer(rig, 42, params=moved, groups=groups)
+    _arrived(page, 42)
+    _until(page, "document.querySelector('" + box + " [data-choices=\"fix_look\"] .ch.on')"
+                 ".getAttribute('data-choice').indexOf('Square') === 0")
+    assert page.input_value(f'{box} input[data-param="fix_luminance"]') == "30"
+    page.click(f'{segment}[data-choice="{ring}"]')
+    page.click(f'{box} [data-apply]')
+    rig.wait_for(lambda: rig.dispatch.seen)
+
+    (sent,) = rig.dispatch.seen
+    assert type(sent) is ApplyMany
+    assert sorted((type(change).__name__, change.name, getattr(change, "choice", None) or
+                   getattr(change, "value", None)) for change in sent.changes) == [
+        (SetChoice.__name__, "fix_look", ring), (SetParameter.__name__, "fix_luminance", 30)]
+
+
 def test_defining_a_color_by_hue_angle_previews_and_saves(rig):
     """A section's New color… panel (the console settings design's §6; the PI, 2026-11-16: "1,2,or
     3. you select an option and then enter the info", "Saved into a color set file"): by hue angle,

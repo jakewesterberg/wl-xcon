@@ -293,8 +293,10 @@ from wl_xcon.welfare import DAILY_FLUID, OUT_OF_CAGE
 #: command's `cid` (a command, not a frame: no schema of its own), beside its fields, never inside a
 #: value (`_cid`, never `_setting`). **And the task's groups** (`Telemetry.groups`, each a
 #: `GroupRow`; the rework's Task 7): each group's title, its settings in order, its sentence and its
-#: section, which the page draws one box from. The build's later tasks add their fields to 23 before
-#: it is released. A reader of 22 refuses 23 and 23 refuses 22, by name, for all three shapes.
+#: section, which the page draws one box from. **And a choice by its words** (the pop-out revision's
+#: Task 5b): a row's `choices` hold a look's words too (`choice_words`), and a `choice` command on the
+#: wire (`SetChoice`) picks one -- a command, not a frame field. The build's later tasks add their
+#: fields to 23 before it is released. A reader of 22 refuses 23 and 23 refuses 22, by name, for all three shapes.
 SCHEMA = 23
 
 #: **The most choices a row carries as words** (`ParamRow.choices`; schema 23): a box shows a
@@ -302,6 +304,34 @@ SCHEMA = 23
 #: a setting declaring more carries none, its box then a field. A display bound, as
 #: `CONDITIONS_SHOWN` is, not a measurement.
 CHOICES_LIMIT = 30
+
+
+def choice_words(choices) -> "dict[str, object] | None":
+    """**A setting's declared choices by the words its box shows them by** (`ParamRow.choices`; the
+    pop-out revision's Task 5b): each choice by its words, in the order declared -- a word as
+    written, an appearance in the rig's words (`review.appearance_words`) -- which a box shows as
+    segments and a `SetChoice` names, mapped back to the one declared choice it is
+    (`taskd.Session._choice`). **`None` for a setting a box cannot pick from by words**: one with
+    no choices or more than `CHOICES_LIMIT`; one with a choice that has no words (a number, a
+    position); one whose every choice shows a color-set light, picked on its color card
+    (`task.set_light`, `SetColor`); and one where two choices share their words, or a choice's
+    words run past `TEXT_LIMIT`, since a pick could not name it. At load, between trials, or as a
+    frame is made; never in a frame."""
+    from wl_xcon.review import appearance_words
+    from wl_xcon.task import set_light
+
+    choices = tuple(choices or ())
+    if not 0 < len(choices) <= CHOICES_LIMIT:
+        return None
+    if all(set_light(choice) is not None for choice in choices):
+        return None
+    found: dict[str, object] = {}
+    for choice in choices:
+        words = choice if isinstance(choice, str) else appearance_words(choice)
+        if not words or len(words) > TEXT_LIMIT or words in found:
+            return None
+        found[words] = choice
+    return found
 
 #: **The longest command id a page may make** (`SetParameter.cid` and the other box commands';
 #: schema 23): printable text of 1 to 64 characters, which a verdict echoes on every frame until it
@@ -625,10 +655,11 @@ class ParamRow:
     #: else 1 for a whole setting, else its unit's (`task.UNIT_STEPS`), else 0.01; a ceiling's its
     #: unit's.
     step: float = 0.01
-    #: **Its choices as words** (schema 23): a categorical setting's choices where every one is a
-    #: word, which a box shows as segments and sends back as it is, at most `CHOICES_LIMIT`; empty
-    #: for a setting of numbers, one whose choices are looks or positions (a color's are its card's,
-    #: `color`), and one declaring more.
+    #: **Its choices as words** (schema 23; `choice_words`): a categorical setting's choices, each a
+    #: word as written or, since the pop-out revision's Task 5b, a look in the rig's words, which a
+    #: box shows as segments and sends back as they are (`SetChoice`), at most `CHOICES_LIMIT`;
+    #: empty for a setting of numbers, one whose choices are positions, one whose every choice is a
+    #: color-set light (a color's are its card's, `color`), and one declaring more.
     choices: tuple = ()
     #: **The task's start for it** (schema 23; `Param.start`): a number or a word, `None` where it
     #: declares none, or one that is neither (a look, a position).
@@ -682,8 +713,8 @@ class ParamRow:
         `None`: msgpack carries no declaration, and no console reads one.
 
         **What its box needs** (schema 23) as given, but `choices`, which become the row's words
-        where every one is a word and they number at most `CHOICES_LIMIT`, else none, and `start`,
-        kept where it is a finite number or a word, else `None`."""
+        where a box can pick from them by words (`choice_words`), else none, and `start`, kept
+        where it is a finite number or a word, else `None`."""
         from wl_xcon.review import appearance_words, position_words
 
         named = tuple(conditions)
@@ -694,9 +725,7 @@ class ParamRow:
         box = dict(
             whole=whole, step=step, start=_scalar(start), label=label, help=help, group=group,
             percent=percent, members=None if members is None else tuple(members), applied=applied,
-            warned=tuple(warned),
-            choices=(tuple(choices) if 0 < len(choices) <= CHOICES_LIMIT
-                     and all(isinstance(choice, str) for choice in choices) else ()))
+            warned=tuple(warned), choices=tuple(choice_words(choices) or ()))
         if looks is not None:
             return cls(name, unit, low, high, None, bounded, None, source, shown, draw,
                        numbers, more, switch, shape, profile, why, gives, color, looks,
@@ -3133,15 +3162,37 @@ class SetColor:
     cid: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SetChoice:
+    """**A person picks one of a setting's declared choices on its box, by its words** (the pop-out
+    revision's design §2: each look's shape "a setting on the console"; its plan's Task 5b): setting
+    `name` to the one choice it declares whose words are `choice` (`choice_words`, the words
+    `ParamRow.choices` gives), from the next trial, through `Session.set` unchanged as the choice it
+    names (`taskd.Session._choice`), so it is recorded as any value set is. **Its own command,
+    never a `SetParameter`**: a look is no number and no word `_setting` takes, and a pick names
+    the choice by the words the box showed it by, never its place in a list. Both fields are text
+    of 1 to `TEXT_LIMIT` characters, decoded as `SetColor`'s are (`_word`), never by `_setting`;
+    which choice the words name is the session's to say."""
+
+    KIND: ClassVar[str] = "choice"
+
+    name: str
+    choice: str
+    by: Actor
+    #: The page's command id, as `SetParameter.cid` (schema 23).
+    cid: str | None = None
+
+
 #: **The most changes one `ApplyMany` may carry** (the console interface plan's Task 4): a bound on
 #: one packet's reach into the refusals, the record and every frame, as `VALUES_LIMIT` is, not a rule
 #: about boxes -- no task here declares half as many settings.
 APPLY_LIMIT = 64
 
 #: **The kinds of change an `ApplyMany` carries** (the console interface design's goal 2): a value,
-#: a drawn range, a person's draw and a color's pick, each as its own command's fields. A hand-back,
-#: a revert and every other command are sent on their own.
-APPLY_KINDS = ("set", "range", "form", "color")
+#: a drawn range, a person's draw, a color's pick and, since the pop-out revision's Task 5b, a
+#: choice's pick by its words, each as its own command's fields. A hand-back, a revert and every
+#: other command are sent on their own.
+APPLY_KINDS = ("set", "range", "form", "color", "choice")
 
 
 @dataclass(frozen=True, slots=True)
@@ -3150,7 +3201,8 @@ class ApplyMany:
     "Apply per box, plus Apply all"): a group box's Apply or an Apply all, one act, **judged together
     and staged together, or refused whole** (`taskd.Session._apply_many`), as a revert is judged: a
     change that only works with another goes with it, and one refused refuses them all, none staged.
-    `changes` are 1 to `APPLY_LIMIT` of `SetParameter`, `SetRange`, `SetForm` and `SetColor`, each
+    `changes` are 1 to `APPLY_LIMIT` of `SetParameter`, `SetRange`, `SetForm`, `SetColor` and
+    `SetChoice`, each
     with this command's `by` and no command id of its own, each decoded by its own kind's rule, so
     every value and number passes `_setting`, M8's rule, welfare-listed and called unchanged. **A
     reward size is never among them** (XC-527): a welfare ceiling's name in one refuses the whole,
@@ -3253,6 +3305,7 @@ Command = (
     | SetRange
     | SetForm
     | SetColor
+    | SetChoice
     | ApplyMany
     | Withdraw
     | DefineColor
@@ -3435,6 +3488,9 @@ def _encode_command(command: Command) -> bytes:
     elif isinstance(command, SetColor):
         payload = {"kind": "color", "by": actors.to_map(command.by), "name": command.name,
                    "colorset": command.colorset, "color": command.color, "cid": command.cid}
+    elif isinstance(command, SetChoice):
+        payload = {"kind": "choice", "by": actors.to_map(command.by), "name": command.name,
+                   "choice": command.choice, "cid": command.cid}
     elif isinstance(command, DefineColor):
         payload = {"kind": "define_color", "by": actors.to_map(command.by),
                    "colorset": command.colorset, "new_set": command.new_set, "name": command.name,
@@ -3465,7 +3521,10 @@ def _change_fields(change) -> dict:
     if isinstance(change, SetColor):
         return {"kind": "color", "name": change.name, "colorset": change.colorset,
                 "color": change.color}
-    raise TypeError(f"an apply of several carries values, ranges, draws and colors, not {change!r}")
+    if isinstance(change, SetChoice):
+        return {"kind": "choice", "name": change.name, "choice": change.choice}
+    raise TypeError(f"an apply of several carries values, ranges, draws, colors and choices, not "
+                    f"{change!r}")
 
 
 class CommandRefused(ValueError):
@@ -3622,8 +3681,10 @@ def _word(data: dict, key: str, kind: str, by: Actor, *, optional: bool = False)
 
 #: **The kinds a page's box sends that carry its command id** (`_cid`; schema 23; the console
 #: interface design's goal 4): a value, a hand-back, a range, a person's draw and a color's pick, and
-#: since its plan's Task 4 an apply of several and a withdrawal, which require one (`_named_cid`).
-CID_KINDS = frozenset({"set", "hand_back", "range", "form", "color", "apply_many", "withdraw"})
+#: since its plan's Task 4 an apply of several and a withdrawal, which require one (`_named_cid`),
+#: and since the pop-out revision's Task 5b a choice's pick.
+CID_KINDS = frozenset({"set", "hand_back", "range", "form", "color", "choice", "apply_many",
+                       "withdraw"})
 
 
 def _is_cid(value: object) -> bool:
@@ -4065,6 +4126,11 @@ def _command_from(data: dict) -> Command:
                         colorset=_word(data, "colorset", kind, by),
                         color=_word(data, "color", kind, by), by=by,
                         cid=_cid(data, kind, by))
+    if kind == "choice":
+        by = _actor(data.get("by"), kind)
+        return SetChoice(name=_word(data, "name", kind, by),
+                         choice=_word(data, "choice", kind, by), by=by,
+                         cid=_cid(data, kind, by))
     if kind == "define_color":
         by = _actor(data.get("by"), kind)
         new_set = data.get("new_set")
@@ -4352,6 +4418,7 @@ _COMMAND_EXPOSURE = {
     "range": ("both", "change a drawn range"),
     "form": ("both", "draw a timing setting each trial from a shape a person gives"),
     "color": ("both", "pick a color setting's hue by its set"),
+    "choice": ("both", "pick one of a setting's declared choices by its words"),
     "apply_many": ("both", "apply several setting changes together, to the same trial"),
     "withdraw": ("both", "withdraw a setting change still waiting for the next trial"),
     "revert": ("both", "take the run's settings and ranges back to an earlier change"),

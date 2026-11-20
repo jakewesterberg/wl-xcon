@@ -798,12 +798,16 @@ _SHAPES = {
     "form": frozenset({"name", "shape", "numbers", "values", "weights"}),
     # And a color setting's hue picked by its set on its card (`link.SetColor`; the design's §6).
     "color": frozenset({"name", "colorset", "color"}),
+    # And one of a setting's declared choices picked on its box by its words (`link.SetChoice`; the
+    # pop-out revision's Task 5b: a look's shape is a console setting).
+    "choice": frozenset({"name", "choice"}),
     # And a new color defined three ways, saved as its set's proposed file (`link.DefineColor`; the
     # design's §6, the build's Task 8).
     "define_color": frozenset({"colorset", "new_set", "name", "method", "numbers"}),
     # The console interface rework's Task 4 (the PI, 2026-11-19, "Apply per box, plus Apply all",
     # and "Yes, a withdraw button"): several changes applied together, each a `set`, `range`,
-    # `form` or `color` by its own fields (`_APPLIED`), and a waiting act withdrawn by its `cid`.
+    # `form`, `color` or `choice` by its own fields (`_APPLIED`), and a waiting act withdrawn by its
+    # `cid`.
     "apply_many": frozenset({"changes"}),
     "withdraw": frozenset(),
 }
@@ -820,12 +824,13 @@ _SERVICE_KINDS = frozenset({"open", "check", "start", "end", "resume_session"})
 #: `training`, since C3 its `hand_back`, `range` and `revert`, and since the pop-out search build
 #: `next_block`, `back_block` and `decline`, whose `suggestion` the wire checks
 #: (`link._suggestion`), which go to the run as any control does, and since the console settings
-#: build `form`, `color`, `define_color` and `shaping`, and since the console interface rework
-#: `apply_many` and `withdraw`. A range's numbers, a form's numbers, values and weights,
-#: and a new color's numbers, are decoded there by `link._setting`, as a setting's value is; a
-#: color's set and hue are words (`link._word`).
+#: build `form`, `color`, `define_color` and `shaping`, since the console interface rework
+#: `apply_many` and `withdraw`, and since the pop-out revision's Task 5b `choice`. A range's
+#: numbers, a form's numbers, values and weights, and a new color's numbers, are decoded there by
+#: `link._setting`, as a setting's value is; a color's set and hue, and a choice's words, are words
+#: (`link._word`).
 _WIRE_KINDS = _SERVICE_KINDS | {"clear", "drum", "training", "hand_back", "range", "revert",
-                                "next_block", "back_block", "decline", "form", "color",
+                                "next_block", "back_block", "decline", "form", "color", "choice",
                                 "define_color", "shaping", "apply_many", "withdraw"}
 
 
