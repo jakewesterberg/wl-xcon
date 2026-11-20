@@ -7,6 +7,13 @@ its behavior). The PI also said: "build out the rest of the task parameters befo
 the pop-out's revision ([its design](2026-11-16-popout-revision-design.md)) is built on the same branch after this,
 before he is asked again.
 
+> **Built 2026-11-19** on `console-build-2026-11-17` (its plan's Tasks 1 to 4, then the whole-build review of this
+> and the pop-out revision, and its fix wave), not merged. **One deviation**: goal 1's "four at 1280 wide" is **three
+> at 1280 and two at 1024**, beside the demo screen's column: the columns are as wide as the widest line a tab's
+> settings can show (`web._widest`, `web._line_width`), so that no plain name or value in force is cut, and four
+> would cut the pop-out's longest names (the ledger's ruling for Task 2). Since the fix wave the width never follows a
+> value in force: turning special trials on moves nothing (`test_turning_special_trials_on_moves_nothing_in_the_summary`).
+
 ## Why
 
 Trying the reworked console in Safari, the PI said:

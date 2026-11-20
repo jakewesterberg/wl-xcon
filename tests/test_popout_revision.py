@@ -759,3 +759,35 @@ def test_an_eye_leaving_on_any_frame_about_the_holds_end_is_scored_by_an_edge(ta
     switched = seen.index(answered)
     assert seen[:switched] == [Outcome.FIXATION_BREAK] * switched
     assert seen[switched:] == [answered] * (len(seen) - switched)
+
+
+def test_the_summary_says_shares_in_percent_a_staircase_its_level_and_the_catch_hold_its_unit(
+        tmp_path):
+    """The whole-build review's M8 and M9, and the catch hold's unit (the controller's ruling on
+    Task 7's concern 8), on the pop-out's own rows: **the Special trials line says its shares
+    with %**, "0% · 0% · 0% · 0% · 0.50 s"; **a line its staircase gives says the level in force
+    after its words**, "by its staircase · 4", which the frame carries (`spec.values`), and its
+    widest, the staircase's highest, sizes the columns (`web._widest`, I1); **and the special
+    trials' sentence shows the catch hold's unit**, "a catch is held [0.50] s", where the shares
+    show their own `%`."""
+    import dataclasses
+
+    from _frames import view
+    from test_page_browser import _popout_own
+    from wl_xcon import web
+
+    made = _popout_own(tmp_path)
+    summary = web._summary(made, view(can_write=True), False)
+    assert ">0% · 0% · 0% · 0% · 0.50 s<" in summary, summary[:200]
+    rows = {row.name: row for row in made.params}
+    stepped = dataclasses.replace(rows["set_size"], source="staircase")
+    assert web._summary_value(stepped) == "by its staircase · 4"
+    assert web._widest(stepped) == "by its staircase · 36"
+    assert web._widest(rows["target_absent_percent"]) == "100%"
+
+    editor = web.fragments(made, view(can_write=True))["params"]
+    box = editor[editor.index('data-card="Special trials"'):]
+    after = box[box.index('data-param="catch_hold"'):].split("</button></span>", 1)[1]
+    assert after.startswith('<span class="unit">s</span>'), after[:120]
+    share = box[box.index('data-param="target_absent_percent"'):].split("</button></span>", 1)[1]
+    assert not share.startswith('<span class="unit">'), share[:120]

@@ -3980,7 +3980,7 @@ _LINE_OVERRUNS = """(root) => {
   }
   const whole = document.querySelector(root + ' > .summary').getBoundingClientRect();
   for (const section of document.querySelectorAll(root + ' > .summary .ssec')) {
-    const head = section.querySelector(':scope > h4');
+    const head = section.querySelector(':scope > h4') || section.querySelector(':scope > .skeep > h4');
     if (past(head.getBoundingClientRect(), section.getBoundingClientRect())) { found.push('header ' + head.textContent); }
     if (head.scrollWidth > head.clientWidth + 1 && !head.title) { found.push('header cut ' + head.textContent); }
     if (past(section.getBoundingClientRect(), whole)) { found.push('section ' + section.getAttribute('data-section')); }
@@ -4129,6 +4129,63 @@ def test_every_popout_line_is_above_the_fold_at_1280x800(rig, tmp_path):
     assert columns == 2, columns
 
 
+#: **The special kinds' shares** (`popout_search.py`'s Special trials), by name.
+SHARES = ("target_absent_percent", "odd_place_empty_percent", "distractor_alone_percent",
+          "odd_one_alone_percent")
+
+
+def _heads_kept(page, root: str = "#params") -> list:
+    """Each section of subsections alone whose header stands in another column than its first
+    subsection, or at a column's foot with nothing under it, by name: the header stranded."""
+    return page.evaluate("""(root) => Array.from(document.querySelectorAll(
+        root + ' > .summary > .ssec')).filter((section) => !section.querySelector(':scope > .line')
+        && section.querySelector('.ssec')).filter((section) => {
+          const head = section.querySelector(':scope > h4, :scope > .skeep > h4');
+          const first = section.querySelector('.ssec');
+          const h = head.getBoundingClientRect(), f = first.getBoundingClientRect();
+          return Math.round(h.left) !== Math.round(f.left) || f.top < h.bottom - 1;
+        }).map((section) => section.getAttribute('data-section'))""", root)
+
+
+@pytest.mark.parametrize("width", [1024, 1280])
+def test_turning_special_trials_on_moves_nothing_in_the_summary(rig, tmp_path, width):
+    """The pop-out revision's whole-build review, I1 (the summary and editor design's anti-goal:
+    "the page jumping under the pointer"): **the summary's columns are sized from the widest value
+    each setting can show** (`web._widest`), never from the values in force, and a group's line by
+    its name (its values cut with an ellipsis, whole in its title). On the pop-out's own rows at
+    1280 x 800 (and 1024), the demo screen's column shown, the four shares set to 10 and then to
+    100 move no line, no header, the legend nor the editor's top, and keep the columns; and **a
+    section of subsections alone keeps its header with its first subsection** in its column (WebKit
+    left "Stimuli · 16 settings" alone at a column's foot). In a real browser: run with
+    `WLX_BROWSER=webkit` too, for Safari."""
+    from wl_xcon.link import decode, encode
+
+    made = _popout_own(tmp_path, demo=True)
+
+    def offer(share, trial):
+        rig.hub.offer(decode(encode(dataclasses.replace(made, trial_index=trial, params=tuple(
+            dataclasses.replace(row, value=share) if row.name in SHARES else row
+            for row in made.params)))))
+
+    offer(0, 40)
+    page = rig.browser_page()
+    page.set_viewport_size({"width": width, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    page.wait_for_selector("#params > .summary .line", state="visible")
+    _arrived(page, 40)
+    before = _rects(page)
+    assert before[-1][0] == "editing", before[-1]
+    assert _heads_kept(page) == []
+    line = '#params > .summary .line[data-open="Special trials"]'
+    for share, trial in ((10, 41), (100, 42)):
+        offer(share, trial)
+        _arrived(page, trial)
+        page.wait_for_function(f"() => document.querySelector({line!r}).title.includes("
+                               f"'· {share}')")
+        assert _rects(page) == before, share
+        assert _heads_kept(page) == [], share
+
+
 def test_the_special_trials_line_says_the_rest_are_normal_search(rig, tmp_path):
     """The pop-out revision's plan, Amendments, item 4 (the console interface design's goal 8:
     "the remainder shown as "normal search""; the PI, 2026-11-19, "One box after Timing"): **the
@@ -4178,7 +4235,8 @@ def _rects(page, root: str = "#params") -> list:
     """Where everything above the editor stands: each summary line, each section's header, the
     legend and the find box, in page coordinates."""
     return page.evaluate("""(root) => Array.from(document.querySelectorAll(
-        root + ' > .summary .line, ' + root + ' > .summary .ssec > h4, ' + root + ' > .legend, ' +
+        root + ' > .summary .line, ' + root + ' > .summary .ssec > h4, ' + root +
+        ' > .summary .skeep > h4, ' + root + ' > .legend, ' +
         root + ' > .editing')).map((node) => { const r = node.getBoundingClientRect();
         return [node.getAttribute('data-open') || node.className, Math.round(r.left * 10),
                 Math.round((r.top + window.scrollY) * 10), Math.round(r.width * 10),
@@ -4524,6 +4582,28 @@ def test_nothing_is_sent_until_apply(rig):
     assert page.is_visible(f'{_b("wait")} [data-side="drawn"]')
     assert _bar(page) == "3 edits not sent: fix_hold, wait, set_size"
     assert "draft" not in _classes(page, "response_deadline")
+
+
+def test_escape_leaves_a_drawn_settings_shape_select_and_returns_to_its_line(rig, tmp_path):
+    """The pop-out revision's whole-build review, M3 (the summary and editor design's goal 7): in
+    a drawn setting's editor **Esc leaves the shape `<select>`**, and a second Esc returns to the
+    setting's summary line, as from a field. In a real browser: run with `WLX_BROWSER=webkit` too,
+    for Safari."""
+    from wl_xcon.link import decode, encode
+
+    rig.hub.offer(decode(encode(_popout_frame(tmp_path))))
+    page = rig.browser_page()
+    _sign_in(page)
+    page.set_viewport_size({"width": 1280, "height": LAPTOP_H})
+    page.click('label[for="t-task"]')
+    _open(page, "fix_hold")
+    shape = f'{_b("fix_hold")} select'
+    page.focus(shape)
+    assert page.evaluate("document.activeElement.tagName") == "SELECT"
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.tagName") != "SELECT"
+    page.keyboard.press("Escape")
+    assert page.evaluate("document.activeElement.getAttribute('data-open')") == "fix_hold"
 
 
 def test_enter_applies_and_escape_undoes(rig):
@@ -5656,7 +5736,8 @@ def test_a_section_and_its_tab_count_the_edits_not_sent(rig):
     def header(name, root="#params"):
         # The summary's section header (the summary and editor design of 2026-11-19).
         return " ".join(page.text_content(
-            f'{root} .ssec[data-section="{name}"] > h4').split())
+            f'{root} .ssec[data-section="{name}"] > h4, '
+            f'{root} .ssec[data-section="{name}"] > .skeep > h4').split())
 
     def tab(which):
         return " ".join(page.text_content(f'label[for="{which}"]').split())

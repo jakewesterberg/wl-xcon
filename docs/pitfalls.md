@@ -420,7 +420,7 @@ bound ended a look at the odd disc as `astray`, an abort, with the eye in the ta
 (`tests/test_page_browser.py::test_the_popout_played_with_the_mouse_is_correct`, about one full-suite run in
 several from 2026-11-16 to 2026-11-19). It looked like a test that load breaks, and load only made the
 coincidence likelier: the suite slowed the test's sight of the report it times its flick from, moving the
-flick onto the page's next still report; flicked the moment a report went, on a quiet machine, 3 of 12 runs
+flick onto the page's next still report; flicked the moment a report went, on a quiet machine, some runs
 aborted, every one with the two reports a frame apart. A hand flicks whenever it flicks. Probed by recording
 the rig's frames, each report the rig took and each the server forwarded beside the suite's load (the
 session's own record says only `abort`). Mitigation: a report is taken exactly only in a stream of one a

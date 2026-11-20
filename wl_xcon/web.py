@@ -3047,8 +3047,10 @@ def _line_unit(row) -> str:
     """**What a summary line writes after a number of a setting** (`_number_said`, `_drawn_said`,
     and `data-unit` for the page's draft text, `_line`): a percent's `%` and a degree's `°`
     against it, a whole number's nothing ("4", the mock-up the PI chose: "Number of discs 4"),
-    any other unit after a space, short where `_SHORT_UNITS` has it."""
-    if row.percent:
+    any other unit after a space, short where `_SHORT_UNITS` has it. **A special kind's share**
+    (`task.SPECIAL_UNIT`, a whole percent) writes `%` too (the pop-out revision's whole-build
+    review, M9: "0% · 0% · 0% · 0% · 0.50 s")."""
+    if row.percent or row.unit == SPECIAL_UNIT:
         return "%"
     if row.whole or not row.unit:
         return ""
@@ -3138,11 +3140,49 @@ def _summary_value(row) -> str:
     drawn = _drawn_said(row)
     if drawn is not None:
         return drawn
+    if (row.source == "staircase" and isinstance(row.value, (int, float))
+            and not isinstance(row.value, bool)):
+        # **A staircase's value in force after its words** (the pop-out revision's whole-build
+        # review, M8: "by its staircase · 4"): the frame carries the level the staircase holds
+        # (`spec.values`); a condition's or a pool's each trial's own, which no frame carries.
+        return f"{_PER_TRIAL_SHORT['staircase']} · {_number_said(row, row.value)}"
     if row.source in _PER_TRIAL_SHORT:
         return _PER_TRIAL_SHORT[row.source]
     if isinstance(row.value, (int, float)) and not isinstance(row.value, bool):
         return _number_said(row, row.value)
     return _figure(row, row.value)
+
+
+def _widest(row) -> str:
+    """**The widest value a summary line of `row` can say** (the pop-out revision's whole-build
+    review, I1: turning special trials on reflowed the summary, its columns sized from the values
+    in force), so the columns never move with a value: the value in force, and beside it what its
+    setting can come to show -- a number at each declared bound (a share's "100%", a set size's
+    "36"), after the words of what gives it where a staircase or the training switch does ("by its
+    staircase · 36"); a pool's "12 of 12"; each hue its color card offers; each choice's segment.
+    A number with an open side is said at its value in force there, which no rig value changes
+    but a person's own. Formatting, not derivation."""
+    said = [_summary_value(row)]
+    if row.members is not None:
+        said.append(f"{len(row.members)} of {len(row.members)}")
+    elif row.color is not None:
+        sets = row.color.get("sets") if isinstance(row.color, dict) else None
+        for entry in (sets.values() if isinstance(sets, dict) else ()):
+            hues = entry.get("hues") if isinstance(entry, dict) else None
+            said += [str(hue) for hue in (hues or {})]
+        said.append(_PER_TRIAL_SHORT["pool"])
+    elif row.choices:
+        said += [_choice_label(words, row.choices) for words in row.choices]
+    elif row.position is None and not isinstance(row.value, str):
+        for end in (row.low, row.high):
+            if isinstance(end, (int, float)) and not isinstance(end, bool) and math.isfinite(end):
+                number = _number_said(row, end)
+                said.append(number)
+                if row.source == "staircase":
+                    said.append(f"{_PER_TRIAL_SHORT['staircase']} · {number}")
+                if row.source in _HELD_BY:
+                    said.append(f"{_HELD_BY[row.source][0]} {number}")
+    return max(said, key=len)
 
 
 def _drawn(row) -> bool:
@@ -3240,7 +3280,7 @@ def _summary(frame, view: View, training: bool) -> str:
             number = (row.members is None and row.color is None and row.position is None
                       and not isinstance(row.value, str))
             shown = _waits(row, change, now)
-            widths.append(_line_width(row.label or row.name, now))
+            widths.append(_line_width(row.label or row.name, _widest(row)))
             lines.append((section, 1 if row.changed else 0, _line(
                 row.name, row.label or row.name, row.name, now, shown,
                 state, said, drawn, row.changed, row.bounded, words,
@@ -3256,7 +3296,9 @@ def _summary(frame, view: View, training: bool) -> str:
         words = "; ".join(f"{member.label or member.name} {_plain(_PER_TRIAL[member.source][0])}"
                           for member in drawn)
         changed = sum(1 for member in members if member.changed)
-        widths.append(_line_width(group.name, now))
+        # **A group's line is not sized by its values** (I1): its name shows whole, and its values
+        # cut with an ellipsis where the columns leave too little, whole in its title.
+        widths.append(_line_width(group.name, ""))
         lines.append((section, changed, _line(
             group.name, group.name, ", ".join(member.name for member in members), now, shown,
             state, said, bool(drawn), bool(changed), False, words), len(members)))
@@ -3294,10 +3336,11 @@ SUMMARY_FLOOR_CH = 24.0
 def _line_width(label: str, shown: str) -> float:
     """**How wide a summary line must be for its plain name and its value to show whole**, in the
     summary's `ch` (`_NAME_CH`, `_VALUE_CH`, `_LINE_CH`), as the summary's columns take it from
-    its longest line (`_summary`, `_sections`): the value in force, never what waits after an
-    arrow or a draft, so a change waiting or typed never moves the columns and the editor under
-    the pointer (the design's anti-goal); either may cut with an ellipsis, its whole in the
-    line's title."""
+    its longest line (`_summary`, `_sections`): the widest value its setting can show
+    (`_widest`), never the value in force alone, nor what waits after an arrow or a draft, so a
+    change applied, waiting or typed never moves the columns and the editor under the pointer
+    (the design's anti-goal; the pop-out revision's whole-build review, I1); a group's line by
+    its name alone. Any may cut with an ellipsis, its whole in the line's title."""
     name = sum(0.38 if char in _NARROW else 0.93 if char in _WIDE else 0.72 if char.isupper()
                else 0.6 for char in label)
     return name * _NAME_CH + len(shown) * _VALUE_CH + _LINE_CH
@@ -3482,6 +3525,21 @@ def _rest_said(total: float) -> str:
     return f"none {NORMAL_REST}" + (f": {IN_PROPORTION}" if total > 100 else "")
 
 
+def _sentence_unit(row, sentence: str) -> bool:
+    """**Whether a group's sentence shows a setting's unit beside its field** (the pop-out
+    revision's whole-build review: "a catch is held [0.50] s"): a setting of a unit the sentence
+    does not name -- not a whole count, which the sentence counts in words, nor a percent or a
+    share, whose `%` the field shows -- where the sentence does not write it after the field."""
+    if row.whole or row.percent or row.unit == SPECIAL_UNIT or not row.unit:
+        return False
+    for literal, field, _, _ in string.Formatter().parse(sentence):
+        if field == row.name:
+            after = sentence.partition("{" + field + "}")[2].lstrip()
+            unit = _SHORT_UNITS.get(row.unit, row.unit)
+            return not (after.startswith(unit) or after.startswith(row.unit))
+    return True
+
+
 def _rest(rows: list) -> str:
     """**The remainder a group holding special trials' shares says after its sentence**
     (`_rest_said`), on a line of its own naming the shares (`data-shares`) and carrying the words
@@ -3528,7 +3586,8 @@ def _group_box(group, rows: list, frame, view: View, staged: dict, acts: dict) -
     codes = ", ".join(row.name for row in rows)
     names = (f'<span class="names"><span class="lbl" title="{title}">{title}</span>'
              f'<span class="code" title="{_e(codes)}">{_e(codes)}</span></span>')
-    entries = {row.name: _entry(row, view, unit=not group.sentence) for row in rows}
+    entries = {row.name: _entry(row, view, unit=not group.sentence
+                                or _sentence_unit(row, group.sentence)) for row in rows}
     shown = []
     for row in rows:
         shown.append(_awaited(entries[row.name][0], staged.get(row.name), row))
@@ -3725,18 +3784,25 @@ def _sections(task: str, cards: list, run: str = "", panels: dict | None = None,
     ruling for the build's Task 3), so a task of short names gets more columns than one of long."""
     panels = panels or {}
 
-    def block(name: str, own: list, counted: list, inside: str = "") -> str:
+    def block(name: str, own: list, counted: list, inside: tuple = ()) -> str:
         settings = sum(item[3] for item in counted)
         whole = _count(settings, sum(item[1] for item in counted))
         label = name.rpartition("/")[2]
         said = f"{settings} setting{'' if settings == 1 else 's'}"
         lines = "".join(item[2] for item in own) + (panels.get(name, "") if own else "")
-        return (f'<div class="ssec" data-section="{_e(name)}"><h4 title="{_e(label)} · {whole}">'
-                f"{_e(label)} · {said}</h4>{lines}{inside}</div>")
+        head = f'<h4 title="{_e(label)} · {whole}">{_e(label)} · {said}</h4>'
+        if inside and not own:
+            # **A section of subsections alone keeps its header with its first** (the pop-out
+            # revision's whole-build review, I1: WebKit honors no `break-after: avoid` on a header
+            # whose section holds only sections, and left "Stimuli · 16 settings" alone at a
+            # column's foot): the two in one block no column breaks (`.skeep`).
+            head, inside = f'<div class="skeep">{head}{inside[0]}</div>', inside[1:]
+        return (f'<div class="ssec" data-section="{_e(name)}">{head}{lines}'
+                f'{"".join(inside)}</div>')
 
     parts = []
     for top, node in _in_order(cards):
-        subs = "".join(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
+        subs = tuple(block(f"{top}/{sub}", found, found) for sub, found in node["subs"].items())
         every = node["own"] + [one for found in node["subs"].values() for one in found]
         parts.append(block(top, node["own"], every, subs))
     wide = "" if width is None else (
@@ -4447,11 +4513,12 @@ body.session-shut .session { display: none !important; }
 /* A section holding subsections breaks between them across columns, so the Training tab, one
    section of several, has columns too (the summary and editor build's Task 3); its header never
    stands alone at a column's foot. */
-.ssec:has(> .ssec) { break-inside: auto; -webkit-column-break-inside: auto; page-break-inside: auto; }
-.ssec > h4 { break-after: avoid; -webkit-column-break-after: avoid; page-break-after: avoid; }
-.ssec > h4 { margin: 0 0 1px; height: 17px; line-height: 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ssec:has(> .ssec), .ssec:has(> .skeep) { break-inside: auto; -webkit-column-break-inside: auto; page-break-inside: auto; }
+.skeep { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; }
+.ssec > h4, .skeep > h4 { break-after: avoid; -webkit-column-break-after: avoid; page-break-after: avoid; }
+.ssec > h4, .skeep > h4 { margin: 0 0 1px; height: 17px; line-height: 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ssec .ssec > h4 { text-transform: none; letter-spacing: 0; font-weight: 500; border-bottom: 0; }
-.ssec > h4 .ns, .tab .tns { color: var(--accent); font-weight: 600; }
+.ssec > h4 .ns, .skeep > h4 .ns, .tab .tns { color: var(--accent); font-weight: 600; }
 .line { display: flex; align-items: center; gap: 5px; box-sizing: border-box; width: 100%; height: 20px; margin: 0; padding: 0 4px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; line-height: 20px; text-align: left; cursor: pointer; min-width: 0; }
 .line:hover { background: var(--surface-2); }
 .line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -6493,8 +6560,8 @@ _SCRIPT = """
       }
       Array.prototype.forEach.call(live.querySelectorAll(".ssec"), function (section) {
         var other = secs.querySelector('.ssec[data-section="' + CSS.escape(section.getAttribute("data-section")) + '"]');
-        var header = section.querySelector(":scope > h4");
-        var fresh = other.querySelector(":scope > h4");
+        var header = headOf(section);
+        var fresh = headOf(other);
         // The rig's counts; what is not sent is said after them again by `settle` (`countDrafts`).
         if (header.textContent !== fresh.textContent) { header.textContent = fresh.textContent; }
         if (header.title !== fresh.title) { header.title = fresh.title; }
@@ -6933,13 +7000,18 @@ _SCRIPT = """
     var said = count ? " · " + count + " not sent" : "";
     if (slot.textContent !== said) { slot.textContent = said; }
   }
+  // **A summary section's header**: its own `h4`, or, for a section of subsections alone, the one
+  // it keeps with its first subsection (`web._sections`, `.skeep`).
+  function headOf(section) {
+    return section.querySelector(":scope > h4") || section.querySelector(":scope > .skeep > h4");
+  }
   function countDrafts() {
     [["params", "t-task"], ["training-params", "t-training"]].forEach(function (pair) {
       var root = el(pair[0]);
       var tab = document.querySelector('label.tab[for="' + pair[1] + '"]');
       if (!root || !tab) { return; }
       Array.prototype.forEach.call(root.querySelectorAll(":scope > .summary .ssec"), function (section) {
-        var header = section.querySelector(":scope > h4");
+        var header = headOf(section);
         var count = 0;
         Array.prototype.forEach.call(section.querySelectorAll(".line[data-open]"), function (line) {
           var box = root.querySelector(':scope > .editing > .box[data-card="' + CSS.escape(line.getAttribute("data-open")) + '"]');
@@ -8503,6 +8575,18 @@ _SCRIPT = """
   // field with no draft leaves the field (`fieldKeys`), and a second Esc returns to its line (the
   // design's call), `leftFrom` the setting it left.
   var leftFrom = null;
+  // **Esc in a box's `<select>`** (a drawn setting's shape; the pop-out revision's whole-build
+  // review, M3): it leaves the select, and a second Esc returns to the setting's line, as from a
+  // field (`fieldKeys`).
+  document.addEventListener("keydown", function (e) {
+    var field = e.target;
+    if (e.key !== "Escape" || !field || !field.matches || !field.matches(inCards(".box select"))) {
+      return;
+    }
+    e.preventDefault();
+    field.blur();
+    leftFrom = nameOf(field.closest(".box"));
+  });
   function firstField(root) {
     var editor = root.querySelector(":scope > .editing");
     var shown = editor ? Array.prototype.filter.call(editor.children, function (child) {
