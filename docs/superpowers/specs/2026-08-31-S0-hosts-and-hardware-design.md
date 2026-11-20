@@ -1450,7 +1450,7 @@ bot check was served. Each row carries its finding; this is the summary.
 
 | # | Item | Blocks |
 |---|---|---|
-| 1 | `wl-stack` adopting the `rig/*` role vocabulary | the registry entry's `runs_on` |
+| ~~1~~ | ~~`wl-stack` adopting the `rig/*` role vocabulary~~ **Settled 2026-11-20:** wl-stack's machine-classes design adopted the roles (see the note at §1), plus `cam` | — |
 | 2 | Whether `rig/intan` and `rig/sglx` are one machine | V8, and the task PC's network layout |
 | 3 | ~~Tandem panel model~~ **The ASUS PG27UCDM, a 26.5" tandem QD-OLED, was chosen** (PI, 2026-09-27, §5.1, replacing the PG32UCDM Gen 3 of 2026-09-26). Still open: **whether its automatic pixel cleaning and Neo Proximity Sensor can be fully turned off** (§5.4 test 1). Ask ASUS before buying | the panel purchase |
 | 4 | ~~Whether the chosen GPU + panel can avoid DSC~~ **Closed 2026-09-26: yes.** The RTX 5070 Ti and the PG27UCDM both list DisplayPort 2.1 UHBR20, and ASUS states 4K/240 "without compression" for the PG27UCDM (read 2026-09-27; §4, §5.1) | — |

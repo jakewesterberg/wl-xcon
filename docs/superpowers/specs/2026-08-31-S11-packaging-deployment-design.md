@@ -76,6 +76,6 @@ Open", with no `LICENSE` file and a revisit planned at M10 with S13 as input.)*
 | # | Item | Blocks |
 |---|---|---|
 | ~~1~~ | ~~Push the repository~~ **Done 2026-08-31** | — |
-| 2 | `wl-stack` adopting the `rig/*` role vocabulary | `runs_on` meaning anything |
-| 3 | A machine class for the kiosk | S13 |
+| ~~2~~ | ~~`wl-stack` adopting the `rig/*` role vocabulary~~ **Settled 2026-11-20:** wl-stack's machine-classes design adopted the roles | — |
+| ~~3~~ | ~~A machine class for the kiosk~~ **Settled 2026-11-20:** wl-stack's machine-classes design added the `kiosk` class | — |
 | 4 | ADR-0002 and ADR-0003 accepted, so dependencies can be declared | `wlo stack` building a real task PC |

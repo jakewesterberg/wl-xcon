@@ -55,9 +55,10 @@ third_party:
       module built by DKMS, so it constrains the machine's distribution rather
       than merely being installed on it: NI-DAQmx 2026 Q2 supports RHEL 9.6/10.0,
       openSUSE 15.6/16.0 and Ubuntu 22.04/24.04 LTS, and does NOT support Fedora,
-      which is the lab's server standard (lab desks are macOS; wl-stack
-      docs/naming.md). The task PC therefore deviates from the server
-      standard deliberately. UNVERIFIED on hardware until a card is benched (pitfalls P10).
+      which is the only Linux stack wl-stack has (wl-fedora-nvidia, groundwork
+      for its server stacks; wl-stack docs/naming.md). Lab desks are Macs
+      (wl-stack hosts.yaml; its 2026-11-20 machine-classes design). The task PC
+      therefore deviates from that Fedora stack deliberately. UNVERIFIED on hardware until a card is benched (pitfalls P10).
   - name: nidaqmx-python
     where: rig/task
     why: >-
