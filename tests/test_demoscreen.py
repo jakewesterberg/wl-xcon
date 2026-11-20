@@ -469,6 +469,28 @@ def test_each_label_of_the_table_is_drawn():
     assert eye.findall(f"{SVG}g[@class='one-eye']") == []
 
 
+def test_the_demo_screen_labels_no_target_on_a_catch():
+    """An array with no target (`Array.found_by` `"none"`, a catch; the pop-out revision's Task 4)
+    has a place declared where an odd one would be, which nothing is: no object window of it is
+    labeled *target*, before the array is drawn or while it is, and its windows are drawn as any
+    array's. A search's target stays labeled."""
+    catch = Stimulus("ring", at=(0.0, 0.0), looks=replace(RING, among=RING.looks,
+                                                           found_by="none"))
+    trial = replace(TRIAL, states=[
+        State("a", enter=[Show(DOT)], go=[On(After(1.0), "b", do=[Show(catch), Show(GOAL)])]),
+        State("b", go=[On(After(1.0), Outcome.CORRECT)])])
+    for visible in ({"dot": DOT}, {"dot": DOT, "ring": catch}):
+        drawn = _drawn(visible, trial=trial)
+        assert sorted(w.name for w in drawn.windows) == ["fix", "goal", "ring.0", "ring.1",
+                                                         "ring.2"]
+        assert [w.name for w in drawn.windows if w.target] == []
+        (eye,) = _eyes(_svg(drawn, width_px=SMALL))
+        windows = eye.findall(f"{SVG}g[@class='window']")
+        assert [g.get("data-target") for g in windows] == ["false"] * 5
+        assert not any("target" in _words(g) for g in windows)
+    assert [w.name for w in _drawn({"dot": DOT, "ring": SEARCH}).windows if w.target] == ["ring.0"]
+
+
 def test_a_stimulus_shown_to_one_eye_or_with_a_disparity_is_l_or_r():
     """§4.4's table through the stereoscope (§14 item 17): a stimulus shown to one eye is L or R in
     that eye alone; one with a disparity is L and R in each, with its disparity, read from its two

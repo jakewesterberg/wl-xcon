@@ -769,16 +769,34 @@ def _extent(looks, values) -> float:
     return width if math.isfinite(width) and width > 0.0 else OUTLINE_DEG
 
 
+def _targetless(drawn, options, values: dict) -> bool:
+    """Whether an array family has no target on the screen (`drawn_windows`): the array its drawn
+    stimulus shows is found by `"none"`, or, none drawn yet, every placement's is."""
+    def none(looks) -> bool:
+        looks = values.get(looks.name) if isinstance(looks, P) else looks
+        return isinstance(looks, Array) and looks.found_by == "none"
+
+    if drawn is not None:
+        return none(drawn.looks)
+    return bool(options) and all(none(placement.looks) for placement, _ in options)
+
+
 def drawn_windows(world: Tracked) -> "tuple[DrawnWindow, ...]":
     """**`world`'s windows as it judges them now** (§3.9, §14 item 4): each declared window and
     array object window with the center and radius `gaze.Tracked.in_window` compares gaze with on
     this frame -- an array's object windows where the trial placed them, switched with the array in
     `Tracked.display` -- and the eye it is judged for; an array alias's own stand-in left out, never
     drawn at the alias's nominal place, and an array's target's objects flagged, the scoring key.
-    A window the trial's values cannot place is drawn nowhere: the loop raises if a guard asks."""
+    **But an array's with no target** (`Array.found_by` `"none"`, a catch; the pop-out revision's
+    Task 4): its declared place is where an odd one would be, which nothing is, so no object of it
+    is labeled *target* -- while it is drawn so, or, before it is drawn, where each way the trial
+    can draw it is. A window the trial's values cannot place is drawn nowhere: the loop raises if
+    a guard asks."""
     aliases = world._members
-    targets = {name for alias, names in aliases.items() if alias.endswith(".target")
-               for name in names}
+    targetless = {f"{of}.target" for of, options in world._arrays
+                  if _targetless(world._drawn.get(of), options, world._values)}
+    targets = {name for alias, names in aliases.items()
+               if alias.endswith(".target") and alias not in targetless for name in names}
     found = []
     for name, declared in world._windows.items():
         if declared is None or name in aliases:

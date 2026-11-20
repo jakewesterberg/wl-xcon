@@ -358,7 +358,11 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = (), calibration=None)
     null at eccentricity 0** (`geometry.shown_polar`; the PI, 2026-10-30, "0 to 360 everywhere" and
     "Empty at center"), so straight down is 270, never -90. **An array** adds `objects`, each
     object's, in index order, on its true circle about its center (`task.Array.positions`, as the
-    screen places them), and `target`, the index of the object it declares the target. **A
+    screen places them), each with `drawn`, false at a place left empty (a `Blank`), and `target`,
+    the index of the object it declares the target, with `found_by` and `odd_place`: an array with
+    no target (`found_by` `"none"`, a catch) writes `target` null and the index it declares, the
+    place an odd one would hold, as `odd_place`, null on every other array (XC-543; wl-preproc,
+    2026-11-19). **A
     stimulus drawn by per-eye positions** (engine spec §5.4) is drawn at no cyclopean position, so
     those four are null and `left` and `right` give each eye's own, in that eye's frame.
 
@@ -468,6 +472,12 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = (), calibration=None)
                                 own = looks.object_looks(index, values)
                             except _UNREADABLE:
                                 own = None
+                            # **Whether the object was drawn** (XC-543, accepted 2026-11-19):
+                            # false at a place left empty, a `Blank`; null where its look is a
+                            # setting with no value, or cannot be read.
+                            shown = value(own) if isinstance(own, P) else own
+                            object_entry["drawn"] = (None if shown is None
+                                                     else not isinstance(shown, Blank))
                             object_entry["size_deg"] = size_of(own, place)
                             object_entry["light_xy"] = _light_xy(own, values, calibration)
                             object_entry["window_deg"] = None
@@ -499,12 +509,18 @@ def _stimuli(placed: tuple, values: dict, windows: tuple = (), calibration=None)
         # whose objects carry theirs.
         entry["light_xy"] = None if array else _light_xy(looks, values, calibration)
         if array:
-            entry["target"] = None
+            # **What names its target, and the place an odd one would hold** (XC-543, wl-preproc's
+            # answer of 2026-11-19): an array with no target (`found_by` "none", a catch) writes
+            # `target` null and the index it declares as `odd_place`; every other array its target
+            # and `odd_place` null. Both keys always written, as `size_deg` is.
+            entry["found_by"] = looks.found_by
+            entry["target"] = entry["odd_place"] = None
+            place = "odd_place" if looks.found_by == "none" else "target"
             if unset(looks.target):
                 reasons.append(why(unset(looks.target)))
             else:
                 try:
-                    entry["target"] = int(value(looks.target))
+                    entry[place] = int(value(looks.target))
                 except _UNREADABLE as fault:
                     reasons.append(f"its target could not be read ({fault})")
         entry["unresolved"] = "; ".join(dict.fromkeys(reasons)) or None

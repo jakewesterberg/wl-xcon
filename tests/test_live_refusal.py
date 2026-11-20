@@ -164,10 +164,12 @@ def _broken(monkeypatch) -> None:
     start as it does: a live change always holds a name (`held`), a run's start none."""
     real = taskd.impossible
 
-    def broken(task, blocks, values, *, held=frozenset(), ranges=None, forms=None):
+    def broken(task, blocks, values, *, held=frozenset(), ranges=None, forms=None,
+               specials="set"):
         if held:
             raise ZeroDivisionError("division by zero")
-        return real(task, blocks, values, held=held, ranges=ranges, forms=forms)
+        return real(task, blocks, values, held=held, ranges=ranges, forms=forms,
+                    specials=specials)
 
     monkeypatch.setattr(taskd, "impossible", broken)
 

@@ -361,6 +361,29 @@ def test_a_stimulus_whose_appearance_is_a_setting_has_its_arrays_objects_only_wh
         _is_at(drawn, x, y)
 
 
+def test_an_array_with_no_target_writes_target_null_and_its_odd_place(tmp_path):
+    """XC-543, as wl-preproc answered it on 2026-11-19: an array found by `"none"` (a catch) writes
+    `target: null` and the index it declares, where an odd one would be, under its own key
+    `odd_place`; every other array writes its target and `odd_place: null`, the key always
+    written, as `size_deg` and `window_deg` are. Each array entry says what names its target
+    (`found_by`), and each object whether it was drawn (`drawn`), false at a place left empty."""
+    from wl_xcon.task import Array, Blank, Disc, P, Stimulus
+
+    catch = Stimulus("catch", at=(0.0, 0.0), looks=Array(
+        n=3, radius=4.0, target=P("odd"), looks=Blank(), among=Disc(size=1.0), found_by="none"))
+    search = Stimulus("search", at=(0.0, 0.0), looks=Array(n=3, radius=4.0, target=P("odd")))
+    cued = Stimulus("cued", at=(0.0, 0.0), looks=Array(n=3, radius=4.0, found_by="cue"))
+    none, look, cue = _line(tmp_path, (_shown(catch, 2), _shown(search, 2), _shown(cued, 2)),
+                            {"odd": 1})
+    assert (none["found_by"], none["target"], none["odd_place"]) == ("none", None, 1)
+    assert [each["drawn"] for each in none["objects"]] == [True, False, True]
+    assert (look["found_by"], look["target"], look["odd_place"]) == ("look", 1, None)
+    assert [each["drawn"] for each in look["objects"]] == [True, True, True]
+    assert (cue["found_by"], cue["target"], cue["odd_place"]) == ("cue", 0, None)
+    assert "odd_place" not in _line(tmp_path / "plain", (_shown(Stimulus(
+        "dot", at=(0.0, 0.0), looks=Disc()), 2),))[0]
+
+
 def test_each_look_drawn_in_a_color_sets_light_writes_its_light_xy(tmp_path):
     """**`light_xy`** (accepted by wl-preproc 2026-11-18 as named): each `stimuli[]` entry and each
     of an array's `objects[]` has the key, always: the CIE 1931 `[x, y]` of the light a color set's

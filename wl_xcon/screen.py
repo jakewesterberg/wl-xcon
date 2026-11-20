@@ -405,11 +405,16 @@ def _items(stimulus, order, lights, geometry, onset) -> list[Item]:
                 return rings[center][i]
             return place
 
-        return [
-            _item(stimulus, f"{stimulus.name}.{i}", (order, i), looks.object_looks(i, values),
-                  object_at(i), lights, geometry, onset)
-            for i in range(int(_value(looks.n, values)))
-        ]
+        # **A place left empty** (a `Blank` among its looks; the pop-out revision's Task 4) draws
+        # no item, as a `Blank` stimulus draws none; its neighbors stay where they are.
+        drawn = []
+        for i in range(int(_value(looks.n, values))):
+            own = looks.object_looks(i, values)
+            if isinstance(_value(own, values) if isinstance(own, P) else own, Blank):
+                continue
+            drawn.append(_item(stimulus, f"{stimulus.name}.{i}", (order, i), own, object_at(i),
+                               lights, geometry, onset))
+        return drawn
     return [_item(stimulus, stimulus.name, (order, 0), looks, lambda center: center, lights,
                   geometry, onset)]
 

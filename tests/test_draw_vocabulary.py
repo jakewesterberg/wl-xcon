@@ -167,8 +167,8 @@ def test_an_array_says_what_names_its_target_its_look_by_default():
     (`"cue"`): something else the trial shows names it -- a cue, a remembered sample, a place --
     as in a cued two-choice design, whose target may look like its distractors. At its default it
     is left out of what the hash reads, so every task that shows an array hashes as before; a cued
-    array's hash moves."""
-    assert FOUND_BY == ("look", "cue")
+    array's hash moves. **No target** (`"none"`, the pop-out revision's Task 4): a catch."""
+    assert FOUND_BY == ("look", "cue", "none")
     assert [spec.name for spec in dataclasses.fields(Array)][-1] == "found_by"
     assert Array().found_by == "look"
     cued = Array(n=2, found_by="cue")

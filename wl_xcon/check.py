@@ -64,6 +64,7 @@ from wl_xcon.task import (
     After,
     Array,
     Balanced,
+    Blank,
     Block,
     ByCriterion,
     Condition,
@@ -98,6 +99,7 @@ from wl_xcon.task import (
     SIZED_LOOKS,
     SPECIAL_UNIT,
     Show,
+    Special,
     Shuffled,
     Staircase,
     Steps,
@@ -735,10 +737,13 @@ def at_values(task: Task, values) -> Task:
 #: so without them a trainer brightening the colors live was told nothing (the design's third
 #: anti-goal, "a color picked on the page that differs from what the rig draws, with nothing saying
 #: so"). Each names its set (`Finding.subjects`), so a set already warned of at the values in force
-#: is not warned of again for another luminance (`taskd.Session._laid_out`).
+#: is not warned of again for another luminance (`taskd.Session._laid_out`). **The special trials'
+#: percentages adding past 100** (`specials-over-100`) are a sum and no layout, judged here because
+#: these are the checks run at the values set (the pop-out revision's plan, Task 4), so shares set
+#: past 100 live are warned when a change makes them so (`_over_100`).
 LAYOUT = ("stimulus-off-screen", "overlapping-windows", "crowded-array",
           "answer-window-reaches-objects", "window-inside-object", "objects-touch",
-          "scaled-small", "color-set-desaturated", "color-set-unreachable")
+          "scaled-small", "color-set-desaturated", "color-set-unreachable", "specials-over-100")
 
 #: **A size scaled by eccentricity that the center leaves small** (the console settings design's
 #: §5: "eccentricity 0 gives size 0, so the load check warns for a scaled stimulus at or near the
@@ -838,8 +843,9 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
 
     **A size scaled by eccentricity** (a `task.Scaled` value; the console settings design's §5) is
     read as the sizes it gives at each place it is drawn, its center and nearness warned and a size
-    past its bound refused (`_scaled_sizes`), `fixed` giving each such setting's fixed value. Run
-    between trials, never in a frame."""
+    past its bound refused (`_scaled_sizes`), `fixed` giving each such setting's fixed value. **And
+    the special trials' percentages past 100** at the values (`_over_100`; `specials-over-100`), a
+    warning. Run between trials, never in a frame."""
     values, scaled = _scaled_sizes(task, dict(values), fixed or {})
     pinned, unstarted = _at_start(at_values(task, values))
     own, _ = _at_start(task)
@@ -865,6 +871,9 @@ def laid_out(task: Task, values, *, allocation: Allocation = PROVISIONAL,
         if _finite(most) and most > longest:
             findings.append(_longer(name, most, longest))
     findings += [finding for finding in scaled if not _among(finding, findings)]
+    over = _over_100(task, values)
+    if over is not None:
+        findings.append(over)
     del deployment  # read by no structure's check: a head's is the task's (`_head_faults`)
     return findings
 
@@ -2549,18 +2558,37 @@ def _special_faults(task: Task) -> list[Finding]:
             findings.append(Finding(BAD_SPECIAL, (
                 f"{named} takes its percentage from {name!r}, which is {_range_said(param)}: a "
                 f"percentage of trials is a setting in {SPECIAL_UNIT} from 0 to 100")))
-    shares = [(special, special_share(getattr(declared.get(special.share.name), "start", None)))
-              for special in task.specials]
+    over = _over_100(task, {})
+    return findings + ([over] if over is not None else [])
+
+
+def _over_100(task: Task, values: dict) -> "Finding | None":
+    """**`SPECIALS_OVER_100` where the special kinds' percentages add past 100**, each read from
+    `values` over the task's starts as the draw reads it (`special_share`), or `None`: at load
+    (`_special_faults`, `values` empty) and at the values set (`laid_out`; the plan's Task 4). Said
+    "at the task's starts" where every percentage is its start, so the run's pre-flight at the
+    task's own starts says the load's sentence, once, and "at the values set" otherwise. Its
+    subjects are each share's setting, so a change that keeps them past 100 is no new warning
+    (`taskd.Session._laid_out`)."""
+    declared = {param.name: param for param in task.params}
+    shares, started = [], True
+    for special in task.specials:
+        name = special.share.name
+        start = getattr(declared.get(name), "start", None)
+        value = values.get(name, start)
+        started = started and value == start
+        shares.append((special, special_share(value)))
     total = sum(share for _, share in shares)
-    if total > 100:
-        each = ", ".join(f"{special.kind} {share:g} from {special.share.name!r}"
-                         for special, share in shares)
-        findings.append(Finding(SPECIALS_OVER_100, (
-            f"the special trials' percentages add to {total:g} at the task's starts ({each}), "
-            f"past 100: each kind is then drawn in proportion to its percentage, and no trial is "
-            f"normal"), blocking=False, accepted_in=SESSION_KINDS,
-            subjects=tuple(f"setting {special.share.name!r}" for special, _ in shares)))
-    return findings
+    if not total > 100:
+        return None
+    each = ", ".join(f"{special.kind} {share:g} from {special.share.name!r}"
+                     for special, share in shares)
+    where = "at the task's starts" if started else "at the values set"
+    return Finding(SPECIALS_OVER_100, (
+        f"the special trials' percentages add to {total:g} {where} ({each}), past 100: each kind "
+        f"is then drawn in proportion to its percentage, and no trial is normal"),
+        blocking=False, accepted_in=SESSION_KINDS,
+        subjects=tuple(f"setting {special.share.name!r}" for special, _ in shares))
 
 
 def unpooled(task: Task, values: dict) -> "list[tuple[str, str]]":
@@ -2739,21 +2767,49 @@ def _found_by_faults(task: Task) -> list[Finding]:
     otherwise, `bad-array`: its word decides whether a target that can look like its distractors,
     or looks that swap, are refused or only warned (`impossible`), so a misspelling would quietly
     soften a pop-out search's refusal. Every array a `Show` or an `Update` gives, as written or
-    among a setting's choices (`task.array_actions`), each stimulus and word said once."""
+    among a setting's choices (`task.array_actions`), each stimulus and word said once.
+
+    **And an array with no target scored by its target** (`"none"`, a catch; the pop-out revision
+    design's §8; its plan's Task 4): a structure that shows one and scores a `SaccadeTo` or a
+    `Hold` on its family's target (`<name>.target`), as a guard or what a timer runs from, is
+    refused, once for each state, structure and guard: a catch's right answer is no look at an
+    object, and its target's place is where an odd one would be, which nothing is."""
     found: list[Finding] = []
     said: set[tuple] = set()
-    for structure in task.structures.values():
+    for label, structure in task.structures.items():
         if not isinstance(structure, Trial):
             continue
+        targetless: list[str] = []
         for _, name, _, array in array_actions(structure):
             word = array.found_by
+            if word == "none" and name not in targetless:
+                targetless.append(name)
             if word in FOUND_BY or (name, repr(word)) in said:
                 continue
             said.add((name, repr(word)))
             found.append(Finding("bad-array", (
                 f"array {name!r} is found by {word!r}, and an array's found_by is one of "
                 f"{', '.join(map(repr, FOUND_BY))}: 'look', its target the odd one out by its "
-                f"look, or 'cue', something else the trial shows naming it")))
+                f"look, 'cue', something else the trial shows naming it, or 'none', no target, "
+                f"a catch")))
+        for name in targetless:
+            for state in structure.states:
+                for edge in state.go:
+                    for guard in (edge.guard, getattr(edge.guard, "since", None)):
+                        if not (isinstance(guard, (SaccadeTo, Hold))
+                                and guard.window == f"{name}.target"):
+                            continue
+                        key = (label, state.name, repr(guard))
+                        if key in said:
+                            continue
+                        said.add(key)
+                        found.append(Finding("bad-array", (
+                            f"array {name!r} has no target (found_by 'none'), and state "
+                            f"{state.name!r} of structure {label!r} scores "
+                            f"{type(guard).__name__}({guard.window!r}): a catch's right answer "
+                            f"is no look at an object, and its target's place holds no odd one; "
+                            f"score the catch by its fixation hold, or say the array's target is "
+                            f"found by its look or a cue")))
     return found
 
 
@@ -2823,6 +2879,7 @@ def impossible(
     ranges: dict | None = None,
     cued: bool = False,
     forms: dict | None = None,
+    specials: str = "set",
 ) -> list[Finding]:
     """**The trials no animal can get right among `blocks`**, refused, `IMPOSSIBLE` (engine build
     C3's spec §9; the PI, 2026-10-30, Q10: "the check judges each concrete combination (per
@@ -2858,25 +2915,65 @@ def impossible(
       sentence said of several conditions is one finding naming each (`subjects`, each
       `"block: condition"`).
 
+    - **Each special kind's structure too** (`task.Special`; TSK-69 revised by the pop-out
+      revision's Task 4), on every condition playing the default structure -- the trials a kind
+      can take the place of (`taskd.Session._special`) -- with that condition's sources, each
+      sentence naming the kind and its structure. **`specials`** says which: `"set"`, at a run's
+      start and live, the kinds whose percentage in `values` is above 0 (`special_share`), so a
+      kind at 0, drawn on no trial, blocks nothing and raising it is judged when it is set;
+      `"every"`, at load, each kind whatever its percentage. A kind the task cannot play
+      (`bad-special`) is not judged here. An array with no target (`Array.found_by` `"none"`, a
+      catch) is judged by neither look check: its objects may all look alike, which is the catch.
+
     A setting nothing gives is not judged (a run's pre-flight refuses it), nor a draw that cannot
     be drawn (`_draw_faults` refuses it), nor a block or condition that is not the shape its
     class declares (`_plan_faults` refuses it); nothing in a task's declarations raises here."""
+    if specials not in ("set", "every"):
+        raise ValueError(f"specials is 'set' or 'every', not {specials!r}")
     declared = {param.name: param for param in task.params}
     changed = ranges if isinstance(ranges, dict) else {}
     formed = forms if isinstance(forms, dict) else {}
+    played = _specials_judged(task, values, specials)
     findings: list[Finding] = []
     for block in blocks:
         if isinstance(block, Block):
             findings += _impossible_in(task, expanded(block), values, held, changed, declared,
-                                       cued, formed)
+                                       cued, formed, played)
     return findings
+
+
+def _specials_judged(task: Task, values: dict, specials: str) -> "list[Special]":
+    """**The special kinds `impossible` judges** (its `specials`): each the task can play -- a
+    structure the task has, a `Trial`, never its default (`bad-special` refuses the rest) -- and,
+    for `"set"`, whose percentage in `values` is above 0 (`special_share`, as the draw reads it)."""
+    return [special for special in getattr(task, "specials", ()) or ()
+            if isinstance(special, Special) and special.structure != task.default
+            and isinstance(task.structures.get(special.structure), Trial)
+            and (specials == "every"
+                 or special_share(values.get(special.share.name)) > 0)]
+
+
+def _played_by(task: Task, condition: Condition,
+               specials: "list[Special]") -> "list[tuple[str, Trial]]":
+    """**The structures a trial of `condition` can play**, each with how a sentence names it: the
+    one it names, or the task's default; and where that is the default, each special kind's
+    (`specials`), named by its kind and structure (`_specials_judged`)."""
+    name = condition.structure or task.default
+    structure = task.structures.get(name)
+    played = [("", structure)] if isinstance(structure, Trial) else []
+    if name == task.default:
+        played += [(f"special kind {special.kind!r} (structure {special.structure!r}): ",
+                    task.structures[special.structure]) for special in specials]
+    return played
 
 
 def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, ranges: dict,
                    declared: dict[str, Param], cued: bool = False,
-                   forms: dict | None = None) -> list[Finding]:
+                   forms: dict | None = None,
+                   specials: "list[Special] | None" = None) -> list[Finding]:
     """`impossible` for one block, its factorial expanded: a look check's finding in an array a
-    cue names the target of (`_cued`) a `CUED` warning, said only with `cued`."""
+    cue names the target of (`_cued`) a `CUED` warning, said only with `cued`; each special kind
+    in `specials` judged on each condition playing the default structure (`_played_by`)."""
     conditions = [
         condition for condition in block.conditions
         if isinstance(condition, Condition) and isinstance(condition.values, dict)
@@ -2887,29 +2984,21 @@ def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, rang
     looked: dict[str, tuple] = {}  # `_same_looks` once per distinct set of arrays
     pairs: dict[str, tuple] = {}  # each distinct pair of looks at two objects, and its conditions
     for condition in conditions:
-        structure = task.structures.get(condition.structure or task.default)
-        if not isinstance(structure, Trial):
+        played = _played_by(task, condition, specials or [])
+        if not played:
             continue
         sources = _sources(task, block, condition, values, held, ranges, declared, forms)
-        arrays = _arrays(structure, sources)
-        key = repr([(name, [part for part in form.parts if part[0] in _LOOKED])
-                    for name, _, form in arrays])
-        if key not in looked:
-            looked[key] = _same_looks(arrays, sources)
-        for sentence in _cut_off(structure, sources) + looked[key][0]:
-            said.setdefault(sentence, []).append(condition.name)
-        for sentence in looked[key][1]:
-            warned.setdefault(sentence, []).append(condition.name)
-        for name, array, form in arrays:
-            parts = dict(form.parts)
-            if _counts(parts["n"], 2, 2) is not True:
-                continue
-            key = repr((parts["looks"], parts["among"], _cued(array)))
-            if key not in pairs:
-                pairs[key] = (parts["looks"], parts["among"], [],
-                              _settings_said((array.looks, array.among), sources), _cued(array))
-            if condition.name not in pairs[key][2]:
-                pairs[key][2].append(condition.name)
+        for named, structure in played:
+            arrays = _arrays(structure, sources)
+            key = repr([(name, [part for part in form.parts if part[0] in _LOOKED])
+                        for name, _, form in arrays])
+            if key not in looked:
+                looked[key] = _same_looks(arrays, sources)
+            for sentence in _cut_off(structure, sources) + looked[key][0]:
+                said.setdefault(named + sentence, []).append(condition.name)
+            for sentence in looked[key][1]:
+                warned.setdefault(named + sentence, []).append(condition.name)
+            _pairs_of(arrays, sources, condition, pairs)
     findings = [
         Finding(IMPOSSIBLE, f"block {block.name!r}, {_conditions_said(names)}: {sentence}",
                 subjects=tuple(f"{block.name}: {name}" for name in names))
@@ -2950,6 +3039,30 @@ def _impossible_in(task: Task, block: Block, values: dict, held: frozenset, rang
                 f"named by a cue; check that one is shown"),
                 blocking=False, accepted_in=SESSION_KINDS, subjects=subjects))
     return findings
+
+
+def _pairs_of(arrays: list[tuple[str, Array, _Made]], sources: dict[str, tuple],
+              condition: Condition, pairs: dict[str, tuple]) -> None:
+    """**Each distinct pair of looks a two-object array of `arrays` can show**, added to `pairs`
+    with `condition` among its conditions, for `_swapped`; an array with no target (`_targetless`)
+    has none to swap, and is left out."""
+    for name, array, form in arrays:
+        parts = dict(form.parts)
+        if _targetless(array) or _counts(parts["n"], 2, 2) is not True:
+            continue
+        key = repr((parts["looks"], parts["among"], _cued(array)))
+        if key not in pairs:
+            pairs[key] = (parts["looks"], parts["among"], [],
+                          _settings_said((array.looks, array.among), sources), _cued(array))
+        if condition.name not in pairs[key][2]:
+            pairs[key][2].append(condition.name)
+
+
+def _targetless(array: object) -> bool:
+    """Whether `array` has no target (`Array.found_by` `"none"`, a catch; the pop-out revision
+    design's §8): its objects may all look alike, which is the catch, so neither look check judges
+    it."""
+    return getattr(array, "found_by", "look") == "none"
 
 
 def _cued(array: object) -> bool:
@@ -3311,7 +3424,7 @@ def _same_looks(arrays: list[tuple[str, Array, _Made]],
     warned: list[str] = []
     for name, array, form in arrays:
         parts = dict(form.parts)
-        if _counts(parts["n"], 2, math.inf) is not True:
+        if _targetless(array) or _counts(parts["n"], 2, math.inf) is not True:
             continue
         if _alike(parts["looks"], parts["among"], one=True) is not True:
             continue
@@ -3414,10 +3527,11 @@ def _impossible_faults(task: Task) -> list[Finding]:
     starts = {param.name: param.start for param in task.params if param.start is not None}
     plain = Block("session", [Condition("session", {}, target=1)])
     found = [dataclasses.replace(finding, detail=f"the plain run: {finding.detail}")
-             for finding in impossible(task, [plain], starts, cued=True)]
+             for finding in impossible(task, [plain], starts, cued=True, specials="every")]
     for name, plan in task.plans.items():
         found += [dataclasses.replace(finding, detail=f"plan {name!r}: {finding.detail}")
-                  for finding in impossible(task, plan.blocks, starts, cued=True)]
+                  for finding in impossible(task, plan.blocks, starts, cued=True,
+                                            specials="every")]
     return found + _little_time_faults(task, starts)
 
 
@@ -3428,8 +3542,11 @@ def _little_time_faults(task: Task, starts: dict) -> list[Finding]:
     expanded, at the task's starting values, each condition's values and draws as `impossible`
     reads them (`_sources`); one finding per sentence, naming each `"block: condition"` it is
     true of. Only at load: a live change is judged for what no animal can get right
-    (`impossible`), never warned for this."""
+    (`impossible`), never warned for this. **Each special kind's structure too**, whatever its
+    percentage, on each condition playing the default structure (`_played_by`; TSK-69 revised),
+    each sentence naming the kind."""
     declared = {param.name: param for param in task.params}
+    specials = _specials_judged(task, starts, "every")
     blocks = [("the plain run", Block("session", [Condition("session", {}, target=1)]))]
     blocks += [(f"plan {name!r}", block) for name, plan in task.plans.items()
                for block in plan.blocks]
@@ -3442,13 +3559,14 @@ def _little_time_faults(task: Task, starts: dict) -> list[Finding]:
             if not (isinstance(condition, Condition) and isinstance(condition.values, dict)
                     and isinstance(condition.structure, (str, type(None)))):
                 continue
-            structure = task.structures.get(condition.structure or task.default)
-            if not isinstance(structure, Trial):
+            played = _played_by(task, condition, specials)
+            if not played:
                 continue
             sources = _sources(task, block, condition, starts, frozenset(), {}, declared)
-            for sentence in _little_time(structure, sources):
-                said.setdefault(f"{where}: {sentence}", []).append(
-                    f"{block.name}: {condition.name}")
+            for named, structure in played:
+                for sentence in _little_time(structure, sources):
+                    said.setdefault(f"{where}: {named}{sentence}", []).append(
+                        f"{block.name}: {condition.name}")
     return [Finding("little-time-to-answer", detail, blocking=False, accepted_in=SESSION_KINDS,
                     subjects=tuple(dict.fromkeys(names)))
             for detail, names in said.items()]
@@ -7155,7 +7273,8 @@ def _crowded_arrays(trial: Trial) -> list[Finding]:
     settings crowd it. A set size sent past its range that draws the objects on one another,
     windows or none, is refused (`_overlapping_objects`). **Every array a `Show` or an `Update`
     gives the family's stimulus** (`_shown_arrays`): since XC-402 the windows follow an `Update`
-    that changes the array (the XC-402 review, I1).
+    that changes the array (the XC-402 review, I1). **A place left empty** (a `Blank` among its
+    looks) is no object, as a `Blank` stimulus is none (`_neighbors`).
     """
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
@@ -7182,7 +7301,7 @@ def _crowded(declared: ObjectWindows, array: Array, params: dict[str, Param]) ->
         return []  # refused at load (XC-426; `_block_faults`, XC-273)
     most = _whole(_span(array.n, params, 0.0)[1])
     tightest = _span(array.radius, params, 0.0)[0]
-    if most < 2:
+    if most < 2 or not _neighbors(array, most):
         return []
     spacing = ring_spacing_deg(tightest, most)
     if spacing >= 2.0 * widest:
@@ -7429,7 +7548,8 @@ def _objects_touch(trial: Trial) -> list[Finding]:
     objects or more -- so they touch or overlap on the screen, whatever their windows. A set size
     far past where they are drawn on one another was refused as past its highest
     (`_overlapping_objects`); every limit that stays is hard since §4, so no open range reaches
-    that refusal, and touching is said here."""
+    that refusal, and touching is said here. **A place left empty** (a `Blank` among its looks) is
+    no object (`_neighbors`): with the odd one's empty, distractors neighbor distractors alone."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for name, array in _shown_arrays(trial):
@@ -7440,21 +7560,29 @@ def _objects_touch(trial: Trial) -> list[Finding]:
         # `_overlapping_objects` reads it (the final re-review's m1).
         ring = min(0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
                    for low, high in _intervals(array.radius, params, 0.0))
-        target, among = _widest(array.looks, params), _widest(array.among, params)
-        if not (math.isfinite(most) and most >= 2) or target is None or among is None:
+        if not (math.isfinite(most) and most >= 2) or not _neighbors(array, most):
             continue
-        mean = (target[0] + among[0]) / 2.0
-        if most >= 3:
-            mean = max(mean, among[0])
+        among = _widest(array.among, params)
+        if _drawn_target(array):
+            target = _widest(array.looks, params)
+            if target is None or among is None:
+                continue
+            mean = (target[0] + among[0]) / 2.0
+            if most >= 3:
+                mean = max(mean, among[0])
+            given = _by(among[1]) or _by(target[1])
+        else:  # the odd one's place empty: distractors neighbor distractors alone
+            if among is None:
+                continue
+            mean, given = among[0], _by(among[1])
         spacing = ring_spacing_deg(ring, most)
         if spacing >= mean:
             continue
         finding = Finding("objects-touch", (
             f"array {name!r} can put {int(most)} objects{_by(array.n)} on a {ring:g}° ring"
             f"{_by(array.radius)}, {spacing:.2f}° apart center to center, closer than their sizes' "
-            f"mean ({mean:g}°{_by(among[1]) or _by(target[1])}), so neighbors touch or overlap on "
-            f"the screen"), blocking=False, accepted_in=SESSION_KINDS,
-            subjects=(f"array {name!r}",))
+            f"mean ({mean:g}°{given}), so neighbors touch or overlap on the screen"),
+            blocking=False, accepted_in=SESSION_KINDS, subjects=(f"array {name!r}",))
         if not _among(finding, findings):
             findings.append(finding)
     return findings
@@ -7482,19 +7610,21 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
     object the array can show, so that the objects are drawn on one another on the tightest ring
     whatever else the console sets (`_narrowest`). The sentence names the fix, the most that ring
     keeps apart (`_most_apart`). A set size sent below its lowest draws fewer objects, further
-    apart, and is never refused here."""
+    apart, and is never refused here. **A place left empty** (a `Blank` among its looks) is no
+    object (`_neighbors`), so its size is not the smallest object's."""
     params = {p.name: p for p in trial.params}
     findings: list[Finding] = []
     for name, array in _shown_arrays(trial):
         if not (isinstance(array.n, P) and array.n.name in raised) or not _counted(array.radius):
             continue  # a ring radius of the wrong kind is refused at load (XC-273)
         n = _whole(raised[array.n.name])
-        if n < 2:
+        if n < 2 or not _neighbors(array, n):
             continue
         ring = min(0.0 if low <= 0.0 <= high else min(abs(low), abs(high))
                    for low, high in _intervals(array.radius, params, 0.0))
         spacing = ring_spacing_deg(ring, n)
-        size = min(_narrowest(array.looks, params), _narrowest(array.among, params))
+        size = min(_narrowest(array.looks, params) if _drawn_target(array) else math.inf,
+                   _narrowest(array.among, params))
         if spacing >= size:
             continue
         most = _most_apart(ring, size)
@@ -7513,6 +7643,23 @@ def _overlapping_objects(trial: Trial, raised: dict[str, float]) -> list[Finding
             f"size only adds work, and far past it the run stalls there, a stop, a pause and the "
             f"out-of-cage limit unheard until it is built")))
     return findings
+
+
+def _drawn_target(array: Array) -> bool:
+    """Whether an array's target's place draws an object: not where its look is a `Blank`, a place
+    left empty (the odd one's, on a catch; the pop-out revision design's §4)."""
+    return not isinstance(array.looks, Blank)
+
+
+def _neighbors(array: Array, most: float) -> bool:
+    """**Whether an array of at most `most` objects draws two side by side** (`objects-touch`,
+    `crowded-array`, `overlapping-objects`), **a place left empty being no object**, as a `Blank`
+    stimulus is none: its distractors' look a `Blank`, only its target is drawn; its target's, its
+    distractors neighbor one another only where there are three places or more. Neither empty, any
+    two places neighbor."""
+    if isinstance(array.among, Blank):
+        return False
+    return _drawn_target(array) or most >= 3
 
 
 def _most_apart(ring: float, size: float) -> int:

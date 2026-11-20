@@ -1085,8 +1085,9 @@ class RDS(Appearance):
 #: What tells the animal which object of an `Array` is its target (`Array.found_by`; the PI,
 #: 2026-10-31, on the engine C3 plan's Appendix B, item 17, "Refuse only odd-one-out tasks
 #: (Recommended)"): `"look"`, its look alone, the odd one out; or `"cue"`, something else the trial
-#: shows -- a cue, a remembered sample, a place.
-FOUND_BY = ("look", "cue")
+#: shows -- a cue, a remembered sample, a place; or `"none"`, no target at all: a catch, whose right
+#: answer is no look at any object (the pop-out revision design's §8; its plan's Task 4).
+FOUND_BY = ("look", "cue", "none")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1126,6 +1127,15 @@ class Array(Appearance):
     #: `"cue"`: something else the trial shows names it -- a cue, a remembered sample, a place --
     #: as in a cued two-choice task, whose target and distractor can look alike by design; the
     #: load then warns that a cue must name the target, and refuses neither (`cued-target`).
+    #: `"none"`: **no target**, a catch (the pop-out revision design's §8): its objects may all
+    #: look alike, since that is the catch, so neither look check judges it, and a structure
+    #: scoring a `SaccadeTo` or a `Hold` on its family's target is refused at load (`bad-array`).
+    #: Its `target` is still the place an odd one would hold, which the record writes as
+    #: `odd_place`.
+    #:
+    #: **A place left empty** is a `Blank` among its looks (`looks` or `among`): the screen draws
+    #: no object there, the record writes that object `drawn: false`, and the layout checks read no
+    #: object there.
     found_by: str = "look"
 
     def positions(

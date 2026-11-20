@@ -2420,6 +2420,10 @@ class Session:
         offered leaves, `_shaping_ahead`; the console settings design's §8): its block as it plays
         (`_full_judged`), beside the plan's, which the run goes back to.
 
+        **And each special kind whose percentage the change leaves above 0** (`check.impossible`'s
+        `specials="set"`; TSK-69 revised by the pop-out revision's Task 4): a kind at 0 is drawn on
+        no trial, so it blocks nothing, and raising its percentage is judged when it is set.
+
         Called once per change (`_impossible`, `_hand_back`, `_range`, `_shaping`, and `_revert`
         for the whole of a revert at once): `check.impossible` judges each distinct combination
         once.
@@ -2448,7 +2452,7 @@ class Session:
             kept = self._kept_trials()
             blocks = [*self._played.blocks, *kept]
             found = impossible(self._task, self._played.blocks, values, held=frozenset(held),
-                               ranges=drawn, forms=formed)
+                               ranges=drawn, forms=formed, specials="set")
             if (self._shaping_ahead() if shaping is None else shaping) == "full":
                 made = self._full_judged()
                 if made is not None:
@@ -2456,10 +2460,10 @@ class Session:
                     found += [finding for finding in impossible(
                         self._task, [block],
                         {**values, **{n: v for n, v in base.items() if n not in held}},
-                        held=frozenset(held), ranges=drawn, forms=formed)
+                        held=frozenset(held), ranges=drawn, forms=formed, specials="set")
                         if not _among(finding, found)]
             waiting = impossible(self._task, kept, values, held=frozenset(held), ranges=drawn,
-                                 forms=formed)
+                                 forms=formed, specials="set")
             if self.paused_at is None:
                 # The next trial is drawn before what is offered applies, from the draws applied
                 # now, and a repeat of it keeps its `same` values under the change: judged so too.
@@ -2469,7 +2473,8 @@ class Session:
                           and (draw if draw is not None else applied[key]).repeat == SAME}
                 if before:
                     waiting += impossible(self._task, blocks, values, held=frozenset(held),
-                                          ranges={**drawn, **before}, forms=formed)
+                                          ranges={**drawn, **before}, forms=formed,
+                                          specials="set")
             waiting = [finding for at, finding in enumerate(waiting)
                        if finding not in found and finding not in waiting[:at]]
             if not found and not waiting:

@@ -662,11 +662,11 @@ def test_an_arrays_found_by_is_its_look_or_a_cue():
         task = _aimed(direction, looks=Array(n=4, radius=2.0, found_by=found_by))
         return [f.detail for f in check_task(task) if f.code == "bad-array"]
 
-    assert refused("look") == refused("cue") == []
+    assert refused("look") == refused("cue") == refused("none") == []
     assert refused("cued") == [
-        "array 's' is found by 'cued', and an array's found_by is one of 'look', 'cue': 'look', "
-        "its target the odd one out by its look, or 'cue', something else the trial shows naming "
-        "it"]
+        "array 's' is found by 'cued', and an array's found_by is one of 'look', 'cue', 'none': "
+        "'look', its target the odd one out by its look, 'cue', something else the trial shows "
+        "naming it, or 'none', no target, a catch"]
 
 
 def test_a_designed_orders_again_at_once_is_true_or_false():

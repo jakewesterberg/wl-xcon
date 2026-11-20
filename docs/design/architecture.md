@@ -641,8 +641,8 @@ scaled size over the sizes it gives where it is drawn (`check._scaled_sizes`, `t
 a stimulus straight ahead is not drawn, and one drawn smaller than its fixed size says both
 (`scaled-small`, a warning); a size past its declared bound at some object is refused
 (`past-limit`); a window ratio below 1 is `window-inside-object`. Each trial line writes each
-stimulus's `size_deg` and each array object's `size_deg` and `window_deg` (`record._stimuli`), the
-scaling itself as its setting's `params` value, its `drawn` the form row's id, and a block end's
+stimulus's `size_deg` and each array object's `size_deg`, `window_deg` and `drawn`
+(`record._stimuli`), the scaling itself as its setting's `params` value, its `drawn` the form row's id, and a block end's
 `varied` a `{"by": "scaled", "from", "factor"}`; the card says what each object gets in degrees
 (`ParamRow.gives`), all as wl-preproc was told (XC-513, group 2).
 
@@ -806,6 +806,19 @@ condition's count, **and steps no staircase** (the PI's "Only normal trials move
 `stepping` apart in `Session.run`, `went_on` stepping only on a normal line). Each line writes
 `trial_kind` (`"normal"`, the kind, or null for a task declaring none) and `stepped`
 (`_Climb.step`'s answer, null where no staircase runs), and the start row `specials` (XC-543).
+**A catch's array has no target** (`Array.found_by="none"`, one of `task.FOUND_BY`; the pop-out
+revision's Task 4, its design's §8): neither look check judges it, since its objects may all look
+alike, and a structure scoring a `SaccadeTo` or a `Hold` on its family's target is refused
+(`bad-array`); **a place left empty** is a `Blank` among an array's looks, drawn as no item
+(`screen._items`), no object to the layout checks (`check._neighbors`) and recorded `drawn: false`
+on its `objects[]` entry. Each array entry writes `found_by`, and a `"none"` array `target: null`
+with the declared place as `odd_place` (null on every other array; XC-543, wl-preproc 2026-11-19).
+**Each special kind's structure is judged for what no animal can get right** (TSK-69 revised;
+`check.impossible`'s `specials`) on every condition playing the default structure: each kind at
+load, whatever its percentage; at a run's start and live (`Session._possible`), each kind above 0,
+so raising one is judged when it is set. Percentages set past 100 live are a warning on the feed
+(`specials-over-100`, one of `check.LAYOUT`, `check._over_100`). The demo screen labels no
+*target* on a catch's array (`pointer.drawn_windows`).
 **Every number in a staircase
 or a bar may be a setting** (the fix round, 2026-11-07; the PI, "everything should be adjustable in
 the console"; TSK-75): a staircase's `down` and `up` and its levels by a step (`task.Steps`), read
