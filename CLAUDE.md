@@ -53,8 +53,9 @@ These conventions bind every session (human- or AI-driven) working in this repo.
   cannot catch this class of error: it checks that a published name resolves to one
   publisher, never that the description is true.
 - **Registry over README for lifecycle.** A package's stage is what
-  `wl-orchestrator/registry/` says. `wl-elab`'s own README still reads as the live ELN
-  and the registry has said `deprecated` for some time.
+  `wl-orchestrator/registry/` says. `wl-elab`'s own README read as the live ELN
+  while the registry said `deprecated`. It has since been retired as `example-elab`
+  and is no longer in the registry.
 - **Ask, do not file.** A decision that is science-facing, animal-facing, or expensive
   to get wrong goes to the PI as a question at the moment it arises. Recording it in an
   open-items table is a record, not an ask — and three of the first four decisions

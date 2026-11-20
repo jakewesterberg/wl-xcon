@@ -113,7 +113,8 @@ PI**. Every mitigation above protects *developers*; none of them help an operato
   training session without a terminal — is the right test, and with people arriving in January it
   cannot wait until M5 to be attempted for the first time. **Registry over README:** a
 package's lifecycle is what `wl-orchestrator` says it is, not what that repo's own README
-says — `wl-elab` reads as the live ELN in its README and is `deprecated` in the registry.
+says — `wl-elab` read as the live ELN in its README while the registry said `deprecated`
+(it has since been retired as `example-elab` and left the registry).
 
 **P10 — Hardware before drivers.** **Raised to High.** NI-DAQmx's supported distributions do
 not include Fedora, the lab's standard; the task PC therefore deviates to Ubuntu 24.04 LTS,
