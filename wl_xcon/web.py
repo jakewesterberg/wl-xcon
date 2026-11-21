@@ -353,11 +353,6 @@ def _num(value: object) -> str:
     return str(value)
 
 
-def _edge(value: object) -> str:
-    """One end of a declared range: `open` where the task declared none."""
-    return "open" if value is None else _num(value)
-
-
 def _pct(part: float, whole: float) -> float:
     """A bar's width, held to 0-100. Display arithmetic on two published numbers."""
     if whole <= 0:
